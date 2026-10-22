@@ -50,6 +50,8 @@ export const api = {
   renderShots: (projectId, body) => request("POST", `/projects/${projectId}/shots/render`, body),
   makeVideo: (projectId, body) => request("POST", `/projects/${projectId}/videos`, body),
   videos: projectId => request("GET", `/projects/${projectId}/videos`),
+  // Construction animation
+  directAnimation: (projectId, body) => request("POST", `/projects/${projectId}/animation/direct`, body),
 };
 
 export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -72,6 +74,29 @@ export async function uploadFile(projectId, file, onProgress) {
     };
     const form = new FormData();
     form.append("file", file, file.name);
+    xhr.send(form);
+  });
+}
+
+/** Sends a finished animation video with its settings. Resolves with the export job. */
+export async function uploadAnimation(projectId, blob, meta, onProgress) {
+  const token = await accessToken();
+  if (!token) throw new ApiError(401, "Sign in to continue.");
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${base()}/projects/${projectId}/animations`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onerror = () => reject(new ApiError(0, "The upload was interrupted. Check your connection and export again."));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new ApiError(xhr.status, data.detail || "The upload failed."));
+    };
+    const form = new FormData();
+    form.append("file", blob, "construction.mp4");
+    form.append("meta", JSON.stringify(meta));
     xhr.send(form);
   });
 }

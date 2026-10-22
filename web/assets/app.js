@@ -1,4 +1,4 @@
-import { api, uploadFile, ApiError, newKey } from "./api.js";
+import { api, uploadFile, uploadAnimation, ApiError, newKey } from "./api.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -153,6 +153,7 @@ async function startImport(f, btn) {
 /* ---------- 3D models (Phase 3) ---------- */
 let viewer = null, viewerModelId = null, walkRoom = 0;
 function resetModel() {
+  leaveBuild();
   $("#walkPanel").hidden = true; walkRoom = 0;
   $("#viewerWrap").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
   if (viewer) { viewer.dispose(); viewer = null; }
@@ -170,6 +171,7 @@ async function loadModels() {
   $("#viewerWrap").hidden = !m;
   $("#modelEmpty").hidden = !!m;
   if (!m || m.id === viewerModelId) return;
+  leaveBuild(); if (viewer) setViewMode("exterior");
   viewerModelId = m.id;
   drawReport(m);
   $("#dlGlb").href = m.glb_url ? `${m.glb_url}&download=${encodeURIComponent(current.name)}-3d.glb` : "#";
@@ -195,7 +197,10 @@ async function loadModels() {
 
 function setViewMode(mode) {
   if (!viewer) return;
-  if (mode === "walk") {
+  if (mode !== "build") leaveBuild();
+  if (mode === "build") {
+    if (!enterBuild()) return;
+  } else if (mode === "walk") {
     if (!viewer.rooms().length) { toast("This model has no rooms to walk into. In Revit's IFC export settings, include rooms (spaces) and export again."); return; }
     if (viewer.mode !== "walk") viewer.walkTo(walkRoom);
     drawRooms();
@@ -204,11 +209,15 @@ function setViewMode(mode) {
   $("#viewOutside").setAttribute("aria-pressed", String(mode === "exterior"));
   $("#viewInside").setAttribute("aria-pressed", String(mode === "interior"));
   $("#viewWalk").setAttribute("aria-pressed", String(mode === "walk"));
+  $("#viewBuild").setAttribute("aria-pressed", String(mode === "build"));
   $("#walkPanel").hidden = mode !== "walk";
+  $("#animPanel").hidden = mode !== "build";
+  ["#viewReset", "#useView", "#saveShot", "#storeyPick"].forEach(sel => { const b = $(sel); if (b) b.classList.toggle("is-off", mode === "build"); });
 }
 $("#viewOutside").onclick = () => setViewMode("exterior");
 $("#viewInside").onclick = () => setViewMode("interior");
 $("#viewWalk").onclick = () => setViewMode("walk");
+$("#viewBuild").onclick = () => setViewMode("build");
 
 /* walking through the rooms */
 function drawRooms() {
@@ -281,7 +290,7 @@ $("#useView").onclick = async () => {
 };
 
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", video_export: "Walkthrough video" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", video_export: "Walkthrough video", animation_export: "Construction video" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
 let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
@@ -295,15 +304,16 @@ async function loadOutputs() {
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
   setupTiers(out);
-  const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export"];
+  const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export", "animation_export"];
   drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type) && !VIDEO_JOBS.includes(j.type)), "#jobList");
   drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
-  drawJobs(out.jobs.filter(j => VIDEO_JOBS.includes(j.type)), "#walkJobs");
+  drawJobs(out.jobs.filter(j => j.type === "video_export"), "#walkJobs");
+  drawJobs(out.jobs.filter(j => j.type === "animation_export"), "#animJobs");
   drawGallery(out.images);
   images = out.images; drawWalk();
   const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   vids.forEach(j => seenDone.add(j.id));
-  if (vids.length && outputsLoadedOnce) { loadVideos(); toast("Your walkthrough video is ready."); }
+  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "animation_export") ? "Your construction video is ready." : "Your walkthrough video is ready."); }
   const done = out.jobs.filter(j => MODEL_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   done.forEach(j => seenDone.add(j.id));
   if (done.length && outputsLoadedOnce) { loadModels(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
@@ -583,18 +593,172 @@ $("#videoForm").onsubmit = e => {
 };
 
 function drawVideos() {
-  $("#videoList").replaceChildren(...videos.map(v => {
+  const card = v => {
     const ratio = `${v.width}/${v.height}`;
     return el("article", { class: "video-card" },
       el("div", { class: "frame", style: `aspect-ratio:${ratio}` },
         v.url ? el("video", { src: v.url, controls: "", preload: "metadata", playsinline: "", "aria-label": `Walkthrough video: ${v.title || "untitled"}` }) : el("span", { class: "muted" }, "Video link unavailable")),
       el("div", { class: "body" },
-        el("h3", {}, v.title || "Walkthrough"),
-        el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
+        el("h3", {}, v.title || (v.kind === "construction" ? "Construction sequence" : "Walkthrough")),
+        el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, v.kind === "construction" ? "Construction" : `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
         el("p", { class: "hint" }, fmtDate(v.created_at)),
         el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "")));
-  }));
+  };
+  $("#videoList").replaceChildren(...videos.filter(v => v.kind !== "construction").map(card));
+  $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction").map(card));
 }
+
+/* ---------- construction animation ---------- */
+const PHASE_UI = { site: "Site", foundation: "Foundation", structure: "Structure (per floor)", walls: "Walls (per floor)", openings: "Doors and windows",
+  roof: "Roof", orbit: "Fly-around", furnish: "Furniture", interior: "Rooms (per room)" };
+const HIDE_UI = { furniture: "Furniture", stairs: "Stairs", beams: "Beams", columns: "Columns", footings: "Footings", doors: "Doors", windows: "Windows", railings: "Railings" };
+let C = null, seq = null, animScript = null, animT = 0, animPlaying = false, animRaf = 0, lastTick = 0, exporting = null;
+const fmtClock = x => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
+const scriptKey = () => `ollic-anim-${current?.id}`;
+function saveScript() { try { localStorage.setItem(scriptKey(), JSON.stringify(animScript)); } catch { /* private mode: settings last until the page closes */ } }
+function loadScript() { try { const s = JSON.parse(localStorage.getItem(scriptKey()) || "null"); return s; } catch { return null; } }
+
+function enterBuild() {
+  if (!viewer || !C) { if (!C) toast("The animation is still loading. Try again in a moment."); return false; }
+  if (seq) return true;
+  viewer.takeOver(true);
+  animScript = C.normalise(loadScript() || { ...C.defaultScript(), title: current?.name || "" });
+  frameViewer(); buildSeq(); drawAnimSettings();
+  return true;
+}
+function leaveBuild() {
+  if (!seq) return;
+  if (exporting) exporting.abort();
+  stopAnim(); seq.dispose(); seq = null;
+  $("#viewer").classList.remove("framed"); $("#viewer").style.removeProperty("--ar");
+  viewer?.takeOver(false);
+  $("#animPanel").hidden = true;
+}
+function frameViewer() {
+  const [w, h] = { "16:9": [16, 9], "9:16": [9, 16], "1:1": [1, 1] }[animScript.format] || [16, 9];
+  const v = $("#viewer"); v.classList.add("framed"); v.style.setProperty("--ar", `${w} / ${h}`); v.style.setProperty("--arw", String(w / h));
+}
+function previewSize() { const e = viewer.engine(); e.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); e.resize(); }
+function buildSeq() {
+  if (seq) seq.dispose();
+  previewSize();
+  seq = C.createConstruction(viewer.engine(), animScript);
+  animScript = seq.script;
+  animT = Math.min(animT, seq.duration);
+  $("#animScrub").max = String(Math.round(seq.duration * 100));
+  $("#animChapters").replaceChildren(...seq.segments.filter((s, i, a) => i === 0 || s.phase !== a[i - 1].phase).map(s =>
+    el("button", { type: "button", class: "chip room", onclick: () => { stopAnim(); showAt(s.start + 0.01); } }, C.PHASE_LABEL[s.phase] || s.label)));
+  const stills = script => script.renders ? animStills().length : 0;
+  const total = 6 + seq.duration + stills(animScript) * animScript.render_seconds;
+  $("#animEst").textContent = `${fmtClock(total)} video, ${animScript.format}. Made on this device, then saved to your project.`;
+  showAt(animT);
+}
+function showAt(t) {
+  if (!seq) return;
+  animT = Math.max(0, Math.min(seq.duration, t));
+  seq.frameAt(animT); viewer.engine().render();
+  $("#animScrub").value = String(Math.round(animT * 100));
+  $("#animTime").textContent = `${fmtClock(animT)} / ${fmtClock(seq.duration)} · ${seq.labelAt(animT)}`;
+}
+function stopAnim() { animPlaying = false; cancelAnimationFrame(animRaf); $("#animPlay").textContent = "Play"; }
+function stepAnim(now) {
+  if (!animPlaying) return;
+  const dt = Math.min(0.1, (now - lastTick) / 1000); lastTick = now;
+  showAt(animT + dt);
+  if (animT >= seq.duration) { stopAnim(); return; }
+  animRaf = requestAnimationFrame(stepAnim);
+}
+$("#animPlay").onclick = () => {
+  if (!seq) return;
+  if (animPlaying) { stopAnim(); return; }
+  if (animT >= seq.duration - 0.05) animT = 0;
+  animPlaying = true; $("#animPlay").textContent = "Pause"; lastTick = performance.now();
+  animRaf = requestAnimationFrame(stepAnim);
+};
+$("#animScrub").oninput = e => { stopAnim(); showAt(Number(e.target.value) / 100); };
+
+function drawAnimSettings() {
+  const s = animScript;
+  $("#animPhases").replaceChildren(...C.PHASES.map(p => {
+    const [lo, hi] = C.LIMITS[p];
+    const on = el("input", { type: "checkbox", ...(s.phases[p].on ? { checked: "" } : {}), "aria-label": `Show ${PHASE_UI[p]}` });
+    const sec = el("input", { type: "number", min: String(lo), max: String(hi), step: "0.5", value: String(s.phases[p].seconds), "aria-label": `Seconds for ${PHASE_UI[p]}` });
+    on.onchange = () => { s.phases[p].on = on.checked; changed(); };
+    sec.onchange = () => { s.phases[p].seconds = Number(sec.value); changed(); };
+    return el("div", { class: "phase-row" }, el("label", { class: "check" }, on, PHASE_UI[p]), el("span", { class: "sec" }, sec, "s"));
+  }));
+  $("#aTime").value = s.time_of_day; $("#aDir").value = s.direction; $("#aFormat").value = s.format;
+  $("#aTitle").value = s.title; $("#aSub").value = s.subtitle; $("#aCaptions").checked = s.captions;
+  $("#aRenders").checked = s.renders; $("#aRenderSec").value = String(s.render_seconds);
+  $("#aHide").replaceChildren(...Object.entries(HIDE_UI).map(([k, label]) => { const c = el("input", { type: "checkbox", value: k, ...(s.hide.includes(k) ? { checked: "" } : {}) });
+    c.onchange = () => { s.hide = c.checked ? [...s.hide, k] : s.hide.filter(x => x !== k); changed(); }; return el("label", { class: "check" }, c, label); }));
+  const rooms = seq?.rooms || [];
+  $("#aRooms").replaceChildren(...(rooms.length ? rooms.map(r => { const c = el("input", { type: "checkbox", value: r, ...(s.rooms.some(x => x.toLowerCase() === r.toLowerCase()) ? { checked: "" } : {}) });
+    c.onchange = () => { s.rooms = c.checked ? [...s.rooms, r] : s.rooms.filter(x => x.toLowerCase() !== r.toLowerCase()); changed(); }; return el("label", { class: "check" }, c, r); })
+    : [el("span", { class: "hint" }, "This model has no rooms. In Revit's IFC export settings, include rooms (spaces).")]));
+}
+function changed(redraw = false) {
+  animScript = C.normalise(animScript); saveScript(); frameViewer(); buildSeq();
+  if (redraw) drawAnimSettings();
+}
+$("#aTime").onchange = e => { animScript.time_of_day = e.target.value; changed(); };
+$("#aDir").onchange = e => { animScript.direction = e.target.value; changed(); };
+$("#aFormat").onchange = e => { animScript.format = e.target.value; changed(); };
+$("#aTitle").onchange = e => { animScript.title = e.target.value.trim(); changed(); };
+$("#aSub").onchange = e => { animScript.subtitle = e.target.value.trim(); changed(); };
+$("#aCaptions").onchange = e => { animScript.captions = e.target.checked; changed(); };
+$("#aRenders").onchange = e => { animScript.renders = e.target.checked; changed(); };
+$("#aRenderSec").onchange = e => { animScript.render_seconds = Number(e.target.value); changed(); };
+
+$("#animDirect").onsubmit = async e => {
+  e.preventDefault();
+  const ask = $("#animAsk").value.trim();
+  if (ask.length < 3 || !seq) { $("#animAsk").focus(); return; }
+  const btn = $("#animAskBtn"); btn.disabled = true; btn.textContent = "Working…";
+  try {
+    const r = await api.directAnimation(current.id, { instruction: ask, script: animScript, context: seq.context() });
+    animScript = r.script; $("#animAsk").value = "";
+    $("#animNotes").textContent = r.notes;
+    changed(true); stopAnim(); showAt(0);
+  } catch (err) { if (err.status === 401) return handle(err); $("#animNotes").textContent = err.message; }
+  finally { btn.disabled = false; btn.textContent = "Apply"; }
+};
+
+function animStills() {
+  // the newest AI render of each walkthrough shot, in the shots' order
+  return shots.map(s => ({ s, r: shotRenders(s.id)[0] })).filter(x => x.r && x.r.url).map(x => ({ url: x.r.url, caption: x.s.name, render_id: x.r.id }));
+}
+
+$("#animExport").onclick = async () => {
+  if (!seq || exporting) return;
+  const { canExport, exportVideo } = await import("./export.js");
+  if (!canExport()) { message($("#animMsg"), "This browser cannot make videos. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
+  stopAnim(); message($("#animMsg"), "");
+  const ctl = new AbortController(); exporting = ctl;
+  const btn = $("#animExport"); btn.disabled = true;
+  $("#animProgress").hidden = false; $("#animBar").style.width = "0%";
+  const say = (f, text) => { $("#animBar").style.width = `${Math.round(f * 100)}%`; $("#animProgText").textContent = text; };
+  try {
+    const out = await exportVideo({ seq, script: animScript, stills: animStills(), title: current.name, signal: ctl.signal,
+      onProgress: (f, text) => say(f * 0.85, `Making the video: ${text.toLowerCase()}. Keep this tab open.`) });
+    say(0.86, `Uploading ${(out.blob.size / 1048576).toFixed(1)} MB…`);
+    await uploadAnimation(current.id, out.blob, { script: animScript, model_id: viewerModelId, items: out.items }, f => say(0.86 + f * 0.14, `Uploading… ${Math.round(f * 100)}%`));
+    say(1, "Uploaded. Ollic is preparing it for phones; it appears below in a minute or two.");
+    toast("Video uploaded. It will appear below when it is ready.");
+    loadOutputs();
+  } catch (err) {
+    if (err.name === "AbortError") message($("#animMsg"), "Export cancelled.", "ok");
+    else if (err.status === 401) handle(err);
+    else message($("#animMsg"), err.message || "The video could not be made.");
+  } finally {
+    exporting = null; btn.disabled = false;
+    setTimeout(() => { $("#animProgress").hidden = true; }, 4000);
+    if (seq) { previewSize(); showAt(animT); }
+  }
+};
+$("#animCancel").onclick = () => exporting?.abort();
+
+import("./construction.js").then(m => { C = m; }).catch(() => { /* the button explains */ });
 
 /* ---------- start ---------- */
 (async function start() {

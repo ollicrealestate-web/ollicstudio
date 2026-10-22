@@ -412,3 +412,33 @@ input[type=number]:focus { border-color: var(--red); outline: none; box-shadow: 
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* construction animation */
+.is-off { display: none !important; }
+.viewer.framed { height: auto; min-height: 0; aspect-ratio: var(--ar); width: min(100%, calc(72vh * var(--arw))); max-height: 72vh; margin-inline: auto; }
+.anim-panel { gap: 16px; }
+.anim-head { display: grid; gap: 4px; }
+.anim-head h3 { font-size: 1.2rem; }
+.anim-player { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.anim-player input[type=range] { width: 100%; accent-color: var(--red); min-height: 32px; }
+.anim-player .mono { font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+.anim-chapters { display: flex; flex-wrap: wrap; gap: 6px; }
+.anim-direct { display: grid; gap: 8px; padding: 14px; border: 1px solid rgba(255, 74, 79, 0.35); border-radius: var(--r-sm); background: var(--red-tint); }
+.anim-direct .row { display: flex; gap: 8px; }
+.anim-direct .row input { flex: 1; min-width: 0; }
+.anim-direct #animNotes:empty { display: none; }
+.anim-settings summary { cursor: pointer; font-weight: 600; min-height: 40px; display: flex; align-items: center; }
+.anim-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 18px; margin-top: 10px; }
+.anim-side { display: grid; gap: 12px; align-content: start; }
+.phase-list { border: 0; padding: 0; margin: 0; }
+.phase-list legend, .anim-side legend { font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; padding: 0; }
+.anim-side fieldset { border: 0; padding: 0; margin: 0; }
+.phase-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.phase-row .sec { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.85rem; }
+.phase-row input[type=number], .anim-side input[type=number] { width: 72px; min-height: 36px; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; font-size: 0.92rem; flex-wrap: wrap; }
+.check input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--red); flex: none; }
+.check-row { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.export-progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; }
+.export-progress .progress { grid-column: 1 / -1; }
+@media (max-width: 760px) { .anim-grid { grid-template-columns: minmax(0, 1fr); } .anim-player { grid-template-columns: auto minmax(0, 1fr); } .anim-player .mono { grid-column: 1 / -1; white-space: normal; } }

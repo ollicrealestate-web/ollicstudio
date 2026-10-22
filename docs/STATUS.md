@@ -8,6 +8,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 - **Phase 2: Concept rendering: complete for Standard render**, verified live. **Premium render** is built, locked to paid plans, and waits for OpenAI credit; **Premium prompting** waits for an Anthropic API key.
 - **Phase 3: IFC import and 3D viewer: verified live** with a generated IFC; a real Revit export is still to be tried.
 - **Render studio, rebuilt around architects:** built and tested; awaiting migration 6 and a live check.
+- **Construction animation:** built and tested in a browser (WebGL, WebCodecs, FFmpeg); awaiting migration 8 and a live export.
 - **Walkthrough (rooms, render all shots, MP4 video):** built and tested in a browser with real FFmpeg; awaiting migration 7 and a live check.
 
 ## Features
@@ -29,6 +30,9 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | **Walk through**: room list from the model's rooms, eye-height camera, drag to look, keys or on-screen arrows to move; **Save shot** keeps the view and camera | Built and tested in a browser (WebGL) | e2e walkthrough test |
 | **Render all shots**: one brief, style and look references for every ticked shot; inside shots render as interiors; the whole batch is checked against the daily allowance first | Built and tested | `test_walkthrough.py`, e2e walkthrough test |
 | **Walkthrough video**: chosen renders become an MP4 (16:9, 9:16 or 1:1) with slow camera moves, dips through black, room titles, title and end cards, made by FFmpeg on our server; private, downloadable, removed with the project | Built and tested with real FFmpeg (6 shots in 38 s on 2 CPUs, 250 MB peak); **verified live** (see below) | `test_walkthrough.py`, e2e walkthrough test |
+| **Construction animation**: site, foundation, each floor's structure and walls, doors and windows, roof, fly-around, furniture, rooms, then the AI room renders; preview with play, scrub and stage chapters; settings for every stage's seconds, light, direction, format, hidden groups, rooms, captions, title | Built and tested in a browser | e2e construction test, `test_animation.py` |
+| **Animation director**: plain words change the settings (Standard: free text model; paid plans: Claude); 40 a day | Built and tested with stand-ins; live once migration 8 is run | `test_animation.py` |
+| **Construction video export**: made in the browser (H.264, or VP9 converted by the server), checked, made phone-friendly and saved; 16:9, 9:16, 1:1 | Built and tested (VP9 path end to end; H.264 path on the server) | e2e construction test, `test_animation.py` |
 | **3D viewer**: outside, inside with roof off and room names, floor picker, element details, GLB and IFC downloads; draws only on change; fits phones | Built and tested in a browser (WebGL) | e2e model test |
 
 ### Live checks, 22 Oct 2026
@@ -41,13 +45,14 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 
 ## Test run (session 2)
 
-`cd backend && python -m pytest`: **128 passed, 0 failed**, Python 3.13. (`test_web_flow.py` failed once in one of four full runs and passed in every other run, alone and in the suite; not yet explained.)
+`cd backend && python -m pytest`: **139 passed, 0 failed**, Python 3.13. (`test_web_flow.py` failed once in one of four full runs and passed in every other run, alone and in the suite; not yet explained.)
 
 - Phase 1: `test_auth.py` 10, `test_projects.py` 6, `test_uploads.py` 20, `test_supabase_client.py` 5
 - Renders: `test_renders.py` 25, `test_openai_client.py` 11, `test_cloudflare.py` 12, `test_studio.py` 12, `test_prompting.py` 5
 - IFC: `test_bim.py` 8
+- Construction animation: `test_animation.py` 10 (settings, Python and JavaScript rules agree, director replies, endpoint, limits, export of VP9 and H.264 uploads, refusals)
 - Walkthrough: `test_walkthrough.py` 10 (shots, isolation, render all, allowance, real MP4 probe, video job, FFmpeg heartbeat and cancel, deletion)
-- Browser: `test_web_flow.py`, `test_render_flow.py`, `test_model_flow.py` (WebGL: IFC to 3D, render this view, read my plan, plan plus look reference render, no sideways scrolling at 390 px), `test_walkthrough_flow.py` (WebGL and FFmpeg: walk into rooms, save, reorder and delete shots, render all, make a 9:16 video)
+- Browser: `test_web_flow.py`, `test_render_flow.py`, `test_model_flow.py` (WebGL: IFC to 3D, render this view, read my plan, plan plus look reference render, no sideways scrolling at 390 px), `test_construction_flow.py` (two-storey villa: chapters, scrubbing, plain-language change, square format, real export and conversion), `test_walkthrough_flow.py` (WebGL and FFmpeg: walk into rooms, save, reorder and delete shots, render all, make a 9:16 video)
 
 ## Known limits
 
@@ -58,11 +63,14 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 - A few plan images from the removed plan tracer remain in the `models` bucket of the owner's test account.
 - Render's free instance sleeps after 15 minutes idle; the first request then takes about 50 s.
 - Videos are made inside the web service. On Render's free instance (0.1 CPU) a 6-shot video can take 10 minutes or more; the Starter plan (0.5 CPU) is about five times faster. A later phase moves videos to a worker.
+- Construction export runs in the customer's browser: fast with a graphics card and Chrome, Edge or Safari 17+ (H.264); Firefox falls back to VP9, which the server converts (minutes on the free instance). A machine without a graphics card is slow (the test machine: about 0.7 s a frame at 1080p). The tab must stay open while it draws.
+- The sequence follows element types and storeys, not a construction schedule. A schedule file (SYNCHRO, MS Project) driving the order is a later step.
 - Walk through needs rooms in the IFC (IfcSpace). Revit exports them only when rooms are included in the IFC export settings; without rooms the app says so. Furniture shows when it is in the export.
 
 ## Next session should do first
 
-1. **Owner:** run `supabase/migrations/20261022000006_remove_plan_modelling.sql`, then `20261022000007_shots_and_videos.sql`; add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
-2. Live check of the walkthrough with a real Revit IFC with rooms and furniture: several shots, render all, a 9:16 video.
-3. Live check: Read my plan on the owner's A103 sheet; a Standard and a Premium render from it with a look reference; a render from a real Revit IFC view. Record results here.
-4. Then **Phase 4: construction sequence** (from the IFC model) towards the build animation.
+1. **Owner:** run `supabase/migrations/20261022000008_construction_animation.sql` (6 and 7 are done); add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
+2. Live check of the construction animation with a real Revit IFC: preview, a plain-language change, a 16:9 export in Chrome.
+3. Live check of the walkthrough with a real Revit IFC with rooms and furniture: several shots, render all, a 9:16 video.
+4. Live check: Read my plan on the owner's A103 sheet; a Standard and a Premium render from it with a look reference; a render from a real Revit IFC view. Record results here.
+5. Then: payments (Paystack) so Premium can be sold; schedule files driving the construction order.

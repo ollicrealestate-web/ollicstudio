@@ -114,6 +114,7 @@
             <button type="button" class="seg-btn" id="viewOutside" aria-pressed="true">Outside</button>
             <button type="button" class="seg-btn" id="viewInside" aria-pressed="false">Inside (roof off)</button>
             <button type="button" class="seg-btn" id="viewWalk" aria-pressed="false">Walk through</button>
+            <button type="button" class="seg-btn" id="viewBuild" aria-pressed="false">Construction</button>
           </div>
           <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
           <button type="button" class="btn" id="viewReset">Reset view</button>
@@ -132,7 +133,50 @@
             <button type="button" class="btn" data-hold="-1,0" aria-label="Walk back">&#9660;</button>
             <button type="button" class="btn" data-hold="0,-1" aria-label="Turn right">&#8631;</button>
           </div>
-          <p class="hint">Pick a room, then drag to look around. Hold the arrows to walk and turn, or on a keyboard use W and S to walk, A and D to step sideways, and the left and right arrows to turn. Frame a view you like and press <b>Save shot</b>.</p>
+          <p class="hint" id="walkHint">Pick a room, then drag to look around. Hold the arrows to walk and turn, or on a keyboard use W and S to walk, A and D to step sideways, and the left and right arrows to turn. Frame a view you like and press <b>Save shot</b>.</p>
+        </div>
+        <div class="anim-panel card" id="animPanel" hidden aria-labelledby="animTitle">
+          <div class="anim-head"><h3 id="animTitle">Construction animation</h3><span class="hint">Built from your model: site, foundation, each floor, doors and windows, roof, a fly-around, furniture, then the rooms and your AI renders.</span></div>
+          <div class="anim-player">
+            <button type="button" class="btn primary" id="animPlay">Play</button>
+            <input type="range" id="animScrub" min="0" max="1000" value="0" step="1" aria-label="Position in the animation">
+            <span class="mono" id="animTime">0:00 / 0:00</span>
+          </div>
+          <div class="anim-chapters" id="animChapters" role="group" aria-label="Jump to a stage"></div>
+          <form class="anim-direct" id="animDirect">
+            <label class="field" for="animAsk">Tell the director what you want <span class="hint">In plain words, e.g. “slow down on the roof, show it at sunset, spend more time in the kitchen, skip the stairs”.</span></label>
+            <div class="row"><input type="text" id="animAsk" maxlength="600" placeholder="e.g. make it portrait for Instagram and visit the master bedroom first">
+              <button class="btn primary" type="submit" id="animAskBtn">Apply</button></div>
+            <p class="hint" id="animNotes" role="status"></p>
+          </form>
+          <details class="anim-settings" id="animSettings">
+            <summary>Settings</summary>
+            <div class="anim-grid">
+              <fieldset class="field phase-list"><legend>Stages and seconds</legend><div id="animPhases"></div></fieldset>
+              <div class="anim-side">
+                <label class="field">Light <select id="aTime"><option value="morning">Morning</option><option value="midday">Midday</option><option value="golden hour">Golden hour (sunset)</option><option value="dusk">Dusk</option></select></label>
+                <label class="field">Fly-around <select id="aDir"><option value="anticlockwise">Anticlockwise</option><option value="clockwise">Clockwise</option></select></label>
+                <label class="field">Format <select id="aFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
+                <label class="field">Title <input type="text" id="aTitle" maxlength="80"></label>
+                <label class="field">Subtitle <input type="text" id="aSub" maxlength="120" placeholder="e.g. your firm or the client"></label>
+                <label class="check"><input type="checkbox" id="aCaptions"> Show stage names</label>
+                <label class="check"><input type="checkbox" id="aRenders"> End with the AI renders of the rooms <input type="number" id="aRenderSec" min="2.5" max="10" step="0.5" aria-label="Seconds per render"> s each</label>
+                <fieldset class="field"><legend>Do not show</legend><div class="check-row" id="aHide"></div></fieldset>
+                <fieldset class="field"><legend>Rooms to visit <span class="hint">None ticked means all</span></legend><div class="check-row" id="aRooms"></div></fieldset>
+              </div>
+            </div>
+          </details>
+          <div class="render-go">
+            <button type="button" class="btn primary big" id="animExport">Export MP4</button>
+            <span class="hint" id="animEst"></span>
+          </div>
+          <div class="export-progress" id="animProgress" hidden>
+            <div class="progress"><i id="animBar"></i></div><span class="hint" id="animProgText"></span>
+            <button type="button" class="btn" id="animCancel">Cancel</button>
+          </div>
+          <div id="animMsg" class="notice" role="status" hidden></div>
+          <div class="jobs" id="animJobs" aria-live="polite"></div>
+          <div class="video-list" id="animVideos"></div>
         </div>
         <div class="model-info">
           <div class="card" id="elementCard"><h3>Element</h3><p class="muted">Tap any part of the building to see what it is.</p></div>

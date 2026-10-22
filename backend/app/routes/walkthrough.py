@@ -186,7 +186,8 @@ def list_videos(project_id: uuid.UUID, request: Request, user: CurrentUser = Dep
     out = []
     for v in vids:
         url = links.get(v["storage_path"])
-        name = f"ollic-walkthrough-{v['id'][:8]}-{v['format'].replace(':', 'x')}.mp4"
-        out.append({k: v.get(k) for k in ("id", "title", "format", "width", "height", "fps", "duration_s", "label", "created_at", "items")}
+        kind = v.get("kind") or "walkthrough"
+        name = f"ollic-{kind}-{v['id'][:8]}-{v['format'].replace(':', 'x')}.mp4"
+        out.append({k: v.get(k) for k in ("id", "title", "format", "width", "height", "fps", "duration_s", "label", "created_at", "items")} | {"kind": kind}
                    | {"url": url, "download_url": f"{url}&download={name}" if url else None})
     return out

@@ -39,6 +39,8 @@ DEFAULT_COLOURS = {
     "IfcWall": (0.93, 0.92, 0.89, 1), "IfcSlab": (0.62, 0.61, 0.59, 1), "IfcRoof": (0.36, 0.33, 0.32, 1),
     "IfcDoor": (0.45, 0.30, 0.18, 1), "IfcWindow": (0.55, 0.72, 0.85, 0.45), "IfcSpace": (0.85, 0.85, 0.95, 0.15),
     "IfcColumn": (0.7, 0.7, 0.7, 1), "IfcBeam": (0.7, 0.7, 0.7, 1), "IfcStair": (0.75, 0.74, 0.72, 1),
+    "IfcFooting": (0.6, 0.6, 0.58, 1), "IfcPile": (0.6, 0.6, 0.58, 1), "IfcFurniture": (0.72, 0.62, 0.5, 1),
+    "IfcFurnishingElement": (0.72, 0.62, 0.5, 1), "IfcRailing": (0.4, 0.4, 0.42, 1), "IfcCurtainWall": (0.55, 0.72, 0.85, 0.45),
 }
 MAX_ELEMENTS = 20000  # beyond this the free web service runs out of memory; larger models wait for the Phase 5 worker
 
@@ -192,7 +194,13 @@ def import_ifc(data: bytes, progress=lambda stage: None) -> ImportResult:
             "storey": (storey.Name if storey is not None and storey.is_a("IfcBuildingStorey") else None),
             "has_geometry": p.GlobalId in with_geometry, "properties": props,
         })
-    glb = _glb(meshes, {c["global_id"]: c for c in components}, lo, hi)
+    kinds = {}
+    for p in products:  # e.g. BASESLAB, ROOF, STRIP_FOOTING: tells the construction animation what a slab is
+        try:
+            kinds[p.GlobalId] = ifcopenshell.util.element.get_predefined_type(p)
+        except Exception:
+            kinds[p.GlobalId] = None
+    glb = _glb(meshes, {c["global_id"]: {**c, "predefined": kinds.get(c["global_id"])} for c in components}, lo, hi)
 
     status = "fail" if any(c["status"] == "fail" for c in checks) else "warn" if any(c["status"] == "warn" for c in checks) else "pass"
     report = {
@@ -243,7 +251,8 @@ def _glb(meshes: dict[str, trimesh.Trimesh], comps: dict[str, dict], lo, hi) -> 
             baseColorFactor=[float(x) for x in rgba], metallicFactor=0.0, roughnessFactor=0.85,
             alphaMode="BLEND" if rgba[3] < 0.99 else "OPAQUE", doubleSided=True)
         m.visual = trimesh.visual.TextureVisuals(material=material)
-        extras = {"globalId": gid, "ifcType": c.get("ifc_type"), "name": c.get("name"), "storey": c.get("storey"), "family": c.get("family")}
+        extras = {"globalId": gid, "ifcType": c.get("ifc_type"), "name": c.get("name"), "storey": c.get("storey"), "family": c.get("family"),
+                  "predefined": c.get("predefined")}
         scene.add_geometry(m, node_name=gid, geom_name=gid, metadata=extras)
     buf = io.BytesIO()
     buf.write(scene.export(file_type="glb", include_normals=True))

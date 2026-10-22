@@ -258,6 +258,8 @@ def _service(e: dict) -> str:
         return "Plan reading"
     if e.get("operation") == "prompt_write":
         return "Premium prompting"
+    if e.get("operation") == "animation_direct":
+        return "Animation director"
     return "Premium render" if e.get("provider") == "openai" else "Standard render"
 
 

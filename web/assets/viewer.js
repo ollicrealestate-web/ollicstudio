@@ -44,6 +44,8 @@ export function createViewer(host, { onSelect } = {}) {
   host.append(labels);
 
   let model = null, elements = [], storeys = [], mode = "exterior", storey = null, selected = null, frame = 0, dirty = true;
+  let owner = null;       // the construction animation, while it drives the camera and the scene
+  let groundY = 0;        // finished ground level: the bottom of the lowest storey's walls, not of its footings
   // walkthrough: eye height, look direction and movement
   const EYE = 1.6, SPEED = 1.4, TURN = 1.6;
   let yaw = 0, pitch = 0, room = null, last = performance.now();
@@ -84,6 +86,11 @@ export function createViewer(host, { onSelect } = {}) {
       lows[s] = Math.min(lows[s] ?? Infinity, y);
     }
     storeys = Object.keys(lows).sort((a, b) => lows[a] - lows[b]);
+    const BELOW = new Set(["IfcFooting", "IfcPile", "IfcSpace"]);
+    const first = elements.filter(e => !BELOW.has(e.userData.ifcType) && !(e.userData.ifcType === "IfcSlab" && e.userData.predefined === "BASESLAB")
+      && (!storeys.length || e.userData.storey === storeys[0]));
+    groundY = first.length ? Math.min(...first.map(e => new THREE.Box3().setFromObject(e).min.y)) : new THREE.Box3().setFromObject(model).min.y;
+    ground.position.y = groundY - 0.02;
     frameAll();
     apply();
     dirty = true;
@@ -252,6 +259,7 @@ export function createViewer(host, { onSelect } = {}) {
   function tick() {
     frame = requestAnimationFrame(tick);
     const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (owner) return;   // the animation draws its own frames
     if (mode === "walk") stepWalk(dt); else controls.update();
     if (!dirty) return;
     dirty = false;
@@ -280,5 +288,18 @@ export function createViewer(host, { onSelect } = {}) {
     snapshot() { renderer.render(scene, camera); return renderer.domElement.toDataURL("image/png"); },
     dispose() { cancelAnimationFrame(frame); renderer.dispose(); host.replaceChildren(); },
     get storeys() { return storeys; },
+    /** Hands the scene to the construction animation (on) or takes it back (off). */
+    takeOver(on) {
+      if (on) {
+        if (mode === "walk") leaveWalk();
+        owner = true; controls.enabled = false; labels.replaceChildren(); select(null);
+        for (const e of elements) e.visible = e.userData.ifcType !== "IfcSpace";
+      } else {
+        owner = null; controls.enabled = true; mode = "exterior";
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+        camera.fov = 45; resize(); frameAll(); apply();
+      }
+    },
+    engine() { return { THREE, scene, camera, renderer, elements, storeys, sun, hemi, ground, groundY, host, render: () => renderer.render(scene, camera), resize }; },
   };
 }
