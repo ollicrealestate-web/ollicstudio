@@ -122,7 +122,7 @@ def test_make_video_gives_a_phone_friendly_mp4(tmp_path):
     res = make_video([(jpeg_bytes(400, 300, (150, 120, 90)), "Living"), (jpeg_bytes(300, 400, (90, 120, 150)), "Kitchen")],
                      fmt="1:1", seconds=2.5, title="Maitama block", brand="Ollic Design Studio", progress=stages.append)
     assert (res.width, res.height) == FORMATS["1:1"] and res.fps == 30
-    assert res.duration_s == pytest.approx(3 + 2.5 + 2.5 + 3 - 3 * 0.8, abs=0.01)
+    assert res.duration_s == pytest.approx(3 + 2.5 + 2.5 + 3, abs=0.01)   # clips dip through black, so they do not overlap
     info = _probe(res.data, tmp_path)
     v = next(s for s in info["streams"] if s["codec_type"] == "video")
     assert v["codec_name"] == "h264" and v["pix_fmt"] == "yuv420p" and (v["width"], v["height"]) == (1080, 1080)

@@ -2,7 +2,9 @@
 room and view, joined into an MP4 with slow camera moves, cross-fades, room titles, a title
 card and an end card. Made with FFmpeg on Ollic's own server; no AI service is involved.
 
-Output plays in Chrome, Safari, Android, iPhone and WhatsApp: H.264 High, yuv420p, 30 fps,
+Each clip is encoded on its own with its fades, and the clips are then joined without
+re-encoding, so memory stays low (about 200 MB) and the join takes a second even on a small
+server. Output plays in Chrome, Safari, Android, iPhone and WhatsApp: H.264 High, yuv420p, 30 fps,
 a silent AAC track, and the index at the front of the file (faststart).
 """
 
@@ -23,8 +25,12 @@ from .imaging import CONCEPT_LABEL
 FONT = Path(__file__).parent / "fonts" / "Outfit.ttf"
 FORMATS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080)}
 FPS = 30
-FADE = 0.8          # seconds of cross-fade between shots
+FADE = 0.4          # seconds each clip fades in from and out to black (a 0.8 s dip between shots)
 CARD_SECONDS = 3.0
+# FFmpeg sizes its thread pool from the host's CPU count, not the slice a small server is given;
+# each thread holds frames, so on a 512 MB instance on a big host it ran out of memory. One thread
+# keeps a 1080p clip near 180 MB; set FFMPEG_THREADS higher on a larger server.
+THREADS = str(max(1, int(os.environ.get("FFMPEG_THREADS", "1") or 1)))
 RED = (212, 33, 39)
 INK = (244, 244, 245)
 BLACK = (7, 7, 7)
@@ -209,38 +215,27 @@ def make_video(shots: list[tuple[bytes, str]], *, fmt: str = "16:9", seconds: fl
             if kind == "card":
                 z = f"1+0.03*on/{max(frames - 1, 1)}"
             chain = f"[0:v]zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={w}x{h}:fps={FPS},setsar=1"
-            cmd = [ff, "-y", "-hide_banner", "-loglevel", "error", "-i", str(bg)]
+            cmd = [ff, "-y", "-hide_banner", "-loglevel", "error", "-filter_threads", THREADS, "-filter_complex_threads", THREADS, "-threads", THREADS, "-i", str(bg)]
             if overlay:
-                cmd += ["-i", str(overlay)]
-                chain += "[bg];[bg][1:v]overlay=0:0,format=yuv420p[v]"
-            else:
-                chain += ",format=yuv420p[v]"
+                cmd += ["-threads", THREADS, "-i", str(overlay)]
+                chain += "[bg];[bg][1:v]overlay=0:0"
+            fades = f"fade=t=in:st=0:d={FADE},fade=t=out:st={dur - FADE:.3f}:d={FADE}"
+            chain += f",{fades},format=yuv420p[v]"
             seg = t / f"seg{i}.mp4"
             cmd += ["-filter_complex", chain, "-map", "[v]", "-frames:v", str(frames), "-r", str(FPS),
-                    "-c:v", "libx264", "-preset", "superfast", "-crf", "18", "-pix_fmt", "yuv420p", str(seg)]
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-profile:v", "high", "-level", "4.1", "-g", str(FPS * 2),
+                    "-threads", THREADS, "-pix_fmt", "yuv420p", "-video_track_timescale", "15360", str(seg)]
             _run(cmd, timeout=900, beat=lambda: progress(f"Making clip {i + 1} of {len(parts)}"))
             segments.append(seg)
             lengths.append(frames / FPS)
 
         progress("Joining the clips")
         out = t / "walkthrough.mp4"
-        cmd = [ff, "-y", "-hide_banner", "-loglevel", "error"]
-        for s in segments:
-            cmd += ["-i", str(s)]
-        cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
-        if len(segments) == 1:
-            graph, last = "[0:v]null[vout]", "[vout]"
-        else:
-            steps, prev, offset = [], "[0:v]", 0.0
-            for k in range(1, len(segments)):
-                offset += lengths[k - 1] - FADE
-                tag = f"[x{k}]"
-                steps.append(f"{prev}[{k}:v]xfade=transition=fade:duration={FADE}:offset={offset:.3f}{tag}")
-                prev = tag
-            graph, last = ";".join(steps), prev
-        total = sum(lengths) - FADE * (len(segments) - 1)
-        cmd += ["-filter_complex", graph, "-map", last, "-map", f"{len(segments)}:a", "-t", f"{total:.3f}",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p", "-r", str(FPS),
-                "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)]
-        _run(cmd, timeout=2400, beat=lambda: progress("Joining the clips"))
+        listing = t / "clips.txt"
+        listing.write_text("".join(f"file '{p.name}'\n" for p in segments))
+        total = sum(lengths)
+        cmd = [ff, "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
+               "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "0:v", "-map", "1:a", "-t", f"{total:.3f}",
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)]
+        _run(cmd, timeout=600, beat=lambda: progress("Joining the clips"))
         return VideoResult(data=out.read_bytes(), width=w, height=h, fps=FPS, duration_s=round(total, 2))
