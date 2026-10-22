@@ -299,3 +299,22 @@ def test_files_have_private_download_links(bim, alice, bob, sample_ifc):
     link = c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=alice["headers"]).json()
     assert "/object/sign/source-files/" in link["url"] and link["download_url"].endswith("&download=house.ifc")
     assert c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=bob["headers"]).status_code == 404
+
+
+def test_sheet_border_and_title_block_are_not_walls():
+    """Real drawings sit inside a thick sheet frame with a boxed title block (found on a customer's A103 sheet)."""
+    from PIL import ImageDraw
+    png, meta = draw_plan(sample_house())
+    plan = Image.open(io.BytesIO(png)).convert("L")
+    W, H = plan.width + 120, plan.height + 260
+    sheet = Image.new("L", (W, H), 255)
+    sheet.paste(plan, (60, 40))
+    d = ImageDraw.Draw(sheet)
+    d.rectangle([8, 8, W - 8, H - 8], outline=0, width=9)                      # sheet frame
+    for x0, x1 in ((30, 260), (270, 520), (530, W - 30)):                       # title block boxes
+        d.rectangle([x0, H - 200, x1, H - 30], outline=0, width=7)
+    d.text((300, H - 150), "Typical 1st Floor Plan", fill=0)
+    buf = io.BytesIO(); sheet.save(buf, "PNG")
+    p = trace(load_plan_image(buf.getvalue(), "png"), [])
+    assert len(p["walls"]) == 8 and len(p["rooms"]) == 5
+    assert max(max(w["a"][1], w["b"][1]) for w in p["walls"]) < (H - 200) * p["image"]["height"] / H   # nothing from the title block

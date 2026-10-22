@@ -7,6 +7,7 @@ every read and write, and they always end in a real state: succeeded, failed or 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import uuid
 
@@ -172,24 +173,28 @@ def run_plan_trace(state, user: CurrentUser, job_id: str) -> None:
                 vision_note = {"status": "ok", "model": read.get("model"), "rooms_read": len(labels),
                                "overall_width_m": read.get("overall_width_m"), "overall_depth_m": read.get("overall_depth_m")}
                 _record_vision_usage(repo, user, job, read)
-            except VisionUnavailable as exc:
-                log.warning("vision read failed in job %s: %s", job_id, exc)
-                vision_note = {"status": "failed", "reason": str(exc)[:300]}
+            except Exception as exc:  # the AI step is optional: never let it stop the plan being read
+                log.warning("vision read failed in job %s: %r", job_id, exc)
+                vision_note = {"status": "failed", "reason": (str(exc) if isinstance(exc, VisionUnavailable) else exc.__class__.__name__)[:300]}
         else:
             vision_note = {"status": "off", "reason": "No vision model is configured, so room names and areas were not read."}
 
         repo.update_job(user, job_id, {"stage": "Finding walls, doors, windows and rooms"})
+        step = "finding the walls and rooms"
         proposal = trace(img, labels)
+        proposal = json.loads(json.dumps(proposal, default=_plain_number))  # plain JSON numbers for the database
         proposal["vision"] = vision_note
         if vision_note["status"] != "ok":
             proposal["flags"].insert(0, {"kind": "check", "target": "vision", "message": "Room names and areas could not be read automatically this time. Name the rooms and set the scale yourself."})
 
+        step = "saving the plan image"
         draft_id = str(uuid.uuid4())
         image_path = f"{user.id}/{job['project_id']}/{draft_id}-plan.png"
         buf = io.BytesIO()
         img.save(buf, "PNG", optimize=True)
         storage.upload(user, image_path, buf.getvalue(), "image/png", bucket=settings.models_bucket)
         proposal["image"]["path"] = image_path
+        step = "saving what was read"
         repo.create_draft(user, {"id": draft_id, "project_id": job["project_id"], "source_file_id": src["id"], "status": "proposed",
                                  "proposal": proposal, "trace": {"job_id": job_id, "vision": vision_note}})
         repo.update_job(user, job_id, {"status": "succeeded", "stage": "Done", "finished_at": now_iso(),
@@ -200,9 +205,18 @@ def run_plan_trace(state, user: CurrentUser, job_id: str) -> None:
     except BackendUnavailable:
         log.exception("storage or database failed in plan trace %s", job_id)
         _fail(repo, user, job_id, "The plan could not be read or saved. Try again in a moment.")
-    except Exception:
+    except Exception as exc:
         log.exception("unexpected error in plan trace %s", job_id)
-        _fail(repo, user, job_id, "Something went wrong while reading the plan. Try again, or upload a clearer image.")
+        where = locals().get("step", "opening the drawing")
+        _fail(repo, user, job_id, f"Something went wrong while {where} ({exc.__class__.__name__}). Try again; if it keeps happening, send this message to support.")
+
+
+def _plain_number(v):
+    """numpy numbers and anything else JSON cannot write become plain Python values."""
+    try:
+        return v.item()
+    except AttributeError:
+        return str(v)
 
 
 def _record_vision_usage(repo, user, job, read):

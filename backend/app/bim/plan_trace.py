@@ -92,11 +92,14 @@ def trace(img: Image.Image, labels: list[dict] | None = None) -> dict:
     vs = [s for s in vs if s.t >= cut]
     if len(hs) < 2 or len(vs) < 2:
         raise TraceFailed("Ollic could not find the walls in this image. Walls need to be drawn as thick dark lines; a clean architectural floor plan works best.")
-    tmax = max(s.t for s in hs + vs)
-    hs = _merge(hs, ink, tmax)
-    vs = _merge(vs, ink, tmax)
+    hs, vs = _drop_sheet_frame(hs, vs, W, H)
+    tmed = _typical_thickness(hs + vs)
+    hs = _merge(hs, ink, tmed)
+    vs = _merge(vs, ink, tmed)
     _snap(hs, vs)
-    walls = [s for s in hs + vs if s.length >= 2 * cut]
+    walls = _main_building([s for s in hs + vs if s.length >= 2 * cut], tmed, (H, W))
+    if len(walls) < 3:
+        raise TraceFailed("Ollic could not find the walls in this image. Walls need to be drawn as thick dark lines; a clean architectural floor plan works best.")
 
     closed = np.zeros_like(ink)
     for s in walls:
@@ -193,9 +196,65 @@ def _thickness_threshold(ts: list[float]) -> float:
     return max(3.0, hi * 0.35)
 
 
-def _merge(segs: list[Seg], ink: np.ndarray, tmax: float) -> list[Seg]:
+def _drop_sheet_frame(hs: list[Seg], vs: list[Seg], W: int, H: int) -> tuple[list[Seg], list[Seg]]:
+    """Drawing sheets have a border and frame lines running almost the whole page; they are not walls."""
+    def frame(s: Seg) -> bool:
+        span = W if s.horizontal else H
+        return s.length > 0.8 * span
+    return [s for s in hs if not frame(s)], [s for s in vs if not frame(s)]
+
+
+def _typical_thickness(segs: list[Seg]) -> float:
+    """Length-weighted median wall thickness: the scale for door and window sizes."""
+    pairs = sorted((s.t, s.length) for s in segs)
+    half, acc = sum(l for _, l in pairs) / 2, 0.0
+    for t, l in pairs:
+        acc += l
+        if acc >= half:
+            return t
+    return pairs[-1][0] if pairs else 6.0
+
+
+def _main_building(walls: list[Seg], t: float, shape: tuple[int, int]) -> list[Seg]:
+    """Keeps the building: walls are drawn into a mask, grown by a few wall-thicknesses so
+    walls separated by doors and windows join up, and the group with the most walls wins.
+    Title blocks, legends and boxes around notes sit apart from it and are dropped."""
+    if not walls:
+        return walls
+    H, W = shape
+    mask = np.zeros((H, W), np.uint8)
+    for s in walls:
+        _draw(mask, s, s.lo, s.hi)
+    k = int(max(9, t * 8)) | 1
+    grown = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    n, lab = cv2.connectedComponents(grown)
+    groups: dict[int, list[Seg]] = {}
+    for s in walls:
+        mx, my = ((s.lo + s.hi) / 2, s.pos) if s.horizontal else (s.pos, (s.lo + s.hi) / 2)
+        groups.setdefault(int(lab[min(H - 1, int(my)), min(W - 1, int(mx))]), []).append(s)
+    main = max(groups.values(), key=lambda g: (len(g), sum(w.length for w in g)))
+    # wings separated from the main group by wide openings still belong to the building if they
+    # sit inside or against its outline; title blocks and legends sit well outside it
+    def box(g):
+        xs = [c for w in g for c in ((w.lo, w.hi) if w.horizontal else (w.pos,))]
+        ys = [c for w in g for c in ((w.pos,) if w.horizontal else (w.lo, w.hi))]
+        return min(xs), min(ys), max(xs), max(ys)
+    x0, y0, x1, y1 = box(main)
+    m = k
+    keep = list(main)
+    for g in groups.values():
+        if g is main:
+            continue
+        gx0, gy0, gx1, gy1 = box(g)
+        if gx0 >= x0 - m and gx1 <= x1 + m and gy0 >= y0 - m and gy1 <= y1 + m:
+            keep += g
+    return keep
+
+
+def _merge(segs: list[Seg], ink: np.ndarray, tmed: float) -> list[Seg]:
     """Joins pieces of the same wall. A gap between pieces is an opening: a window when
-    thin lines cross it, a door when it is empty. Very long gaps are separate walls."""
+    glazing lines cross it, a door when it is empty and door-sized. Wider empty gaps are
+    open passages between rooms, so the pieces stay separate walls."""
     segs = sorted(segs, key=lambda s: s.pos)
     lines: list[list[Seg]] = []
     for s in segs:
@@ -210,10 +269,13 @@ def _merge(segs: list[Seg], ink: np.ndarray, tmax: float) -> list[Seg]:
         weight = cur.length
         for s in group[1:]:
             gap = s.lo - cur.hi
+            kind = _classify_gap(ink, cur, cur.hi, s.lo) if gap > 2 else None
+            # typical walls are 0.15-0.23 m: doors up to about 8 thicknesses (1.2-1.8 m),
+            # windows up to about 20 (3-4.6 m)
             if gap <= 2:
                 pass
-            elif gap <= 14 * tmax:
-                cur.gaps.append((cur.hi, s.lo, _classify_gap(ink, cur, cur.hi, s.lo)))
+            elif (kind == "door" and gap <= 8 * tmed) or (kind == "window" and gap <= 20 * tmed):
+                cur.gaps.append((cur.hi, s.lo, kind))
             else:
                 out.append(cur)
                 cur = Seg(s.horizontal, s.pos, s.lo, s.hi, s.t)

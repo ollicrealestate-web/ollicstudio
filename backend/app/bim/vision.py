@@ -39,8 +39,10 @@ def _image_payload(img: Image.Image) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def parse_answer(text: str) -> dict:
-    m = re.search(r"\{.*\}", text or "", re.S)
+def parse_answer(text) -> dict:
+    if not isinstance(text, str):
+        text = json.dumps(text) if isinstance(text, (dict, list)) else str(text or "")
+    m = re.search(r"\{.*\}", text, re.S)
     if not m:
         raise VisionUnavailable("no JSON in the answer")
     try:
@@ -94,9 +96,9 @@ class CloudflareVision:
             raise VisionUnavailable(f"vision model error {res.status_code}: {str(errs[0].get('message'))[:200]}")
         result = payload.get("result") if isinstance(payload.get("result"), dict) else payload
         text = result.get("response")
-        if isinstance(text, dict):  # some models return parsed JSON already
-            text = json.dumps(text)
-        out = parse_answer(text or "")
+        if text is None and isinstance(result.get("choices"), list) and result["choices"]:  # OpenAI-style answer
+            text = (result["choices"][0].get("message") or {}).get("content")
+        out = parse_answer(text)
         out["model"] = self._model
         out["usage"] = result.get("usage")
         return out

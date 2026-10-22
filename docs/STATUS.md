@@ -37,7 +37,7 @@ Last updated: 22 October 2026, session 2.
 
 ## Test run (session 2)
 
-`cd backend && python -m pytest`: **111 passed, 0 failed**, Python 3.13. The 108 non-browser tests also pass in a clean environment built only from `requirements*.txt`.
+`cd backend && python -m pytest`: **112 passed, 0 failed**, Python 3.13. The 108 non-browser tests also pass in a clean environment built only from `requirements*.txt`.
 
 - Phase 1: `test_auth.py` 10, `test_projects.py` 6, `test_uploads.py` 20, `test_supabase_client.py` 5
 - Phase 2: `test_renders.py` 25, `test_openai_client.py` 11, `test_cloudflare.py` 12
@@ -45,6 +45,11 @@ Last updated: 22 October 2026, session 2.
 - Browser: `e2e/test_web_flow.py`, `e2e/test_render_flow.py`, `e2e/test_model_flow.py` (WebGL: IFC upload to 3D with report and room labels; plan upload, review, scale from a wall, build; no sideways scrolling at 390 px)
 
 Brief acceptance tests covered: **1, 2, 5, 14, 22** live; **3, 15** live for Standard render; **4, 8, 9 (honest MEP note), 12 (viewer at phone size, emulated), 13, 16, 17, 18, 37** in tests.
+
+### Live check, 22 Oct 2026 (Phases 3 and 3b), test account B
+- IFC import of the generated bungalow: succeeded in 6 s, report "pass", 26 elements, GLB served from the private bucket.
+- Plan reading with the real vision model (`@cf/meta/llama-4-scout-17b-16e-instruct`): read all 5 room names and areas and the 12 m overall width; scale 0.01740 m/px against a true 0.01667 (4%).
+- The owner's real sheet (A103, "Typical 1st - 6th Floor Plan", two flats around a core) failed with a generic error on its first try. Fixes: the AI step can no longer stop plan reading, results are converted to plain JSON before saving, and errors name the step that failed. The sheet frame and title block were being read as walls, and wide openings as doors: the reader now drops lines spanning the sheet, keeps only the building's wall groups, and limits doors and windows to realistic sizes. On that sheet it now finds the building's walls (128 pieces, 77 openings); rooms are under-counted (8) because terraces and open plans leave rooms unenclosed, so they need naming in the editor.
 
 ## Known limits
 
