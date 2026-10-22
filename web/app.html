@@ -10,6 +10,7 @@
 <meta name="theme-color" content="#070707">
 <link rel="stylesheet" href="assets/styles.css">
 <script src="assets/config.js"></script>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/"}}</script>
 </head>
 <body>
 <div class="blueprint" aria-hidden="true"></div>
@@ -97,16 +98,50 @@
     <div class="uploads" id="uploads" aria-live="polite"></div>
     <div class="table-wrap" id="filesWrap" hidden>
       <table>
-        <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Details</th><th>Uploaded</th><th>Checksum</th></tr></thead>
+        <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Details</th><th>Uploaded</th><th>Checksum</th><th><span class="sr-only">Actions</span></th></tr></thead>
         <tbody id="fileRows"></tbody>
       </table>
     </div>
+    <section class="model" id="modelSection" aria-labelledby="modelTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">3D model</span><h2 id="modelTitle" class="studio-title">Your building in 3D</h2>
+          <p class="muted">Upload a Revit export (IFC) and Ollic reads it straight away. Or upload a floor plan image or PDF and press <b>Make 3D model</b>: Ollic reads the walls, doors, windows and rooms, you check them, and Ollic builds the model inside and out.</p></div>
+      </div>
+      <div class="jobs" id="modelJobs" aria-live="polite"></div>
+      <div id="planReview" class="plan-review" hidden>
+        <div class="review-head">
+          <h3>Check what Ollic read from your plan</h3>
+          <p class="muted">Every value shows where it came from: <span class="chip src-drawing">Read from drawing</span> <span class="chip src-ai">Read by AI</span> <span class="chip src-user">You</span> <span class="chip src-default">Standard value</span>. Nothing is built until you confirm the scale.</p>
+        </div>
+        <div id="planEditor"></div>
+        <div id="planMsg" class="notice error" role="status" hidden></div>
+      </div>
+      <div id="viewerWrap" hidden>
+        <div class="viewer-bar" role="toolbar" aria-label="3D view">
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" class="seg-btn" id="viewOutside" aria-pressed="true">Outside</button>
+            <button type="button" class="seg-btn" id="viewInside" aria-pressed="false">Inside (roof off)</button>
+          </div>
+          <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
+          <button type="button" class="btn" id="viewReset">Reset view</button>
+          <span class="spacer"></span>
+          <a class="btn" id="dlGlb" download>Download 3D (GLB)</a>
+          <a class="btn" id="dlIfc" hidden>Download IFC</a>
+        </div>
+        <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
+        <div class="model-info">
+          <div class="card" id="elementCard"><h3>Element</h3><p class="muted">Tap any part of the building to see what it is.</p></div>
+          <div class="card" id="reportCard"></div>
+        </div>
+      </div>
+      <div class="empty" id="modelEmpty" hidden>No 3D model yet. Upload an IFC file, or a floor plan and press <b>Make 3D model</b> next to it.</div>
+    </section>
     <section class="studio" id="studio" aria-labelledby="studioTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>
           <p class="muted">Describe the house, or start from one of your sketches. Each image takes about a minute. These are AI concept images for ideas and finishes, labelled <b>AI concept — not to scale</b>; renders that match your drawings exactly come from the 3D model in a later phase.</p></div>
       </div>
-      <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add an OpenAI key to the server.</div>
+      <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
       <form id="renderForm" class="render-form card" hidden>
         <fieldset class="tiers span2" id="tierPick">
           <legend>Render type</legend>

@@ -12,7 +12,7 @@ Phase 1 needs one Supabase project. The free plan is enough to build and test.
 
 1. Open **SQL Editor** > **New query**.
 2. Paste the whole of `supabase/migrations/20261022000001_foundation.sql` and choose **Run**.
-   Then do the same, in a new query, with `supabase/migrations/20261022000002_concept_renders.sql` (Phase 2: jobs, renders, usage records and the private `renders` bucket). Then `20261022000003_cloudflare_and_daily_limits.sql`, then `20261022000004_premium_plan.sql`. Run each migration once, in date order.
+   Then do the same, in a new query, with `supabase/migrations/20261022000002_concept_renders.sql` (Phase 2: jobs, renders, usage records and the private `renders` bucket). Then `20261022000003_cloudflare_and_daily_limits.sql`, then `20261022000004_premium_plan.sql`, then `20261022000005_bim_models.sql` (3D models, components, plan drafts and the private `models` bucket). Run each migration once, in date order.
 
 ### Giving a customer Premium render (until payments arrive in Phase 7)
 **Table Editor > profiles**, find the customer's row (its `id` matches their user id under **Authentication > Users**), set `plan` to `premium` and save. Set it back to `free` to remove it. Customers cannot change this themselves.

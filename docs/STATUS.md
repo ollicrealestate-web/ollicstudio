@@ -4,6 +4,7 @@ Last updated: 22 October 2026, session 2.
 
 - **Phase 1: Foundation: complete.** Live at https://ollicstudio.onrender.com (Render, Frankfurt; Supabase project zusfpymdqfmwgfaejaer).
 - **Phase 2: Concept rendering: complete for Standard render** (verified live on 22 Oct 2026, see below). **Premium render** (OpenAI) is wired, locked to paid plans, and waits only for credit on the OpenAI account.
+- **Phase 3: IFC import** and **Phase 3b: model from a floor plan: built and tested; awaiting configuration and a live check.** The owner has to run migration 5; then an IFC import and a plan-to-model build need checking on the live site.
 
 ### Live check, 22 Oct 2026 (Standard render, Cloudflare FLUX.2 [klein] 4B), test account B on the free plan
 - Concept from a description: succeeded in 29 s, 1536 x 1024. From a line sketch: succeeded in 13 s, and kept the sketch's roof, two windows and centred door. Revision ("light terracotta walls, warm lights in the windows"): succeeded in 10 s, building unchanged otherwise.
@@ -16,56 +17,46 @@ Last updated: 22 October 2026, session 2.
 
 | Feature | Status | Evidence |
 | --- | --- | --- |
-| Sign-up, sign-in, sign-out, password reset (Supabase Auth) | Operational live; reset emails use Supabase's default template | Live sign-in with two test accounts on 22 Oct 2026 |
-| Token verification on every request (HS256 legacy secret; RS256/ES256 via JWKS) | Operational live (the project issues ES256 tokens) | `test_auth.py`; live isolation check |
-| Projects: create, list, open, delete | Operational live | `test_projects.py`; `scripts/verify_isolation.py` |
-| Ownership checked in code, plus row-level security and storage policies | **Verified live**: `scripts/verify_isolation.py` passed 14/14 against the deployed site on 22 Oct 2026 | — |
-| Uploads: type from contents, size limit, checksum, private storage, originals never modified | Operational live | `test_uploads.py`; live isolation check |
-| Project deletion removes stored files | Verified live (the check reads the storage folder listing, because Supabase's CDN can serve a deleted object for up to a minute) | live isolation check |
-| Website: landing page, dashboard, uploads, delete confirmation, mobile layout | Operational live | e2e journey test |
-| Hosting on Render from GitHub (`Dockerfile`; Railway files kept) | Operational | `/health` live |
-| **Concept renders from a description** (server-side OpenAI Image API, `gpt-image-2.5-flare`) | Built and tested with a stand-in model. **Awaiting configuration**: migration 2, then a live render | `test_renders.py`, `test_openai_client.py`, e2e render test |
-| **Concept renders from a reference sketch or photo** (PNG/JPEG sent as the base image; PDF and IFC refused with a reason) | Same as above | same |
-| **Revisions of a render** (`gpt-image-2.5-sunburst`, previous render kept as the base; the original is never changed) | Same as above | same |
-| Concept label: "AI concept — not to scale" on every card, stamped into the image file and in the download name; the database refuses an unlabelled concept | Same as above | `test_renders.py`; migration check constraint |
-| Jobs: real status from the database, cancel, failure reasons, interrupted jobs reported as failed after 10 minutes, one render per Idempotency-Key, 3 active per project | Same as above | `test_renders.py` |
-| Cost recorded for every model call, from the tokens OpenAI reports (`/api/usage`); null, never a guess, when usage or a price is missing | Same as above | `test_renders.py::test_every_model_call_records_its_cost_from_the_reported_tokens` |
-| **Free image provider: Cloudflare Workers AI** (`@cf/black-forest-labs/flux-2-klein-4b`, 10,000 free neurons a day, about 60 landscape concepts). This is **Standard render**, free for everyone. Reference images are shrunk below 512 px as the model requires. Cost recorded as an estimate from image tiles at list price | Built and tested with a mocked Cloudflare API. **Awaiting configuration**: token in Render, migration 3, live render | `test_cloudflare.py` |
-| **Two tiers side by side**: Standard render (Cloudflare, free) and **Premium render** (OpenAI), Premium for paid plans only (`profiles.plan = 'premium'`, set by the owner until Phase 7; customers cannot change it). Revisions stay in the tier of the original | Operational in tests and in the browser test; awaiting migration 4 | `test_cloudflare.py`, e2e render test |
-| Per-customer daily limits per tier: Standard 3 (`DAILY_RENDERS_PER_USER`), Premium 20 (`DAILY_PREMIUM_RENDERS_PER_USER`), reset at midnight UTC = 01:00 Lagos; failed renders do not count | Operational in tests | `test_cloudflare.py` |
-| OpenAI key only on the server (not in `config.js`, `/health`, settings repr or logs) | Operational in tests | `test_renders.py::test_the_openai_key_never_reaches_the_browser` |
+| Sign-up, sign-in, sign-out, password reset (Supabase Auth) | Operational live; reset emails use Supabase's default template | Live sign-in with two test accounts |
+| Token verification (HS256 legacy secret; RS256/ES256 via JWKS) | Operational live (the project issues ES256 tokens) | `test_auth.py`; live isolation check |
+| Projects, uploads, ownership in code plus RLS and storage policies, deletion removes files | **Verified live**: `scripts/verify_isolation.py` 14/14 | `test_projects.py`, `test_uploads.py` |
+| Website, mobile layout, Render hosting from GitHub | Operational live | e2e tests; `/health` |
+| **Standard render** (Cloudflare `@cf/black-forest-labs/flux-2-klein-4b`, free daily allowance): from a description, from a sketch, revisions | **Verified live** | `test_cloudflare.py`, `test_renders.py`, e2e render test |
+| **Premium render** (OpenAI `gpt-image-2.5-flare` / `-sunburst`), paid plans only (`profiles.plan = 'premium'`, set by the owner until Phase 7) | Built and tested; awaiting OpenAI credit | `test_cloudflare.py`, `test_openai_client.py` |
+| Concept label stamped on every image and in the download name; database refuses an unlabelled concept | Verified live | live check; migration 2 |
+| Jobs: real status, cancel, failure reasons, interrupted jobs reported after 10 min, idempotency, 3 active per project | Operational in tests; render jobs verified live | `test_renders.py` |
+| Daily limits per customer: Standard 3, Premium 20; failed renders do not count | Verified live (Standard) | live check |
+| Cost recorded for every model call; null, never a guess, when usage or a price is missing | Verified live | live check |
+| **IFC import** (IfcOpenShell 0.9): IFC2X3, IFC4, IFC4X3; validation report (schema, units, storeys, GlobalIds, element counts, MEP note, geometry, size, georeferencing); GLB with one node per element named by its GlobalId; components table; private `models` bucket. An uploaded IFC is imported automatically | Built and tested with a generated house. **Awaiting configuration**: migration 5, live import of a real Revit export | `test_bim.py`, e2e model test |
+| **3D viewer** (three.js r169 bundled with the site): outside view, inside with the roof off and room names, floor picker, tap an element to see its type, floor and GlobalId, GLB and IFC downloads. Draws only when something changes (battery) and fits the building to phone screens | Built and tested in a browser (WebGL) | e2e model test, screenshots at 1280 px and 390 px |
+| **Floor plan to layout** (PNG, JPEG or PDF): OpenCV finds walls (solid or double-line), doors (empty gaps), windows (gaps with glazing lines) and rooms; a vision model (Cloudflare `@cf/meta/llama-4-scout-17b-16e-instruct`) reads room names and written areas; the scale comes from the areas. Every value carries its source; missing values are flagged, never invented | Built and tested on generated plans. **Awaiting** a live run: the vision model's image request format could not be tested from here (no Cloudflare access), and plan reading falls back to unnamed rooms and a manual scale if it fails | `test_bim.py`, e2e model test |
+| **Plan review editor**: walls, doors, windows, rooms over the plan; select, add, delete, drag wall ends; set the scale from one wall of known length; storeys, storey height, roof type, pitch and overhang; nothing builds without a scale | Built and tested in a browser | e2e model test |
+| **Model from confirmed dimensions**: IFC4 house with walls, real openings with doors and windows, slabs, flat/gable/hip roof, named spaces; GlobalIds derived from the draft, so a rebuild keeps them; saved as a "Made by Ollic" IFC file and imported through the same pipeline. Version 1: one or two storeys (the upper floor repeats the outline as one open space) | Built and tested | `test_bim.py` |
 
-**Phase 2 deliverable** ("upload a reference image, generate a concept visual, request an edit"): passes end to end in a browser (real site, real API, real background threads; stand-in Supabase Auth and stand-in image model). Not yet run against the real OpenAI API.
+**Phase 3 deliverable** ("a sample IFC house is processed and its report shown"): passes end to end in a browser. **Phase 3b deliverable** ("a simple sketch becomes a confirmed IFC model that passes Phase 3 validation"): passes end to end in a browser with a generated plan; awaits a real customer plan on the live site.
 
 ## Test run (session 2)
 
-`cd backend && python -m pytest`: **92 passed, 0 failed**, Python 3.13 (`test_cloudflare.py` covers the free provider, both tiers, plans and daily limits).
+`cd backend && python -m pytest`: **111 passed, 0 failed**, Python 3.13. The 108 non-browser tests also pass in a clean environment built only from `requirements*.txt`.
 
-- `test_auth.py` 10, `test_projects.py` 6, `test_uploads.py` 20, `test_supabase_client.py` 5: Phase 1, plus requests for the new tables and buckets
-- `test_renders.py` 25: prompt-only, reference and revision renders; labels; validation; token-expiry guard; cross-user 404s on render, outputs, jobs, cancel and revise; provider refusal; cancel mid-call; restart detection; idempotency; active-job limit; cost per call; usage kept after project deletion; renders deleted with the project
-- `test_openai_client.py` 10: exact request bodies, data-URL images, the key only in the header, plain messages for moderation, bad key, no permission, no credit, rate limit, unknown model and server errors
-- `e2e/test_web_flow.py` 1, `e2e/test_render_flow.py` 1: browser journeys; the render journey also checks for no sideways scrolling at 390 px
+- Phase 1: `test_auth.py` 10, `test_projects.py` 6, `test_uploads.py` 20, `test_supabase_client.py` 5
+- Phase 2: `test_renders.py` 25, `test_openai_client.py` 11, `test_cloudflare.py` 12
+- Phases 3 and 3b: `test_bim.py` 19: builder output and counts, stable GlobalIds, import report, GLB node names, broken files, plan reading (walls, doors, windows, rooms, widths, scale within 6%), double-line walls, missing scale flagged, unreadable images, vision answers parsed defensively, pixels to metres with the y-axis flipped, two storeys, API journeys (IFC import, plan to model), cross-user 404s, file links, deletion
+- Browser: `e2e/test_web_flow.py`, `e2e/test_render_flow.py`, `e2e/test_model_flow.py` (WebGL: IFC upload to 3D with report and room labels; plan upload, review, scale from a wall, build; no sideways scrolling at 390 px)
 
-Brief acceptance tests covered: **1, 2, 5, 14, 22** live. **3, 13 (as far as one web process allows), 15, 18 (idempotency)** in tests, awaiting the live check.
-
-## How Phase 2 works
-
-- `POST /api/projects/{id}/architectural-render` and `POST /api/renders/{id}/edit` create a job row and return 202. A small thread pool in the web service runs it as the signed-in user, so row-level security still applies.
-- The job calls `/v1/images/generations` or `/v1/images/edits` (JSON body, images as base64 data URLs, `safety_identifier` = a hash of the user id), records the usage event, then saves two private copies in the `renders` bucket: an unlabelled base for revisions and a labelled copy for viewing and download.
-- `GET /api/projects/{id}/outputs` returns renders with one-hour signed links, plus recent jobs. The page polls it every 3 s while a job is active.
-- Prices (`backend/app/pricing.py`): $5 text in, $8 image in, $30 image out per million tokens for both models, standard tier, from OpenAI's pricing page on 22 Oct 2026.
+Brief acceptance tests covered: **1, 2, 5, 14, 22** live; **3, 15** live for Standard render; **4, 8, 9 (honest MEP note), 12 (viewer at phone size, emulated), 13, 16, 17, 18, 37** in tests.
 
 ## Known limits
 
-- Jobs run inside the web service. A restart mid-job loses that job; it is reported as failed after 10 minutes. A separate worker with retries comes with the GPU work in Phase 5.
-- Jobs act with the user's token, which lasts an hour. Renders are refused when the token has under 5 minutes left (the page refreshes it). Users can therefore write their own job and usage rows directly. Harmless while nothing is billed; Phase 7 moves those writes to a worker key and removes the grants.
+- Jobs run inside the web service (512 MB on Render's free instance). IFC files are limited to 20,000 elements here; bigger models wait for the Phase 5 worker. A restart mid-job is reported as failed after 10 minutes.
+- Jobs act with the user's token; users can write their own job and usage rows. Phase 7 moves those writes to a worker key.
+- Plan reading, version 1: walls must run horizontally or vertically on the page; curved and diagonal walls are not read yet. Rooms are not recomputed when walls are added in the editor. Two-storey buildings copy the ground outline upstairs until first-floor plans are supported.
+- Pitched roofs cover the footprint's bounding rectangle (fine for rectangular plans; L-shapes get a simple roof).
+- The vision model and Standard render share Cloudflare's 10,000 free neurons a day.
 - Render's free instance sleeps after 15 minutes idle; the first request then takes about 50 s.
-- The model may still move walls or windows when it works from a sketch, which is why every output is labelled a concept. Plan-accurate renders come from the 3D model (Phases 3–5).
-- `Pillow==12.3.0` was added for labelling. It has not been installed from PyPI here (no access); the Render build confirms it.
-- No customer credits, quotas or prices yet (Phase 7). No privacy notice or retention policy yet (Phase 8).
 
 ## Next session should do first
 
-1. Migrations 2–4 and the Cloudflare settings were applied on 22 Oct 2026 and Standard render was verified live. Remaining: **Owner:** run migrations 3 and 4 (`20261022000003_cloudflare_and_daily_limits.sql`, `20261022000004_premium_plan.sql`), and add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in Render; `/health` should then show `"standard": true`. The first live OpenAI attempt on 22 Oct 2026 was refused because the OpenAI account had no credit ("You have no credits remaining"), and the app reported it correctly.
-2. Make one real render from a description, one from a reference sketch, and one revision on the live site. Check the label, the download and `/api/usage` against the OpenAI usage page. Record the results here and mark Phase 2 complete.
-3. Then **Phase 3: IFC import** (IfcOpenShell processing, validation report, glTF output, GlobalIds kept).
+1. **Owner:** run `supabase/migrations/20261022000005_bim_models.sql` in the Supabase SQL editor. Until then, deleting a project fails (it looks for models to delete).
+2. Live check: upload a real Revit IFC export and a real floor plan image; record the import report, whether the vision model read the room names, how the plan reading did, and the built model, here.
+3. Then **Phase 4: construction sequence** (stages and dependencies from the model, cycle detection, CSV export).

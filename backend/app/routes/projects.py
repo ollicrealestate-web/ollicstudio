@@ -127,3 +127,16 @@ def upload_source_file(project_id: uuid.UUID, request: Request, file: UploadFile
     if project.get("input_type") in (None, "unknown"):
         _repo(request).update_project(user, str(project_id), {"input_type": "ifc" if check.kind == "ifc" else "sketch"})
     return saved
+
+
+@router.get("/projects/{project_id}/files/{file_id}/link")
+def file_link(project_id: uuid.UUID, file_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """A one-hour download link for one of the project's own files (for example the IFC Ollic built from a plan)."""
+    _owned_project(request, user, project_id)
+    f = _repo(request).get_source_file(user, str(file_id))
+    if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found in this project.")
+    url = _storage(request).signed_urls(user, [f["storage_path"]], bucket=request.app.state.settings.storage_bucket).get(f["storage_path"])
+    if not url:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found in storage.")
+    return {"url": url, "download_url": f"{url}&download={f['original_name']}", "name": f["original_name"]}

@@ -41,7 +41,9 @@ export function createViewer(host, { onSelect } = {}) {
   labels.className = "viewer-labels";
   host.append(labels);
 
-  let model = null, elements = [], storeys = [], mode = "exterior", storey = null, selected = null, frame = 0;
+  let model = null, elements = [], storeys = [], mode = "exterior", storey = null, selected = null, frame = 0, dirty = true;
+  const redraw = () => { dirty = true; };
+  controls.addEventListener("change", redraw);
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
 
   function resize() {
@@ -49,6 +51,7 @@ export function createViewer(host, { onSelect } = {}) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    dirty = true;
   }
   new ResizeObserver(resize).observe(host);
 
@@ -77,16 +80,23 @@ export function createViewer(host, { onSelect } = {}) {
     storeys = Object.keys(lows).sort((a, b) => lows[a] - lows[b]);
     frameAll();
     apply();
+    dirty = true;
     return { storeys, count: elements.length };
   }
 
   function frameAll() {
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
-    const r = Math.max(size.x, size.z, size.y * 1.4) * 0.78;
+    const radius = size.length() / 2;
+    // fit the whole building in whichever field of view is narrower (portrait phones: the horizontal one)
+    const vfov = THREE.MathUtils.degToRad(camera.fov);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+    const d = radius / Math.sin(Math.min(vfov, hfov) / 2) * 0.92;
+    const dir = new THREE.Vector3(0.62, 0.48, 0.62).normalize();
     controls.target.copy(c);
-    camera.position.set(c.x + r * 1.15, c.y + r * 0.75, c.z + r * 1.35);
-    camera.near = r / 200; camera.far = r * 40; camera.updateProjectionMatrix();
+    camera.position.copy(c).addScaledVector(dir, d);
+    camera.near = Math.max(0.05, d / 200); camera.far = d * 40; camera.updateProjectionMatrix();
+    const r = Math.max(size.x, size.z, size.y);
     sun.position.set(c.x + r * 1.2, c.y + r * 2, c.z + r * 0.6);
     sun.target.position.copy(c);
     const s = r * 1.2;
@@ -106,6 +116,7 @@ export function createViewer(host, { onSelect } = {}) {
   function apply() {
     for (const e of elements) e.visible = visible(e.userData);
     drawLabels();
+    dirty = true;
   }
 
   function drawLabels() {
@@ -145,11 +156,15 @@ export function createViewer(host, { onSelect } = {}) {
     selected = obj;
     if (obj) { obj.material = obj.material.clone(); obj.material.emissive?.set("#5a0a0d"); }
     onSelect?.(obj ? obj.userData : null);
+    dirty = true;
   }
 
+  // Draw only when something changed (camera moved, mode, selection, resize): saves battery on phones.
   function tick() {
     frame = requestAnimationFrame(tick);
     controls.update();
+    if (!dirty) return;
+    dirty = false;
     if (labels.children.length) placeLabels();
     renderer.render(scene, camera);
   }
@@ -160,7 +175,7 @@ export function createViewer(host, { onSelect } = {}) {
     load,
     setMode(m) { mode = m; apply(); },
     setStorey(s) { storey = s || null; apply(); },
-    reset() { frameAll(); },
+    reset() { frameAll(); dirty = true; },
     snapshot() { renderer.render(scene, camera); return renderer.domElement.toDataURL("image/png"); },
     dispose() { cancelAnimationFrame(frame); renderer.dispose(); host.replaceChildren(); },
     get storeys() { return storeys; },

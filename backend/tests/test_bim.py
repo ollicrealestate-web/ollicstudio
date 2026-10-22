@@ -290,3 +290,12 @@ def test_plan_reading_without_the_vision_model_still_works_and_says_so(settings,
     assert c.get(f"/api/jobs/{job['id']}", headers=alice["headers"]).json()["status"] == "succeeded"
     p = c.get(f"/api/projects/{pid}/layout", headers=alice["headers"]).json()["draft"]["proposal"]
     assert p["vision"]["status"] == "off" and p["scale"]["m_per_px"] is None and p["flags"][0]["target"] == "vision"
+
+
+def test_files_have_private_download_links(bim, alice, bob, sample_ifc):
+    c = bim[0]
+    pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
+    f = upload(c, alice, pid, "house.ifc", sample_ifc)
+    link = c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=alice["headers"]).json()
+    assert "/object/sign/source-files/" in link["url"] and link["download_url"].endswith("&download=house.ifc")
+    assert c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=bob["headers"]).status_code == 404

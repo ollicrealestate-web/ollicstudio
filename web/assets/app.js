@@ -83,8 +83,9 @@ async function openProject(id) {
   show("projectView"); $("#uploads").replaceChildren(); resetDelete(); stopPolling();
   $("#gallery").replaceChildren(); $("#jobList").replaceChildren(); message($("#renderMsg"), "");
   $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
+  resetModel(); outputsLoadedOnce = false; seenDone = new Set();
   history.replaceState(null, "", `${location.pathname}?project=${encodeURIComponent(id)}`);
-  try { current = await api.getProject(id); renderProject(); loadOutputs(); }
+  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadLayout(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
@@ -92,8 +93,10 @@ function renderProject() {
   $("#projectMeta").textContent = `${INPUT[current.input_type] || ""} · created ${fmtDate(current.created_at)}`;
   const rows = $("#fileRows"); rows.replaceChildren();
   current.source_files.forEach(f => rows.append(el("tr", {},
-    el("td", {}, f.original_name), el("td", {}, TYPE[f.detected_type] || f.detected_type), el("td", { class: "mono" }, fmtBytes(f.size_bytes)),
-    el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"))));
+    el("td", {}, f.original_name, f.origin === "generated" ? el("span", { class: "chip generated", style: "margin-left:8px" }, "Made by Ollic") : ""),
+    el("td", {}, TYPE[f.detected_type] || f.detected_type), el("td", { class: "mono" }, fmtBytes(f.size_bytes)),
+    el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"),
+    el("td", {}, el("div", { class: "file-actions" }, ...fileActions(f))))));
   $("#filesWrap").hidden = current.source_files.length === 0;
   const ref = $("#rRef"), keep = ref.value;
   ref.replaceChildren(el("option", { value: "" }, "Nothing: a fresh concept"),
@@ -102,10 +105,129 @@ function renderProject() {
 }
 $("#backBtn").onclick = () => { stopPolling(); listProjects(); };
 
+function fileActions(f) {
+  if (f.detected_type === "ifc" && f.origin !== "generated")
+    return [el("button", { class: "btn", type: "button", onclick: e => startImport(f, e.currentTarget) }, "Import 3D")];
+  if (["png", "jpeg", "pdf"].includes(f.detected_type))
+    return [el("button", { class: "btn", type: "button", onclick: e => startTrace(f, e.currentTarget) }, "Make 3D model")];
+  return [];
+}
+async function startImport(f, btn) {
+  if (btn) btn.disabled = true;
+  try { await api.importIfc(current.id, f.id, newKey()); toast("Reading the IFC model. This takes a few seconds to a minute."); loadOutputs(); }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function startTrace(f, btn) {
+  if (btn) btn.disabled = true;
+  try { await api.tracePlan(current.id, f.id, newKey()); toast("Reading the floor plan: walls, doors, windows and rooms."); loadOutputs(); $("#modelSection").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+/* ---------- 3D models and plan review (Phases 3 and 3b) ---------- */
+let viewer = null, viewerModelId = null, editor = null;
+function resetModel() {
+  $("#viewerWrap").hidden = true; $("#planReview").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
+  $("#planEditor").replaceChildren(); message($("#planMsg"), "");
+  if (viewer) { viewer.dispose(); viewer = null; }
+  viewerModelId = null; editor = null;
+  $("#viewer").replaceChildren(el("div", { class: "viewer-msg", id: "viewerMsg" }, "Loading the 3D model…"));
+}
+
+async function loadModels() {
+  if (!current) return;
+  const pid = current.id;
+  let models;
+  try { models = await api.models(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
+  if (current?.id !== pid) return;
+  const m = models[0];
+  $("#viewerWrap").hidden = !m;
+  $("#modelEmpty").hidden = !!m || !$("#planReview").hidden;
+  if (!m || m.id === viewerModelId) return;
+  viewerModelId = m.id;
+  drawReport(m);
+  $("#dlGlb").href = m.glb_url ? `${m.glb_url}&download=${encodeURIComponent(current.name)}-3d.glb` : "#";
+  const ifc = current.source_files.find(f => f.id === m.source_file_id);
+  $("#dlIfc").hidden = !ifc;
+  if (ifc) $("#dlIfc").onclick = async e => { e.preventDefault(); try { const l = await api.fileLink(pid, ifc.id); location.href = l.download_url; } catch (err) { toast(err.message); } };
+  try {
+    if (!viewer) {
+      const { createViewer } = await import("./viewer.js");
+      $("#viewer").querySelector(".viewer-msg")?.remove();
+      viewer = createViewer($("#viewer"), { onSelect: showElement });
+      setViewMode("exterior");
+    }
+    const info = await viewer.load(m.glb_url);
+    const pick = $("#storeySelect");
+    pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
+    $("#storeyPick").hidden = info.storeys.length < 2;
+    showElement(null);
+  } catch (err) {
+    $("#viewer").append(el("div", { class: "viewer-msg" }, "The 3D view could not start on this device. You can still download the model."));
+  }
+}
+
+function setViewMode(mode) {
+  viewer?.setMode(mode);
+  $("#viewOutside").setAttribute("aria-pressed", String(mode === "exterior"));
+  $("#viewInside").setAttribute("aria-pressed", String(mode === "interior"));
+}
+$("#viewOutside").onclick = () => setViewMode("exterior");
+$("#viewInside").onclick = () => setViewMode("interior");
+$("#viewReset").onclick = () => viewer?.reset();
+$("#storeySelect").onchange = e => { viewer?.setStorey(e.target.value); if (e.target.value) setViewMode("interior"); };
+
+const TYPE_NAME = { IfcWall: "Wall", IfcWallStandardCase: "Wall", IfcSlab: "Floor slab", IfcRoof: "Roof", IfcDoor: "Door", IfcWindow: "Window", IfcSpace: "Room", IfcColumn: "Column", IfcBeam: "Beam", IfcStair: "Stair", IfcCovering: "Covering", IfcRailing: "Railing" };
+function showElement(x) {
+  const card = $("#elementCard");
+  if (!x) { card.replaceChildren(el("h3", {}, "Element"), el("p", { class: "muted" }, "Tap any part of the building to see what it is.")); return; }
+  card.replaceChildren(el("h3", {}, TYPE_NAME[x.ifcType] || x.ifcType || "Element"),
+    el("dl", { class: "kv" }, el("dt", {}, "Name"), el("dd", {}, x.name || "—"), el("dt", {}, "Floor"), el("dd", {}, x.storey || "—"),
+      el("dt", {}, "IFC type"), el("dd", { class: "mono" }, x.ifcType || "—"), el("dt", {}, "GlobalId"), el("dd", { class: "mono" }, x.globalId || "—")));
+}
+
+function drawReport(m) {
+  const r = m.report || {};
+  const verdict = { pass: "Model checked: ready to use", warn: "Model checked: usable, with notes", fail: "Model has problems" }[r.status] || "Model report";
+  const fromPlan = m.layout_draft_id ? el("p", { class: "hint" }, "Built by Ollic from your confirmed floor plan.") : "";
+  $("#reportCard").replaceChildren(el("h3", {}, verdict), fromPlan,
+    el("ul", { class: "checks" }, ...(r.checks || []).map(c => el("li", { class: c.status }, c.message))));
+}
+
+async function loadLayout() {
+  if (!current) return;
+  const pid = current.id;
+  let res;
+  try { res = await api.layout(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
+  if (current?.id !== pid) return;
+  const d = res.draft;
+  const open = d && d.status === "proposed";
+  $("#planReview").hidden = !open;
+  if (open && editor?.draftId !== d.id) {
+    editor = { draftId: d.id };  // claim it first, so a second refresh does not build the editor twice
+    const { createPlanEditor } = await import("./plan_editor.js");
+    if (editor?.draftId !== d.id || current?.id !== pid) return;
+    Object.assign(editor, createPlanEditor($("#planEditor"), d, { projectName: current.name, onConfirm: body => confirmPlan(pid, body) }));
+  }
+  if (!open) $("#modelEmpty").hidden = !$("#viewerWrap").hidden;
+}
+
+async function confirmPlan(pid, body) {
+  message($("#planMsg"), "");
+  try {
+    const job = await api.confirmLayout(pid, body, newKey());
+    (job.notes || []).forEach(n => toast(n));
+    toast("Building the 3D model from your plan…");
+    $("#planReview").hidden = true; editor = null;
+    loadOutputs();
+  } catch (err) { if (err.status === 401) return handle(err); message($("#planMsg"), err.message); }
+}
+
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", plan_trace: "Reading floor plan", model_build: "Building 3D model" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
-let pollTimer = null, outputsFor = null, seenFailed = new Set();
+let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
 
 async function loadOutputs() {
@@ -117,16 +239,23 @@ async function loadOutputs() {
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
   setupTiers(out);
-  drawJobs(out.jobs); drawGallery(out.images);
+  const MODEL_JOBS = ["ifc_import", "plan_trace", "model_build"];
+  drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type)), "#jobList");
+  drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
+  drawGallery(out.images);
+  const done = out.jobs.filter(j => MODEL_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
+  done.forEach(j => seenDone.add(j.id));
+  if (done.length && outputsLoadedOnce) { loadModels(); loadLayout(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
+  outputsLoadedOnce = true;
   stopPolling();
   if (out.jobs.some(j => j.status === "queued" || j.status === "running")) pollTimer = setTimeout(loadOutputs, 3000);
 }
 
-function drawJobs(jobs) {
+function drawJobs(jobs, target = "#jobList") {
   const now = Date.now();
   const show = jobs.filter(j => j.status === "queued" || j.status === "running"
     || ((j.status === "failed" || j.status === "cancelled") && now - new Date(j.finished_at || j.created_at).getTime() < 30 * 60 * 1000 && !seenFailed.has(j.id)));
-  $("#jobList").replaceChildren(...show.map(j => {
+  $(target).replaceChildren(...show.map(j => {
     const active = j.status === "queued" || j.status === "running";
     const text = j.status === "failed" ? j.error : j.status === "cancelled" ? (j.stage || "Cancelled.") : (j.stage || (j.status === "queued" ? "Waiting to start" : "Working"));
     return el("div", { class: `job ${j.status}` },
@@ -220,8 +349,10 @@ async function uploadAll(files) {
     const row = el("div", { class: "upload-row" }, el("span", { class: "name" }, file.name), status, el("div", { class: "progress" }, bar));
     $("#uploads").prepend(row);
     try {
-      await uploadFile(current.id, file, f => { bar.style.width = `${Math.round(f * 100)}%`; status.textContent = `${Math.round(f * 100)}%`; });
+      const uploaded = uploadFile(current.id, file, f => { bar.style.width = `${Math.round(f * 100)}%`; status.textContent = `${Math.round(f * 100)}%`; });
+      const saved = await uploaded;
       bar.style.width = "100%"; status.textContent = "Checked and saved";
+      if (saved?.detected_type === "ifc") startImport(saved);
       current = await api.getProject(current.id); renderProject();
       setTimeout(() => row.remove(), 2500);
     } catch (err) {

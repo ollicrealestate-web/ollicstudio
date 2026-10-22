@@ -32,6 +32,15 @@ app.html + assets/*.js  ──►   /api/*  verify JWT (auth.py)    ──►   
 3. Straight after the call, the cost is written to `usage_events` from the reported tokens (`app/pricing.py`). Then the image is checked with Pillow and stored twice in the private `renders` bucket: an unlabelled base (used for revisions) and a copy stamped "AI concept - not to scale". A `rendered_images` row links them, with `parent_image_id` for revisions.
 4. The page reads `GET /api/projects/{id}/outputs` (signed one-hour links plus job states) and polls while anything is running. A job untouched for 10 minutes is marked failed with an explanation.
 
+## 3D models (Phases 3 and 3b)
+
+- **IFC import** (`app/bim/importer.py`): IfcOpenShell opens the file, the report checks schema, units, storeys, GlobalIds, elements, MEP, geometry, size and georeferencing, and trimesh writes a GLB with one node per element named by its GlobalId (y-up, centred). Components go to `building_components`; the GLB to the private `models` bucket.
+- **Floor plans** (`app/bim/plan_trace.py`, `app/bim/vision.py`): OpenCV reads walls, openings and rooms in image pixels; a Cloudflare vision model reads room names and areas; the scale comes from the areas. The proposal is saved as a `layout_drafts` row with the plan image.
+- **Review** (`web/assets/plan_editor.js`): the customer edits the proposal over the plan and confirms a scale. `PUT /api/projects/{id}/layout` converts pixels to metres (`app/bim/confirm.py`) and starts a `model_build` job.
+- **Builder** (`app/bim/builder.py`): IfcOpenShell's API writes an IFC4 house with stable GlobalIds; it is stored as a generated source file and imported by the same code as an upload.
+- **Viewer** (`web/assets/viewer.js`): three.js r169, bundled under `web/vendor/three` (MIT licence included), loaded through an import map; renders only when something changes.
+- Heavy libraries load inside the jobs, not at start-up, to keep the web service small.
+
 ## Decisions
 
 | Decision | Why |
