@@ -105,7 +105,12 @@ def trace(img: Image.Image, labels: list[dict] | None = None) -> dict:
     for s in walls:
         _draw(closed, s, s.lo, s.hi)
     footprint = _footprint(closed)
-    rooms, lab = _rooms(closed, footprint)
+    # for finding rooms only: seal small gaps where wall ends do not quite meet
+    k = int(max(3, tmed * 3)) | 1
+    sealed = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    bx = [c for s in walls for c in ((s.lo, s.hi) if s.horizontal else (s.pos,))]
+    by = [c for s in walls for c in ((s.pos,) if s.horizontal else (s.lo, s.hi))]
+    rooms, lab = _rooms(sealed, (max(bx) - min(bx)) * (max(by) - min(by)))
 
     # ------------------------------------------------------------ assemble the proposal
     out_walls, out_open = [], []
@@ -127,9 +132,10 @@ def trace(img: Image.Image, labels: list[dict] | None = None) -> dict:
                           "area_px": r["area_px"], "area_label": None, "area_source": None, "_label": r["label"]})
     used_labels = _assign_labels(out_rooms, lab, labels or [], W, H)
 
-    fw = (max(p[0][0] for p in footprint) - min(p[0][0] for p in footprint)) if footprint is not None else W
-    fh = (max(p[0][1] for p in footprint) - min(p[0][1] for p in footprint)) if footprint is not None else H
-    scale = _scale_from_areas(out_rooms, (fw, fh))
+    # the building's extent from all its walls (its outline contour can be just one wing)
+    wx = [c for s in walls for c in ((s.lo, s.hi) if s.horizontal else (s.pos,))]
+    wy = [c for s in walls for c in ((s.pos,) if s.horizontal else (s.lo, s.hi))]
+    scale = _scale_from_areas(out_rooms, (max(wx) - min(wx), max(wy) - min(wy)))
     flags = []
     if scale["m_per_px"] is None:
         flags.append({"kind": "missing", "target": "scale", "message": "No room areas could be read, so the scale is unknown. Enter the real length of one wall."})
@@ -338,11 +344,11 @@ def _footprint(closed: np.ndarray):
 
 
 # ---------------------------------------------------------------------------- rooms
-def _rooms(closed: np.ndarray, footprint) -> tuple[list[dict], np.ndarray]:
+def _rooms(closed: np.ndarray, building_area_px: float) -> tuple[list[dict], np.ndarray]:
     H, W = closed.shape
     free = cv2.bitwise_not(closed)
     n, lab, stats, _ = cv2.connectedComponentsWithStats(free, connectivity=4)
-    total = cv2.contourArea(footprint) if footprint is not None else H * W
+    total = building_area_px or H * W
     rooms = []
     for i in range(1, n):
         x, y, w, h, area = (int(v) for v in stats[i])
@@ -399,7 +405,8 @@ def _scale_from_areas(rooms: list[dict], building_px: tuple[float, float]) -> di
     for r in rooms:
         if r.get("area_label") and r["area_px"] > 0:
             s = math.sqrt(r["area_label"] / r["area_px"])
-            if not (4 <= max(bw, bh) * s <= 150):   # a house or block between 4 m and 150 m across
+            tiny = r["area_px"] < 0.004 * bw * bh                      # a cupboard or shaft, not a labelled room
+            if tiny or not (4 <= max(bw, bh) * s <= 80):   # a house or block between 4 m and 80 m across
                 rejected += 1
                 continue
             evidence.append({"room": r["id"], "name": r["name"], "area_m2": r["area_label"], "area_px": r["area_px"], "m_per_px": s})
