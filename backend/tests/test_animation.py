@@ -224,3 +224,20 @@ def test_photoreal_views_are_tagged_and_unlabelled_links_are_given(anim, alice, 
     assert img["options"]["anim_hero"] == {"index": 0, "key": "hvabc1230"} and img["base_url"] and img["base_url"] != img["url"]
     bad = {**body, "anim_hero": {"index": 5, "key": "x"}}
     assert c.post(f"/api/projects/{pid}/architectural-render", json=bad, headers={**alice["headers"], "Idempotency-Key": "hero-test-0002"}).status_code == 422
+
+
+def test_line_drawings_of_views_are_tagged(anim, alice, repo):
+    c, _, _ = anim
+    pid = new_project(c, alice)
+    from .test_studio import upload
+    from . import samples
+    pic = upload(c, alice, pid, "elevation.png", samples.png(150, 100))
+    c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": "Night render", "references": [{"file_id": pic["id"], "role": "model"}],
+                                                          "anim_hero": {"index": 0, "key": f"img-{pic['id']}"}}, headers={**alice["headers"], "Idempotency-Key": "line-test-0001"})
+    (photo,) = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"]
+    r = c.post(f"/api/renders/{photo['id']}/edit", json={"instruction": "Clean white line drawing on black", "anim_line": {"index": 0, "key": f"img-{pic['id']}"}},
+               headers={**alice["headers"], "Idempotency-Key": "line-test-0002"})
+    assert r.status_code == 202, r.text
+    line, photo2 = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"]
+    assert line["options"]["anim_line"]["key"] == f"img-{pic['id']}" and "anim_hero" not in line["options"]
+    assert photo2["options"]["anim_hero"]["key"] == f"img-{pic['id']}" and line["parent_image_id"] == photo2["id"]

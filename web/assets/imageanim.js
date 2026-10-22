@@ -3,7 +3,7 @@
 // ground up; then a line of light sweeps up and reveals the photoreal picture, with a slow push-in.
 // Everything is drawn on a 2D canvas as a pure function of time, so preview and export match.
 
-const GOLD = [255, 196, 110];
+const GOLD = [255, 178, 80];
 
 function rand(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 const clamp01 = x => Math.max(0, Math.min(1, x));
@@ -105,6 +105,41 @@ export function traceLines(img, maxSide = 1400) {
   return { lines, glow, width: w, height: h, rowSpan };
 }
 
+/**
+ * Gold lines from an AI line drawing (light lines on black, same view as the photo): far cleaner
+ * than tracing the photo. Brightness becomes the gold's opacity.
+ */
+export function linesFromDrawing(img, maxSide = 1600) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  const s = Math.min(1, maxSide / Math.max(iw, ih));
+  const w = Math.max(8, Math.round(iw * s)), h = Math.max(8, Math.round(ih * s)), n = w * h;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.drawImage(img, 0, 0, w, h);
+  const src = g.getImageData(0, 0, w, h).data;
+  const lines = document.createElement("canvas"); lines.width = w; lines.height = h;
+  const lg = lines.getContext("2d"), out = lg.createImageData(w, h), keep = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const l = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
+    const a = Math.max(0, Math.min(1, (l - 60) / 170)) * 0.85;
+    if (a <= 0) continue;
+    keep[i] = a > 0.3 ? 1 : 0;
+    out.data[i * 4] = GOLD[0]; out.data[i * 4 + 1] = GOLD[1]; out.data[i * 4 + 2] = GOLD[2]; out.data[i * 4 + 3] = Math.round(a * 255);
+  }
+  lg.putImageData(out, 0, 0);
+  const glow = document.createElement("canvas"); glow.width = w; glow.height = h;
+  const small = document.createElement("canvas"); small.width = Math.max(4, w >> 2); small.height = Math.max(4, h >> 2);
+  const sg = small.getContext("2d"); sg.imageSmoothingQuality = "high"; sg.drawImage(lines, 0, 0, small.width, small.height);
+  const gg = glow.getContext("2d"); gg.imageSmoothingQuality = "high"; gg.drawImage(small, 0, 0, w, h); gg.globalCompositeOperation = "lighter"; gg.drawImage(small, 0, 0, w, h);
+  const rowSpan = [], band = Math.max(4, Math.round(h * 0.025));
+  for (let y = 0; y < h; y++) {
+    let a = -1, b = -1, cnt = 0;
+    for (let yy = Math.max(0, y - band); yy < Math.min(h, y + band); yy++) for (let x = 0; x < w; x += 2) if (keep[yy * w + x]) { cnt++; if (a < 0 || x < a) a = x; if (x > b) b = x; }
+    rowSpan.push(cnt < 6 ? null : [a / w, b / w]);
+  }
+  return { lines, glow, width: w, height: h, rowSpan, clean: true };
+}
+
 /** The picture with soft edges, for when it does not fill the frame. */
 function feathered(img) {
   const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
@@ -139,7 +174,7 @@ function nightBackdrop(w, h, seed = 3) {
  * Returns { duration, renderFrame(t, w, h), labelAt(t), tagAt(t), script }.
  */
 export function createImageAnimation(views, { seconds = 10, script = {} } = {}) {
-  const traced = views.map(v => ({ ...v, tr: traceLines(v.image), soft: feathered(v.image) }));
+  const traced = views.map(v => ({ ...v, tr: v.drawing ? linesFromDrawing(v.drawing) : traceLines(v.image), soft: feathered(v.image) }));
   const per = Math.max(6, Math.min(20, seconds));
   const duration = per * Math.max(1, traced.length);
   const out = document.createElement("canvas"), g = out.getContext("2d");
@@ -178,8 +213,13 @@ export function createImageAnimation(views, { seconds = 10, script = {} } = {}) 
     if (bottom > top) {
       g.save(); g.beginPath(); g.rect(0, top, w, bottom - top); g.clip();
       g.globalCompositeOperation = "lighter";
-      g.globalAlpha = 1; g.drawImage(v.tr.glow, box.x, box.y, box.w, box.h); g.globalAlpha = 0.6; g.drawImage(v.tr.glow, box.x, box.y, box.w, box.h);
-      g.globalAlpha = 1; g.drawImage(v.tr.lines, box.x, box.y, box.w, box.h); g.globalAlpha = 0.5; g.drawImage(v.tr.lines, box.x, box.y, box.w, box.h);
+      if (v.tr.clean) {     // an AI line drawing: lines are already solid, so less doubling
+        g.globalAlpha = 0.75; g.drawImage(v.tr.glow, box.x, box.y, box.w, box.h);
+        g.globalAlpha = 0.95; g.drawImage(v.tr.lines, box.x, box.y, box.w, box.h);
+      } else {
+        g.globalAlpha = 1; g.drawImage(v.tr.glow, box.x, box.y, box.w, box.h); g.globalAlpha = 0.6; g.drawImage(v.tr.glow, box.x, box.y, box.w, box.h);
+        g.globalAlpha = 1; g.drawImage(v.tr.lines, box.x, box.y, box.w, box.h); g.globalAlpha = 0.5; g.drawImage(v.tr.lines, box.x, box.y, box.w, box.h);
+      }
       g.restore();
     }
     // the drawing front glows while the lines are being drawn

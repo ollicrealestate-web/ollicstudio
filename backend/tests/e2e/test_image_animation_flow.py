@@ -58,15 +58,19 @@ def test_animation_from_3d_images(stack, tmp_path):  # noqa: F811
         assert page.is_disabled("#iaExport")
         page.fill("#iaLook", "white render, bronze glass, palm trees")
         page.click("#iaMake")
-        page.wait_for_function("document.querySelector('#iaPick .ia-item').textContent.includes('Photoreal ready')", timeout=30000)
-        call = stack["images"].calls[-1]
-        assert len(stack["images"].calls) == calls_before + 1 and "Keep the building's exact shape" in call["prompt"] and "bronze glass" in call["prompt"]
+        # the photoreal view, then (automatically) its clean line drawing, made from it
+        page.wait_for_function("document.querySelector('#iaPick .ia-item').textContent.includes('Photoreal + lines ready')", timeout=60000)
+        photo, line = stack["images"].calls[-2:]
+        assert len(stack["images"].calls) == calls_before + 2 and "Keep the building's exact shape" in photo["prompt"] and "bronze glass" in photo["prompt"]
+        assert line["kind"] == "edit" and "line drawing" in line["prompt"]
+        tags = [i["options"].get("anim_line") for i in stack["repo"].images.values() if i["options"].get("anim_line")]
+        assert len(tags) == 1 and tags[0]["key"].startswith("img-")
         page.wait_for_selector("#iaStage:not([hidden])")
         # the second is a finished render already: used as it is, no AI call
         page.check("#iaPick .ia-item >> nth=1 >> text=Already photoreal")
         page.check("#iaPick .ia-item >> nth=1 >> text=Animate this")
         page.wait_for_function("document.querySelector('#iaTime').textContent.includes('0:20')")    # 2 images x 10 s
-        assert len(stack["images"].calls) == calls_before + 1
+        assert len(stack["images"].calls) == calls_before + 2
         page.fill("#iaScrub", "1300"); page.dispatch_event("#iaScrub", "input")     # image 2, lines drawing (first 42% of its 10 s)
         assert "Drawing" in page.inner_text("#iaTime")
         page.locator("#iaFrame").screenshot(path=str(shots / "e2e-image-anim-lines.png"))

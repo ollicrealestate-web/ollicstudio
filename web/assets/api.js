@@ -34,7 +34,7 @@ export const api = {
   deleteProject: id => request("DELETE", `/projects/${id}`),
   // Phase 2: concept renders. The key makes a double-click or a retry start one render, not two.
   startRender: (projectId, body, key) => request("POST", `/projects/${projectId}/architectural-render`, body, true, { "Idempotency-Key": key }),
-  editRender: (renderId, instruction, key) => request("POST", `/renders/${renderId}/edit`, { instruction }, true, { "Idempotency-Key": key }),
+  editRender: (renderId, instruction, key, extra = {}) => request("POST", `/renders/${renderId}/edit`, { instruction, ...extra }, true, { "Idempotency-Key": key }),
   outputs: projectId => request("GET", `/projects/${projectId}/outputs`),
   cancelJob: id => request("POST", `/jobs/${id}/cancel`),
   // Phases 3 and 3b: 3D models

@@ -222,7 +222,9 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         options = {"size": size, "quality": quality, "operation": operation, "tier": tier, "final_prompt": prompt[:8000],
                    "prompt_notes": (writer_note or {}).get("notes"), "premium_prompting": bool(writer_note)}
         if job["type"] == "concept_render":
-            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero")})
+            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line")})
+        elif inp.get("anim_line"):
+            options["anim_line"] = inp["anim_line"]
         try:
             repo.create_rendered_image(user, {
                 "id": render_id, "project_id": job["project_id"], "job_id": job_id, "kind": "concept", "label": CONCEPT_LABEL,

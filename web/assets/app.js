@@ -882,12 +882,28 @@ async function sourceLink(fid) {
 }
 const iaFiles = () => (current?.source_files || []).filter(f => (f.detected_type === "png" || f.detected_type === "jpeg") && !/^Photoreal view \d/.test(f.original_name));
 const iaRender = fid => images.find(i => (i.options || {}).anim_hero?.key === `img-${fid}` && (i.base_url || i.url));
+const iaLine = fid => images.find(i => (i.options || {}).anim_line?.key === `img-${fid}` && (i.base_url || i.url));
+const LINE_PROMPT = "Turn this picture into a clean architectural wireframe line drawing of the building only: thin, crisp, bright white lines on a pure black background, "
+  + "tracing the outline, every floor slab edge, balcony edge, column and window frame, in exactly the same position, size and camera. "
+  + "Remove the trees, cars, people, sky, ground texture and all shading and colour. No text.";
+let iaLineWanted = new Set(), iaLinePending = new Set();
+/** After a photoreal view arrives, its line drawing is made from it (only for views asked for in this visit). */
+async function iaRequestLines() {
+  for (const fid of [...iaLineWanted]) {
+    const r = iaRender(fid);
+    if (!r || iaLine(fid) || iaLinePending.has(fid)) { if (iaLine(fid)) { iaLineWanted.delete(fid); iaLinePending.delete(fid); } continue; }
+    iaLinePending.add(fid);
+    try { await api.editRender(r.id, LINE_PROMPT, newKey(), { anim_line: { index: Math.max(0, iaSel.indexOf(fid)), key: `img-${fid}` } }); drawIA(); loadOutputs(); }
+    catch (err) { iaLinePending.delete(fid); iaLineWanted.delete(fid); toast(`The line drawing could not be started: ${err.message}`); }
+  }
+}
 
 function drawIA() {
   if (!current) return;
   const files = iaFiles();
   iaSel = iaSel.filter(id => files.some(f => f.id === id));
-  const key = JSON.stringify([files.map(f => f.id), iaSel, [...iaAsIs], [...iaPending], files.map(f => iaRender(f.id)?.id || "")]);
+  iaRequestLines();
+  const key = JSON.stringify([files.map(f => f.id), iaSel, [...iaAsIs], [...iaPending], [...iaLinePending], files.map(f => (iaRender(f.id)?.id || "") + (iaLine(f.id)?.id || ""))]);
   if (key !== iaKey) {
     iaKey = key;
     $("#iaPick").replaceChildren(...(files.length ? files.map(f => {
@@ -903,7 +919,8 @@ function drawIA() {
       };
       const real = el("input", { type: "checkbox", ...(asIs ? { checked: "" } : {}) });
       real.onchange = () => { if (real.checked) iaAsIs.add(f.id); else iaAsIs.delete(f.id); drawIA(); };
-      const badge = asIs ? "Used as it is" : r ? "Photoreal ready" : pending ? "Rendering…" : "3D image";
+      const ln = iaLine(f.id);
+      const badge = asIs ? (ln ? "As it is · lines ready" : "Used as it is") : r ? (ln ? "Photoreal + lines ready" : iaLinePending.has(f.id) ? "Drawing lines…" : "Photoreal ready") : pending ? "Rendering…" : "3D image";
       return el("div", { class: `ia-item${on ? " on" : ""}` },
         el("div", { class: "thumb" }, thumb, el("span", { class: "badge" }, on ? `${iaSel.indexOf(f.id) + 1} · ${badge}` : badge)),
         el("div", { class: "body" }, el("span", { class: "name", title: f.original_name }, f.original_name),
@@ -917,11 +934,12 @@ async function buildIA() {
   const views = [];
   for (const fid of iaSel) {
     const f = iaFiles().find(x => x.id === fid), r = iaRender(fid);
-    if (iaAsIs.has(fid)) views.push({ fid, url: await sourceLink(fid), caption: "", render_id: null, name: f?.original_name });
-    else if (r) views.push({ fid, url: r.base_url || r.url, caption: "", render_id: r.id, name: f?.original_name });
+    const ln = iaLine(fid), line = ln ? ln.base_url || ln.url : null;
+    if (iaAsIs.has(fid)) views.push({ fid, url: await sourceLink(fid), line, caption: "", render_id: null, name: f?.original_name });
+    else if (r) views.push({ fid, url: r.base_url || r.url, line, caption: "", render_id: r.id, name: f?.original_name });
   }
   const fmt = $("#iaFormat").value, secs = Number($("#iaSeconds").value) || 10;
-  const bkey = JSON.stringify([views.map(v => v.url), fmt, secs, iaSel]);
+  const bkey = JSON.stringify([views.map(v => v.url + (v.line || "")), fmt, secs, iaSel]);
   if (bkey === iaBuildKey) return;
   iaBuildKey = bkey;
   const missing = iaSel.length - views.length;
@@ -932,9 +950,10 @@ async function buildIA() {
   }
   try {
     const imgs = await Promise.all(views.map(v => loadImg(v.url)));
+    const lines = await Promise.all(views.map(v => v.line ? loadImg(v.line).catch(() => null) : null));
     if (bkey !== iaBuildKey) return;
     iaStop();
-    iaAnim = IA.createImageAnimation(views.map((v, i) => ({ image: imgs[i], caption: "", render_id: v.render_id })), { seconds: secs });
+    iaAnim = IA.createImageAnimation(views.map((v, i) => ({ image: imgs[i], drawing: lines[i], caption: "", render_id: v.render_id })), { seconds: secs });
     iaAnim.items = views.map(v => ({ caption: v.name || "", render_id: v.render_id }));
     const [w, h] = IA_SIZE[fmt];
     const c = $("#iaCanvas"); c.width = w; c.height = h;
@@ -973,9 +992,22 @@ $("#iaSeconds").onchange = () => { iaBuildKey = ""; buildIA(); };
 $("#iaMake").onclick = async () => {
   if (!current) return;
   if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
+  if (!iaSel.length) { toast("Tick the images to animate first."); return; }
+  // views with a photoreal picture (made, or used as it is) but no line drawing yet: only the drawing is needed
+  const needLines = iaSel.filter(fid => (iaRender(fid) || iaAsIs.has(fid)) && !iaLine(fid) && !iaLinePending.has(fid));
   const todo = iaSel.filter(fid => !iaAsIs.has(fid) && !iaPending.has(`img-${fid}`) && !iaRender(fid));
+  if (!todo.length && needLines.length) {
+    const asIs = needLines.filter(fid => iaAsIs.has(fid));
+    needLines.filter(fid => !asIs.includes(fid)).forEach(fid => iaLineWanted.add(fid));
+    for (const fid of asIs) {     // a picture used as it is: draw its lines from the uploaded file itself
+      try { const f = await api.startRender(current.id, { prompt: LINE_PROMPT, view: "exterior", aspect: { "16:9": "landscape", "9:16": "portrait", "1:1": "square" }[$("#iaFormat").value],
+          tier: chosenTier(), references: [{ file_id: fid, role: "base" }], anim_line: { index: Math.max(0, iaSel.indexOf(fid)), key: `img-${fid}` } }, newKey());
+        void f; iaLinePending.add(fid); } catch (err) { toast(err.message); }
+    }
+    iaRequestLines(); drawIA(); toast("Making the line drawings. About a minute."); return;
+  }
   const redo = todo.length ? todo : iaSel.filter(fid => !iaAsIs.has(fid));
-  if (!redo.length) { toast(iaSel.length ? "These images are used as they are." : "Tick the images to animate first."); return; }
+  if (!redo.length) { toast("These images are used as they are."); return; }
   const look = $("#iaLook").value.trim();
   const aspect = { "16:9": "landscape", "9:16": "portrait", "1:1": "square" }[$("#iaFormat").value];
   const prompt = `${look ? look + ". " : ""}Photorealistic luxury architectural visualisation of this exact building at night: blue hour sky with stars, warm light glowing from every window, `
@@ -986,7 +1018,7 @@ $("#iaMake").onclick = async () => {
       const looks = tickedLooks().filter(id => id !== fid).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
       await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", tier: chosenTier(),
         quality: $("#rQuality").value, references: [{ file_id: fid, role: "model" }, ...looks], anim_hero: { index: Math.max(0, iaSel.indexOf(fid)), key: `img-${fid}` } }, newKey());
-      iaPending.add(`img-${fid}`);
+      iaPending.add(`img-${fid}`); iaLineWanted.add(fid);
     }
     toast(`Making ${redo.length} photoreal view${redo.length > 1 ? "s" : ""}. Each takes about a minute.`);
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }

@@ -56,6 +56,7 @@ class ConceptRenderIn(BaseModel):
     quality: Literal["medium", "high", "max"] = "high"   # Premium render only; Standard has one level
     tier: Literal["standard", "premium"] = "standard"
     anim_hero: AnimHero | None = None
+    anim_line: AnimHero | None = None     # the result is the line drawing of an animation view
 
     @field_validator("prompt")
     @classmethod
@@ -89,6 +90,7 @@ class ConceptRenderIn(BaseModel):
 class EditIn(BaseModel):
     instruction: str = Field(min_length=3, max_length=1000)
     tier: Literal["standard", "premium"] | None = None  # default: the same tier as the render being revised
+    anim_line: "AnimHero | None" = None   # marks the result as the line drawing of an animation view
 
     @field_validator("instruction")
     @classmethod
@@ -218,7 +220,8 @@ def edit_render(render_id: uuid.UUID, body: EditIn, request: Request, response: 
     _require_token_life(user)
     if image.get("kind") != "concept":
         raise HTTPException(422, {"code": "not_a_concept", "reason": "Only concept renders can be revised this way."})
-    return _start_job(request, user, image["project_id"], "concept_edit", {"parent_image_id": str(render_id), "instruction": body.instruction, "tier": tier}, idempotency_key, response)
+    return _start_job(request, user, image["project_id"], "concept_edit", {"parent_image_id": str(render_id), "instruction": body.instruction, "tier": tier,
+                                                                         **({"anim_line": body.anim_line.model_dump()} if body.anim_line else {})}, idempotency_key, response)
 
 
 @router.get("/jobs/{job_id}")
