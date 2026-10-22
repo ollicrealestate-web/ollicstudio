@@ -328,3 +328,14 @@ def test_ai_labels_that_land_on_a_wall_or_outside_are_handled():
     stray = {"name": "Garden", "area_m2": 99, "x": 0.01, "y": 0.99}        # off the building
     p = trace(load_plan_image(png, "png"), [on_wall, stray] + labels[1:])
     assert len(p["rooms"]) == 5 and "Garden" not in [r["name"] for r in p["rooms"]]
+
+
+def test_area_labels_matched_to_the_wrong_room_do_not_set_a_silly_scale():
+    """On a real sheet an AI label 'Bedroom 1, 14 m2' landed in a cupboard and implied a building ~270 m wide."""
+    from app.bim.plan_trace import _scale_from_areas
+    cupboard = {"id": "r1", "name": "Bedroom 1", "area_label": 14.0, "area_px": 166}
+    assert _scale_from_areas([cupboard], (920, 470))["m_per_px"] is None
+    # with good matches too, the odd one out is dropped
+    good = [{"id": f"g{i}", "name": "Room", "area_label": a, "area_px": round(a / 0.033 ** 2)} for i, a in enumerate((14, 20, 24, 8))]
+    s = _scale_from_areas(good + [cupboard], (920, 470))
+    assert abs(s["m_per_px"] - 0.033) < 0.001 and s["rejected"] == 1

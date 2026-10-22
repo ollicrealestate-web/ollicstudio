@@ -127,7 +127,9 @@ def trace(img: Image.Image, labels: list[dict] | None = None) -> dict:
                           "area_px": r["area_px"], "area_label": None, "area_source": None, "_label": r["label"]})
     used_labels = _assign_labels(out_rooms, lab, labels or [], W, H)
 
-    scale = _scale_from_areas(out_rooms)
+    fw = (max(p[0][0] for p in footprint) - min(p[0][0] for p in footprint)) if footprint is not None else W
+    fh = (max(p[0][1] for p in footprint) - min(p[0][1] for p in footprint)) if footprint is not None else H
+    scale = _scale_from_areas(out_rooms, (fw, fh))
     flags = []
     if scale["m_per_px"] is None:
         flags.append({"kind": "missing", "target": "scale", "message": "No room areas could be read, so the scale is unknown. Enter the real length of one wall."})
@@ -388,16 +390,29 @@ def _assign_labels(rooms: list[dict], lab: np.ndarray, labels: list[dict], W: in
     return used
 
 
-def _scale_from_areas(rooms: list[dict]) -> dict:
-    """Plans often show room areas but no dimensions. Each labelled room gives metres per pixel."""
-    evidence = []
+def _scale_from_areas(rooms: list[dict], building_px: tuple[float, float]) -> dict:
+    """Plans often show room areas but no dimensions. Each labelled room gives metres per pixel.
+    A label matched to the wrong room gives an absurd building size, so such evidence is dropped,
+    and if nothing sensible is left the scale stays unknown for the customer to set."""
+    evidence, rejected = [], 0
+    bw, bh = building_px
     for r in rooms:
         if r.get("area_label") and r["area_px"] > 0:
-            evidence.append({"room": r["id"], "name": r["name"], "area_m2": r["area_label"], "area_px": r["area_px"],
-                             "m_per_px": math.sqrt(r["area_label"] / r["area_px"])})
+            s = math.sqrt(r["area_label"] / r["area_px"])
+            if not (4 <= max(bw, bh) * s <= 150):   # a house or block between 4 m and 150 m across
+                rejected += 1
+                continue
+            evidence.append({"room": r["id"], "name": r["name"], "area_m2": r["area_label"], "area_px": r["area_px"], "m_per_px": s})
     if not evidence:
-        return {"m_per_px": None, "source": None, "evidence": [], "spread": None}
+        return {"m_per_px": None, "source": None, "evidence": [], "spread": None, "rejected": rejected}
     vals = [e["m_per_px"] for e in evidence]
     med = statistics.median(vals)
     spread = (max(vals) - min(vals)) / med if len(vals) > 1 else 0.0
-    return {"m_per_px": med, "source": "ai", "evidence": evidence, "spread": round(spread, 3)}
+    if len(vals) > 2:  # drop matches far from the rest
+        keep = [e for e in evidence if abs(e["m_per_px"] - med) / med <= 0.25]
+        if len(keep) >= 2 and len(keep) < len(evidence):
+            rejected += len(evidence) - len(keep)
+            evidence, vals = keep, [e["m_per_px"] for e in keep]
+            med = statistics.median(vals)
+            spread = (max(vals) - min(vals)) / med
+    return {"m_per_px": med, "source": "ai", "evidence": evidence, "spread": round(spread, 3), "rejected": rejected}
