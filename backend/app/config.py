@@ -30,10 +30,37 @@ class Settings:
     openai_image_model: str = "gpt-image-2.5-flare"      # new concepts from a prompt or a reference
     openai_edit_model: str = "gpt-image-2.5-sunburst"    # revisions, where keeping the base matters most
     renders_bucket: str = "renders"
+    # Cloudflare Workers AI: a free allowance every day (10,000 neurons).
+    cloudflare_account_id: str | None = None
+    cloudflare_api_token: str | None = field(default=None, repr=False)  # server only
+    cloudflare_image_model: str = "@cf/black-forest-labs/flux-2-klein-4b"
+    # "cloudflare" or "openai". Empty: Cloudflare when it is set up, otherwise OpenAI.
+    image_provider_choice: str = ""
+    # Renders each customer may start per day (UTC). 0 means no limit.
+    daily_renders_per_user: int = 5
+
+    @property
+    def image_provider(self) -> str | None:
+        has_cf = bool(self.cloudflare_account_id and self.cloudflare_api_token)
+        has_oa = bool(self.openai_api_key)
+        choice = self.image_provider_choice.strip().lower()
+        if choice == "cloudflare":
+            return "cloudflare" if has_cf else None
+        if choice == "openai":
+            return "openai" if has_oa else None
+        return "cloudflare" if has_cf else "openai" if has_oa else None
 
     @property
     def renders_enabled(self) -> bool:
-        return bool(self.openai_api_key)
+        return self.image_provider is not None
+
+    @property
+    def generate_model(self) -> str:
+        return self.cloudflare_image_model if self.image_provider == "cloudflare" else self.openai_image_model
+
+    @property
+    def edit_model(self) -> str:
+        return self.cloudflare_image_model if self.image_provider == "cloudflare" else self.openai_edit_model
 
     @property
     def jwks_url(self) -> str:
@@ -62,4 +89,9 @@ class Settings:
             openai_image_model=os.environ.get("OPENAI_IMAGE_MODEL", "").strip() or "gpt-image-2.5-flare",
             openai_edit_model=os.environ.get("OPENAI_EDIT_MODEL", "").strip() or "gpt-image-2.5-sunburst",
             renders_bucket=os.environ.get("RENDERS_BUCKET", "renders").strip() or "renders",
+            cloudflare_account_id=os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip() or None,
+            cloudflare_api_token=os.environ.get("CLOUDFLARE_API_TOKEN", "").strip() or None,
+            cloudflare_image_model=os.environ.get("CLOUDFLARE_IMAGE_MODEL", "").strip() or "@cf/black-forest-labs/flux-2-klein-4b",
+            image_provider_choice=os.environ.get("IMAGE_PROVIDER", "").strip(),
+            daily_renders_per_user=_int("DAILY_RENDERS_PER_USER", 5),
         )

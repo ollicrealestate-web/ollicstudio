@@ -116,6 +116,8 @@ async function loadOutputs() {
   catch (err) { if (err.status === 401) return handle(err); pollTimer = setTimeout(loadOutputs, 8000); return; }
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
+  $("#rQuality").closest("label").hidden = out.provider !== "openai";  // the free model has one detail level
+  $("#renderLimit").textContent = out.daily_limit ? `Up to ${out.daily_limit} free concepts a day. Failed ones do not count.` : "";
   drawJobs(out.jobs); drawGallery(out.images);
   stopPolling();
   if (out.jobs.some(j => j.status === "queued" || j.status === "running")) pollTimer = setTimeout(loadOutputs, 3000);

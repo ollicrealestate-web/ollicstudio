@@ -120,6 +120,9 @@ class FakeRepo:
         rows = [j for j in self.jobs.values() if j["project_id"] == project_id and j["owner_id"] == user.id]
         return [copy.deepcopy(j) for j in sorted(rows, key=lambda j: j["created_at"], reverse=True)][:limit]
 
+    def count_jobs_since(self, user, since_iso, statuses):
+        return sum(1 for j in self.jobs.values() if j["owner_id"] == user.id and j["created_at"] >= since_iso and j["status"] in statuses)
+
     def create_rendered_image(self, user, record):
         self._owned_project(user, record["project_id"])
         assert record["storage_path"].split("/")[:2] == [user.id, record["project_id"]], "path check constraint"

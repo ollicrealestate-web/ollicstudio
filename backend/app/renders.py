@@ -13,6 +13,7 @@ from .auth import CurrentUser
 from .imaging import CONCEPT_LABEL, BadImage, open_image, stamp_label, to_jpeg
 from .jobs import WORKER_NAME, now_iso
 from .openai_images import SIZES, ProviderError
+from .cloudflare_images import FREE_NEURONS_PER_DAY, USD_PER_1000_NEURONS, cost_usd_estimate
 from .pricing import PRICE_SOURCE, cost_usd, token_counts
 from .supabase import BackendUnavailable
 
@@ -94,7 +95,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                     return fail("The reference image is no longer available. Choose another one.")
                 ref = (storage.download(user, src["storage_path"]), REF_MIME[src["detected_type"]])
             prompt = build_prompt(inp, with_reference=ref is not None)
-            model = settings.openai_image_model
+            model = settings.generate_model
             if ref:
                 operation = "image_edit"
                 result = client.edit(model=model, prompt=prompt, images=[ref], size=size, quality=quality, user_id=user.id)
@@ -109,7 +110,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             base = storage.download(user, parent.get("base_path") or parent["storage_path"], bucket=settings.renders_bucket)
             size, quality = parent["options"].get("size", "auto"), parent["options"].get("quality", "medium")
             prompt = build_edit_prompt(inp["instruction"])
-            model, operation = settings.openai_edit_model, "image_edit"
+            model, operation = settings.edit_model, "image_edit"
             result = client.edit(model=model, prompt=prompt, images=[(base, "image/jpeg")], size=size, quality=quality, user_id=user.id)
             source_file_id = parent.get("source_file_id")
     except ProviderError as exc:
@@ -163,14 +164,22 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
 
 
 def record_usage(repo, user: CurrentUser, job: dict, model: str, operation: str, result) -> bool:
-    text_in, image_in, out = token_counts(result.usage)
-    cost = cost_usd(model, result.usage)
+    if model.startswith("@cf/"):
+        provider, text_in, image_in, out = "cloudflare", 0, 0, 0
+        cost = cost_usd_estimate(result.usage)
+        source = (f"Cloudflare Workers AI list price ${USD_PER_1000_NEURONS}/1,000 neurons, estimated from image tiles; "
+                  f"the first {FREE_NEURONS_PER_DAY:,} neurons a day are free, checked 2026-10-22")
+    else:
+        provider = "openai"
+        text_in, image_in, out = token_counts(result.usage)
+        cost = cost_usd(model, result.usage)
+        source = PRICE_SOURCE
     try:
         repo.create_usage_event(user, {
-            "project_id": job["project_id"], "job_id": job["id"], "provider": "openai", "model": model, "operation": operation,
+            "project_id": job["project_id"], "job_id": job["id"], "provider": provider, "model": model, "operation": operation,
             "input_text_tokens": text_in, "input_image_tokens": image_in, "output_tokens": out,
             "cost_usd": str(cost) if cost is not None else None,
-            "price_source": PRICE_SOURCE if cost is not None else ("provider reported no usage" if not result.usage else f"no price on file for {model}"),
+            "price_source": source if cost is not None else ("provider reported no usage" if not result.usage else f"no price on file for {model}"),
             "raw_usage": result.usage, "provider_request_id": result.request_id,
         })
         return True

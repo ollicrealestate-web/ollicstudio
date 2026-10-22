@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
@@ -69,7 +70,7 @@ def public_job(job: dict) -> dict:
 
 def _require_renders(request: Request) -> None:
     if not request.app.state.settings.renders_enabled or request.app.state.image_client is None:
-        raise HTTPException(503, {"code": "not_configured", "reason": "Concept renders are not switched on yet: the server has no OpenAI key. The owner needs to add OPENAI_API_KEY."})
+        raise HTTPException(503, {"code": "not_configured", "reason": "Concept renders are not switched on yet: the server has no image provider. The owner needs to add the Cloudflare or OpenAI settings."})
 
 
 def _require_token_life(user: CurrentUser) -> None:
@@ -106,6 +107,12 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
                 raise HTTPException(409, {"code": "idempotency_conflict", "reason": "That Idempotency-Key was already used for a different request."})
             response.status_code = status.HTTP_200_OK
             return public_job(_settle_stale(request, user, existing))
+    limit = request.app.state.settings.daily_renders_per_user
+    if limit > 0:
+        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        used = repo.count_jobs_since(user, midnight.isoformat(), ("queued", "running", "succeeded"))
+        if used >= limit:
+            raise HTTPException(429, {"code": "daily_limit", "reason": f"You have used today's {limit} free renders. They reset at 01:00 Lagos time (midnight UTC)."})
     active = [j for j in repo.list_jobs(user, project_id) if j.get("status") in ACTIVE and not is_stale(j)]
     if len(active) >= MAX_ACTIVE_PER_PROJECT:
         raise HTTPException(429, {"code": "too_many_active", "reason": f"This project already has {len(active)} renders in progress. Wait for one to finish."})
@@ -173,7 +180,8 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
         out.append({k: i.get(k) for k in ("id", "kind", "label", "prompt", "parent_image_id", "source_file_id", "options", "model", "width", "height", "created_at", "job_id")}
                    | {"url": url, "download_url": f"{url}&download={name}" if url else None})
     jobs = [_settle_stale(request, user, j) for j in repo.list_jobs(user, str(project_id)) if j.get("owner_id") == user.id]
-    return {"renders_enabled": settings.renders_enabled, "images": out, "jobs": [public_job(j) for j in jobs]}
+    return {"renders_enabled": settings.renders_enabled, "provider": settings.image_provider,
+            "daily_limit": settings.daily_renders_per_user or None, "images": out, "jobs": [public_job(j) for j in jobs]}
 
 
 @router.get("/usage")

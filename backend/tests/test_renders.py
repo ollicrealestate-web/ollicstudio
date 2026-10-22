@@ -102,7 +102,7 @@ def test_without_an_openai_key_the_endpoints_say_so(client, alice):
     r = client.post(f"/api/projects/{p['id']}/architectural-render", json={"prompt": "a house"}, headers=alice["headers"])
     assert r.status_code == 503 and r.json()["detail"]["code"] == "not_configured"
     out = client.get(f"/api/projects/{p['id']}/outputs", headers=alice["headers"]).json()
-    assert out == {"renders_enabled": False, "images": [], "jobs": []}
+    assert out["renders_enabled"] is False and out["provider"] is None and out["images"] == [] and out["jobs"] == []
 
 
 def test_the_openai_key_never_reaches_the_browser(rclient):

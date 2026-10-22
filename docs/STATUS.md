@@ -23,13 +23,15 @@ Last updated: 22 October 2026, session 2.
 | Concept label: "AI concept — not to scale" on every card, stamped into the image file and in the download name; the database refuses an unlabelled concept | Same as above | `test_renders.py`; migration check constraint |
 | Jobs: real status from the database, cancel, failure reasons, interrupted jobs reported as failed after 10 minutes, one render per Idempotency-Key, 3 active per project | Same as above | `test_renders.py` |
 | Cost recorded for every model call, from the tokens OpenAI reports (`/api/usage`); null, never a guess, when usage or a price is missing | Same as above | `test_renders.py::test_every_model_call_records_its_cost_from_the_reported_tokens` |
+| **Free image provider: Cloudflare Workers AI** (`@cf/black-forest-labs/flux-2-klein-4b`, 10,000 free neurons a day, about 60 landscape concepts). Chosen automatically when `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are set; `IMAGE_PROVIDER` overrides. Reference images are shrunk below 512 px as the model requires. Cost recorded as an estimate from image tiles at list price | Built and tested with a mocked Cloudflare API. **Awaiting configuration**: token in Render, migration 3, live render | `test_cloudflare.py` |
+| Per-customer daily limit (`DAILY_RENDERS_PER_USER`, default 5, resets at midnight UTC = 01:00 Lagos); failed renders do not count | Operational in tests | `test_cloudflare.py` |
 | OpenAI key only on the server (not in `config.js`, `/health`, settings repr or logs) | Operational in tests | `test_renders.py::test_the_openai_key_never_reaches_the_browser` |
 
 **Phase 2 deliverable** ("upload a reference image, generate a concept visual, request an edit"): passes end to end in a browser (real site, real API, real background threads; stand-in Supabase Auth and stand-in image model). Not yet run against the real OpenAI API.
 
 ## Test run (session 2)
 
-`cd backend && python -m pytest`: **78 passed, 0 failed**, Python 3.13.
+`cd backend && python -m pytest`: **88 passed, 0 failed**, Python 3.13 (78 at the Phase 2 commit, plus 10 in `test_cloudflare.py`).
 
 - `test_auth.py` 10, `test_projects.py` 6, `test_uploads.py` 20, `test_supabase_client.py` 5: Phase 1, plus requests for the new tables and buckets
 - `test_renders.py` 25: prompt-only, reference and revision renders; labels; validation; token-expiry guard; cross-user 404s on render, outputs, jobs, cancel and revise; provider refusal; cancel mid-call; restart detection; idempotency; active-job limit; cost per call; usage kept after project deletion; renders deleted with the project
@@ -56,6 +58,6 @@ Brief acceptance tests covered: **1, 2, 5, 14, 22** live. **3, 13 (as far as one
 
 ## Next session should do first
 
-1. **Owner:** in Supabase **SQL Editor**, run `supabase/migrations/20261022000002_concept_renders.sql` once. Check that Render's latest deploy is green and that `/health` shows `"renders": "on"`.
+1. Migration 2 was run on 22 Oct 2026. **Owner:** run `supabase/migrations/20261022000003_cloudflare_and_daily_limits.sql`, and add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in Render; `/health` should then show `"renders": "cloudflare"`. The first live OpenAI attempt on 22 Oct 2026 was refused because the OpenAI account had no credit ("You have no credits remaining"), and the app reported it correctly.
 2. Make one real render from a description, one from a reference sketch, and one revision on the live site. Check the label, the download and `/api/usage` against the OpenAI usage page. Record the results here and mark Phase 2 complete.
 3. Then **Phase 3: IFC import** (IfcOpenShell processing, validation report, glTF output, GlobalIds kept).

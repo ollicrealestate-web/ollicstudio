@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import TokenVerifier
 from .config import Settings
+from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
 from .routes import projects, renders
@@ -28,7 +29,9 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.state.verifier = verifier or TokenVerifier(settings)
     app.state.repo = repo or SupabaseRepository(settings)
     app.state.storage = storage or SupabaseStorage(settings)
-    if image_client is None and settings.renders_enabled:
+    if image_client is None and settings.image_provider == "cloudflare":
+        image_client = CloudflareImages(settings.cloudflare_account_id, settings.cloudflare_api_token)
+    elif image_client is None and settings.image_provider == "openai":
         image_client = OpenAIImages(settings.openai_api_key, settings.openai_base_url)
     app.state.image_client = image_client  # None until OPENAI_API_KEY is set; the render endpoints then say so
     app.state.runner = runner or ThreadRunner()
@@ -48,7 +51,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "renders": "on" if settings.renders_enabled else "off"}
+        return {"status": "ok", "renders": settings.image_provider or "off"}
 
     app.include_router(projects.router, prefix="/api")
     app.include_router(renders.router, prefix="/api")

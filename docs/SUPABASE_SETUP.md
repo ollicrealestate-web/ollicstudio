@@ -12,7 +12,7 @@ Phase 1 needs one Supabase project. The free plan is enough to build and test.
 
 1. Open **SQL Editor** > **New query**.
 2. Paste the whole of `supabase/migrations/20261022000001_foundation.sql` and choose **Run**.
-   Then do the same, in a new query, with `supabase/migrations/20261022000002_concept_renders.sql` (Phase 2: jobs, renders, usage records and the private `renders` bucket). Run each migration once, in date order.
+   Then do the same, in a new query, with `supabase/migrations/20261022000002_concept_renders.sql` (Phase 2: jobs, renders, usage records and the private `renders` bucket). Then `20261022000003_cloudflare_and_daily_limits.sql`. Run each migration once, in date order.
 3. Check **Table Editor**: `profiles`, `projects` and `source_files` should each show "RLS enabled".
 4. Check **Storage**: a bucket named `source-files` exists and is **not** public.
 
