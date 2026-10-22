@@ -11,7 +11,11 @@ import base64
 import hashlib
 from dataclasses import dataclass, field
 
+import logging
+
 import httpx
+
+log = logging.getLogger("ollic.openai")
 
 SIZES = {"landscape": "1536x1024", "portrait": "1024x1536", "square": "1024x1024"}
 
@@ -90,6 +94,8 @@ def _error_from(res: httpx.Response) -> ProviderError:
         err = res.json().get("error") or {}
     except ValueError:
         err = {}
+    # OpenAI's error text names limits and models, never the key; keep it in the logs for the owner.
+    log.warning("OpenAI %s error %s: %s", res.status_code, err.get("code") or err.get("type"), str(err.get("message"))[:500])
     code = err.get("code") or err.get("type") or ""
     status = res.status_code
     if code == "moderation_blocked" or "safety" in str(err.get("message", "")).lower():
@@ -101,7 +107,8 @@ def _error_from(res: httpx.Response) -> ProviderError:
     elif status == 429 and code == "insufficient_quota":
         msg = "The OpenAI account has run out of credit. The owner needs to add credit at platform.openai.com."
     elif status == 429:
-        msg = "The image model is busy (rate limit). Wait a minute and try again."
+        detail = str(err.get("message") or "")[:240]
+        msg = "The image model refused for now (rate limit). Wait a minute and try again." + (f" OpenAI said: {detail}" if detail else "")
     elif status == 404 or code == "model_not_found":
         msg = "The configured image model is not available to this OpenAI account."
     elif status >= 500:

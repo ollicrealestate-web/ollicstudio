@@ -44,7 +44,7 @@ def test_edit_sends_images_as_data_urls():
     (401, {"code": "invalid_api_key", "message": "bad key"}, "OPENAI_API_KEY"),
     (403, {"message": "Your organization must be verified"}, "permissions or the organisation"),
     (429, {"code": "insufficient_quota", "message": "quota"}, "run out of credit"),
-    (429, {"code": "rate_limit_exceeded", "message": "slow down"}, "rate limit"),
+    (429, {"code": "rate_limit_exceeded", "message": "slow down"}, "OpenAI said: slow down"),
     (404, {"code": "model_not_found", "message": "nope"}, "not available"),
     (500, {"message": "oops"}, "on its side"),
 ])
