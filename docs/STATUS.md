@@ -3,7 +3,14 @@
 Last updated: 22 October 2026, session 2.
 
 - **Phase 1: Foundation: complete.** Live at https://ollicstudio.onrender.com (Render, Frankfurt; Supabase project zusfpymdqfmwgfaejaer).
-- **Phase 2: Concept rendering: built and tested; awaiting configuration and a live check.** The second migration has to be run in Supabase, then one real render and one revision need to be made with the live OpenAI key (see "Next session").
+- **Phase 2: Concept rendering: complete for Standard render** (verified live on 22 Oct 2026, see below). **Premium render** (OpenAI) is wired, locked to paid plans, and waits only for credit on the OpenAI account.
+
+### Live check, 22 Oct 2026 (Standard render, Cloudflare FLUX.2 [klein] 4B), test account B on the free plan
+- Concept from a description: succeeded in 29 s, 1536 x 1024. From a line sketch: succeeded in 13 s, and kept the sketch's roof, two windows and centred door. Revision ("light terracotta walls, warm lights in the windows"): succeeded in 10 s, building unchanged otherwise.
+- Every image carries the stamped label; downloads return `attachment; filename=ollic-concept-…-AI-concept-not-to-scale.jpg`.
+- A 4th render that day was refused with the daily-limit message. Premium for a free-plan user was refused with `premium_only`.
+- `/api/usage`: 3 calls, all with costs recorded (estimate at list price, $0.005275 total; actual charge $0 inside the free allowance).
+- The first Premium (OpenAI) attempt was refused by OpenAI: "You have no credits remaining". The app reported that correctly and recorded no cost.
 
 ## Features
 
@@ -59,6 +66,6 @@ Brief acceptance tests covered: **1, 2, 5, 14, 22** live. **3, 13 (as far as one
 
 ## Next session should do first
 
-1. Migration 2 was run on 22 Oct 2026. **Owner:** run migrations 3 and 4 (`20261022000003_cloudflare_and_daily_limits.sql`, `20261022000004_premium_plan.sql`), and add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in Render; `/health` should then show `"standard": true`. The first live OpenAI attempt on 22 Oct 2026 was refused because the OpenAI account had no credit ("You have no credits remaining"), and the app reported it correctly.
+1. Migrations 2–4 and the Cloudflare settings were applied on 22 Oct 2026 and Standard render was verified live. Remaining: **Owner:** run migrations 3 and 4 (`20261022000003_cloudflare_and_daily_limits.sql`, `20261022000004_premium_plan.sql`), and add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in Render; `/health` should then show `"standard": true`. The first live OpenAI attempt on 22 Oct 2026 was refused because the OpenAI account had no credit ("You have no credits remaining"), and the app reported it correctly.
 2. Make one real render from a description, one from a reference sketch, and one revision on the live site. Check the label, the download and `/api/usage` against the OpenAI usage page. Record the results here and mark Phase 2 complete.
 3. Then **Phase 3: IFC import** (IfcOpenShell processing, validation report, glTF output, GlobalIds kept).
