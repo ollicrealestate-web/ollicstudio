@@ -370,8 +370,8 @@ def _assign_labels(rooms: list[dict], lab: np.ndarray, labels: list[dict], W: in
         if room is None:  # the label point sits on a wall or furniture line: look around it
             best, bd = None, 1e9
             for r in rooms:
-                cx = sum(p[0] for p in r["polygon"]) / len(r["polygon"])
-                cy = sum(p[1] for p in r["polygon"]) / len(r["polygon"])
+                cx = sum(p[0] for p in r["polygon_px"]) / len(r["polygon_px"])
+                cy = sum(p[1] for p in r["polygon_px"]) / len(r["polygon_px"])
                 d = math.hypot(cx - x, cy - y)
                 if d < bd:
                     best, bd = r, d

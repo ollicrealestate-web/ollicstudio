@@ -318,3 +318,13 @@ def test_sheet_border_and_title_block_are_not_walls():
     p = trace(load_plan_image(buf.getvalue(), "png"), [])
     assert len(p["walls"]) == 8 and len(p["rooms"]) == 5
     assert max(max(w["a"][1], w["b"][1]) for w in p["walls"]) < (H - 200) * p["image"]["height"] / H   # nothing from the title block
+
+
+def test_ai_labels_that_land_on_a_wall_or_outside_are_handled():
+    """The vision model's positions are approximate: a label may land on a wall line or off the building."""
+    png, meta = draw_plan(sample_house())
+    labels = labels_for(meta)
+    on_wall = dict(labels[0]); on_wall["y"] = 90 / meta["height"]          # exactly on the top wall
+    stray = {"name": "Garden", "area_m2": 99, "x": 0.01, "y": 0.99}        # off the building
+    p = trace(load_plan_image(png, "png"), [on_wall, stray] + labels[1:])
+    assert len(p["rooms"]) == 5 and "Garden" not in [r["name"] for r in p["rooms"]]
