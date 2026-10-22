@@ -1,4 +1,5 @@
-// 3D viewer for imported and generated building models (Phase 3).
+// 3D viewer for architects' IFC models: orbit outside, inside with the roof off, and a
+// first-person walkthrough room by room. Saved views become render and video shots.
 // Loads the GLB made by the server: one node per element, named by its IFC GlobalId,
 // with { globalId, ifcType, name, storey, family } in its extras.
 import * as THREE from "three";
@@ -25,7 +26,8 @@ export function createViewer(host, { onSelect } = {}) {
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.495;
 
-  scene.add(new THREE.HemisphereLight("#eef3ff", "#6b6256", 1.25));
+  const hemi = new THREE.HemisphereLight("#eef3ff", "#6b6256", 1.25);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight("#fff4e0", 2.4);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1536, 1536);
@@ -42,6 +44,10 @@ export function createViewer(host, { onSelect } = {}) {
   host.append(labels);
 
   let model = null, elements = [], storeys = [], mode = "exterior", storey = null, selected = null, frame = 0, dirty = true;
+  // walkthrough: eye height, look direction and movement
+  const EYE = 1.6, SPEED = 1.4, TURN = 1.6;
+  let yaw = 0, pitch = 0, room = null, last = performance.now();
+  const keys = new Set(), hold = { fwd: 0, turn: 0 };
   const redraw = () => { dirty = true; };
   controls.addEventListener("change", redraw);
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
@@ -106,7 +112,7 @@ export function createViewer(host, { onSelect } = {}) {
   }
 
   function visible(x) {
-    if (mode === "exterior") return x.ifcType !== "IfcSpace";
+    if (mode === "exterior" || mode === "walk") return x.ifcType !== "IfcSpace";
     // interior: the roof comes off, storeys above the chosen one are hidden, rooms are tinted
     if (ROOFISH.has(x.ifcType)) return false;
     if (storey && x.storey) return storeys.indexOf(x.storey) <= storeys.indexOf(storey);
@@ -141,7 +147,90 @@ export function createViewer(host, { onSelect } = {}) {
     }
   }
 
-  renderer.domElement.addEventListener("pointerdown", e => { ptr.down = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener("pointerdown", e => {
+    ptr.down = [e.clientX, e.clientY]; ptr.last = [e.clientX, e.clientY];
+    if (mode === "walk") try { renderer.domElement.setPointerCapture(e.pointerId); } catch { /* not a real pointer */ }
+  });
+  renderer.domElement.addEventListener("pointermove", e => {
+    if (mode !== "walk" || !ptr.last || !e.buttons) return;
+    yaw -= (e.clientX - ptr.last[0]) * 0.004;
+    pitch = Math.max(-1.2, Math.min(1.2, pitch - (e.clientY - ptr.last[1]) * 0.004));
+    ptr.last = [e.clientX, e.clientY];
+    aim();
+  });
+  renderer.domElement.addEventListener("pointerup", () => { ptr.last = null; });
+  renderer.domElement.tabIndex = 0;
+  renderer.domElement.addEventListener("keydown", e => {
+    if (mode !== "walk") return;
+    const k = e.key.toLowerCase();
+    if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) { keys.add(k); e.preventDefault(); }
+  });
+  renderer.domElement.addEventListener("keyup", e => keys.delete(e.key.toLowerCase()));
+  renderer.domElement.addEventListener("blur", () => keys.clear());
+
+  function forward() { return new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); }
+  function aim() { camera.lookAt(camera.position.clone().add(forward())); dirty = true; }
+
+  function rooms() {
+    return elements.filter(e => e.userData.ifcType === "IfcSpace").map(e => {
+      const b = new THREE.Box3().setFromObject(e);
+      return { name: e.userData.name || "Room", storey: e.userData.storey || null, box: b };
+    }).sort((a, b) => (storeys.indexOf(a.storey) - storeys.indexOf(b.storey)) || a.name.localeCompare(b.name));
+  }
+
+  function walkTo(which) {
+    const all = rooms();
+    const r = (typeof which === "number" ? all[which] : all.find(x => x.name === which)) || all[0];
+    if (!r) return false;
+    room = r.name;
+    mode = "walk"; controls.enabled = false; scene.fog = null; hemi.intensity = 2.1;
+    camera.fov = 70; camera.near = 0.05; camera.far = 600; camera.updateProjectionMatrix();
+    const c = r.box.getCenter(new THREE.Vector3()), size = r.box.getSize(new THREE.Vector3());
+    // stand near one end of the room's longer side and look along it, so most of the room is in view
+    const alongX = size.x >= size.z;
+    yaw = alongX ? -Math.PI / 2 : 0;          // facing +x, or facing -z
+    const back = alongX ? new THREE.Vector3(-1, 0, 0) : new THREE.Vector3(0, 0, 1);
+    camera.position.set(c.x, r.box.min.y + EYE, c.z).addScaledVector(back, (alongX ? size.x : size.z) * 0.32);
+    pitch = -0.06;
+    apply(); aim();
+    return true;
+  }
+
+  function goTo(p, roomName = null) {
+    if (p.mode === "walk") {
+      mode = "walk"; room = roomName; controls.enabled = false; scene.fog = null; hemi.intensity = 2.1;
+      camera.fov = p.fov || 70; camera.near = 0.05; camera.far = 600; camera.updateProjectionMatrix();
+      camera.position.fromArray(p.position);
+      const d = new THREE.Vector3().fromArray(p.target).sub(camera.position).normalize();
+      pitch = Math.asin(Math.max(-1, Math.min(1, d.y))); yaw = Math.atan2(-d.x, -d.z);
+      apply(); aim();
+    } else {
+      if (mode === "walk") leaveWalk();
+      camera.fov = p.fov || 45; camera.updateProjectionMatrix();
+      camera.position.fromArray(p.position); controls.target.fromArray(p.target); controls.update(); dirty = true;
+    }
+  }
+
+  function leaveWalk() {
+    mode = "exterior"; room = null; keys.clear(); controls.enabled = true; scene.fog = new THREE.Fog("#c9d3dc", 80, 260); hemi.intensity = 1.25;
+    camera.fov = 45; camera.updateProjectionMatrix(); frameAll(); apply();
+  }
+
+  function stepWalk(dt) {
+    let f = hold.fwd, t = hold.turn, side = 0;
+    if (keys.has("w") || keys.has("arrowup")) f += 1;
+    if (keys.has("s") || keys.has("arrowdown")) f -= 1;
+    if (keys.has("arrowleft")) t += 1;
+    if (keys.has("arrowright")) t -= 1;
+    if (keys.has("a")) side -= 1;
+    if (keys.has("d")) side += 1;
+    if (!f && !t && !side) return;
+    yaw += t * TURN * dt;
+    const flat = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    camera.position.addScaledVector(flat, f * SPEED * dt).addScaledVector(right, side * SPEED * dt);
+    aim();
+  }
   renderer.domElement.addEventListener("pointerup", e => {
     if (!ptr.down || Math.hypot(e.clientX - ptr.down[0], e.clientY - ptr.down[1]) > 6) return;
     const r = renderer.domElement.getBoundingClientRect();
@@ -162,7 +251,8 @@ export function createViewer(host, { onSelect } = {}) {
   // Draw only when something changed (camera moved, mode, selection, resize): saves battery on phones.
   function tick() {
     frame = requestAnimationFrame(tick);
-    controls.update();
+    const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (mode === "walk") stepWalk(dt); else controls.update();
     if (!dirty) return;
     dirty = false;
     if (labels.children.length) placeLabels();
@@ -173,7 +263,18 @@ export function createViewer(host, { onSelect } = {}) {
 
   return {
     load,
-    setMode(m) { mode = m; apply(); },
+    setMode(m) { if (mode === "walk" && m !== "walk") leaveWalk(); mode = m; apply(); },
+    rooms() { return rooms().map((r, i) => ({ index: i, name: r.name, storey: r.storey })); },
+    walkTo,
+    leaveWalk,
+    goTo,
+    get room() { return room; },
+    get mode() { return mode; },
+    hold(fwd, turn) { hold.fwd = fwd; hold.turn = turn; dirty = true; },
+    pose() {
+      const t = mode === "walk" ? camera.position.clone().add(forward()) : controls.target.clone();
+      return { mode: mode === "walk" ? "walk" : "orbit", position: camera.position.toArray().map(v => +v.toFixed(3)), target: t.toArray().map(v => +v.toFixed(3)), fov: camera.fov };
+    },
     setStorey(s) { storey = s || null; apply(); },
     reset() { frameAll(); dirty = true; },
     snapshot() { renderer.render(scene, camera); return renderer.domElement.toDataURL("image/png"); },

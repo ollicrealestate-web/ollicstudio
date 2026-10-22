@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     WEB_DIR=/app/web
 
+# FFmpeg makes the walkthrough videos
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app/backend
 COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt

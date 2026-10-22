@@ -79,6 +79,8 @@ def delete_project(project_id: uuid.UUID, request: Request, user: CurrentUser = 
     _storage(request).remove(user, paths)
     _storage(request).remove(user, render_paths, bucket=settings.renders_bucket)
     _storage(request).remove(user, [p for p in model_paths if p], bucket=settings.models_bucket)
+    video_paths = [v["storage_path"] for v in _repo(request).list_videos(user, str(project_id)) if v.get("owner_id") == user.id]
+    _storage(request).remove(user, video_paths, bucket=settings.videos_bucket)
     if not _repo(request).delete_project(user, str(project_id)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
 

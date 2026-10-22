@@ -65,6 +65,8 @@ def build_prompt(opts: dict, *, with_reference: bool = False, roles: list[str] |
         parts.append(f"The ground floor is a {opts['ground_floor']}.")
     if opts.get("style"):
         parts.append(f"Style: {STYLES.get(opts['style'], opts['style'])}.")
+    if opts.get("shot_name"):
+        parts.append(f"This shot is: {opts['shot_name'].strip()}. Render it as a finished, furnished, lived-in space or view, true to the model.")
     parts.append(f"Architect's brief: {opts['prompt'].strip()}")
     if opts.get("materials"):
         parts.append(f"Materials and colours: {opts['materials'].strip()}.")
@@ -167,7 +169,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             prompt = build_prompt(inp, roles=roles)
             writer_note = _premium_prompt(state, user, job, tier, lambda w: w.write(
                 brief=inp["prompt"], images=images, roles=roles,
-                choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect")}))
+                choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect", "shot_name")}))
             if writer_note:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
             model = settings.model_for(tier, "create")
@@ -220,7 +222,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         options = {"size": size, "quality": quality, "operation": operation, "tier": tier, "final_prompt": prompt[:8000],
                    "prompt_notes": (writer_note or {}).get("notes"), "premium_prompting": bool(writer_note)}
         if job["type"] == "concept_render":
-            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references")})
+            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name")})
         try:
             repo.create_rendered_image(user, {
                 "id": render_id, "project_id": job["project_id"], "job_id": job_id, "kind": "concept", "label": CONCEPT_LABEL,

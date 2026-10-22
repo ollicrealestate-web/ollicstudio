@@ -138,7 +138,8 @@ def _utc_midnight() -> str:
     return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
 
-def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: str, job_input: dict, key: str | None, response: Response, run=None) -> dict:
+def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: str, job_input: dict, key: str | None, response: Response, run=None,
+               max_active: int = MAX_ACTIVE_PER_PROJECT) -> dict:
     repo = _repo(request)
     if key is not None:
         if not KEY_RE.match(key):
@@ -157,7 +158,7 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
             kind = "premium renders" if tier == "premium" else "free renders"
             raise HTTPException(429, {"code": "daily_limit", "reason": f"You have used today's {limit} {kind}. They reset at 01:00 Lagos time (midnight UTC)."})
     active = [j for j in repo.list_jobs(user, project_id) if j.get("status") in ACTIVE and not is_stale(j)]
-    if len(active) >= MAX_ACTIVE_PER_PROJECT:
+    if len(active) >= max_active:
         raise HTTPException(429, {"code": "too_many_active", "reason": f"This project already has {len(active)} renders in progress. Wait for one to finish."})
     job = repo.create_job(user, {"project_id": project_id, "type": job_type, "status": "queued", "stage": "Waiting to start",
                                  "input": job_input, "idempotency_key": key})

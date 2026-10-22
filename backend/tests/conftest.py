@@ -36,6 +36,8 @@ class FakeRepo:
         self.plans: dict[str, str] = {}  # user id -> "premium"; everyone else is on "free"
         self.models: dict[str, dict] = {}
         self.components: list[dict] = []
+        self.shots: dict[str, dict] = {}
+        self.videos: dict[str, dict] = {}
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
@@ -64,7 +66,7 @@ class FakeRepo:
         if not p or p["owner_id"] != user.id:
             return False
         del self.projects[project_id]
-        for table in (self.files, self.jobs, self.images, self.models):  # on delete cascade
+        for table in (self.files, self.jobs, self.images, self.models, self.shots, self.videos):  # on delete cascade
             for k in [k for k, r in table.items() if r["project_id"] == project_id]:
                 del table[k]
         self.components = [c for c in self.components if c["project_id"] != project_id]
@@ -180,12 +182,52 @@ class FakeRepo:
     def list_usage_events(self, user, limit=100):
         return [copy.deepcopy(e) for e in reversed(self.usage) if e["owner_id"] == user.id][:limit]
 
+    # walkthrough shots and videos
+    def create_shot(self, user, record):
+        self._owned_project(user, record["project_id"])
+        row = {"id": str(uuid.uuid4()), "position": 0, **record, "owner_id": user.id, "created_at": self._now()}
+        self.shots[row["id"]] = row
+        return copy.deepcopy(row)
+
+    def get_shot(self, user, shot_id):
+        return self._own("shots", user, shot_id)
+
+    def list_shots(self, user, project_id):
+        rows = [s for s in self.shots.values() if s["project_id"] == project_id and s["owner_id"] == user.id]
+        return [copy.deepcopy(s) for s in sorted(rows, key=lambda s: (s["position"], s["created_at"]))]
+
+    def update_shot(self, user, shot_id, fields):
+        s = self.shots.get(shot_id)
+        if not s or s["owner_id"] != user.id:
+            return None
+        assert set(fields) <= {"name", "position"}, "column grants would reject this update"
+        s.update(fields)
+        return copy.deepcopy(s)
+
+    def delete_shot(self, user, shot_id):
+        s = self.shots.get(shot_id)
+        if not s or s["owner_id"] != user.id:
+            return False
+        del self.shots[shot_id]
+        return True
+
+    def create_video(self, user, record):
+        self._owned_project(user, record["project_id"])
+        assert record["storage_path"].split("/")[:2] == [user.id, record["project_id"]], "path check constraint"
+        row = {"label": "AI concept — not to scale", **record, "owner_id": user.id, "created_at": self._now()}
+        self.videos[row["id"]] = row
+        return copy.deepcopy(row)
+
+    def list_videos(self, user, project_id):
+        rows = [v for v in self.videos.values() if v["project_id"] == project_id and v["owner_id"] == user.id]
+        return [copy.deepcopy(v) for v in sorted(rows, key=lambda v: v["created_at"], reverse=True)]
+
 
 class FakeStorage:
     """Buckets keyed by name; source files live in "source-files" (the default)."""
 
     def __init__(self):
-        self.buckets: dict[str, dict[str, tuple[bytes, str]]] = {"source-files": {}, "renders": {}, "models": {}}
+        self.buckets: dict[str, dict[str, tuple[bytes, str]]] = {"source-files": {}, "renders": {}, "models": {}, "videos": {}}
 
     @property
     def objects(self):

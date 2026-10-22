@@ -6,8 +6,11 @@ import io
 
 from PIL import Image, ImageDraw, ImageFont
 
+from pathlib import Path
+
 CONCEPT_LABEL = "AI concept — not to scale"
-STAMP_TEXT = "AI concept - not to scale"  # the built-in font has no em dash
+STAMP_TEXT = CONCEPT_LABEL
+FONT = Path(__file__).parent / "fonts" / "Outfit.ttf"  # the site's typeface (SIL Open Font Licence)
 
 
 class BadImage(Exception):
@@ -35,9 +38,10 @@ def stamp_label(img: Image.Image, text: str = STAMP_TEXT) -> Image.Image:
     w, h = out.size
     size = max(14, round(min(w, h) * 0.026))
     try:
+        font = ImageFont.truetype(str(FONT), size)
+        font.set_variation_by_name("Medium")
+    except (OSError, ValueError, AttributeError):
         font = ImageFont.load_default(size=size)
-    except TypeError:  # very old Pillow
-        font = ImageFont.load_default()
     draw = ImageDraw.Draw(out, "RGBA")
     pad = round(size * 0.6)
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)

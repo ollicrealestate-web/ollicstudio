@@ -113,15 +113,27 @@
           <div class="seg" role="group" aria-label="View">
             <button type="button" class="seg-btn" id="viewOutside" aria-pressed="true">Outside</button>
             <button type="button" class="seg-btn" id="viewInside" aria-pressed="false">Inside (roof off)</button>
+            <button type="button" class="seg-btn" id="viewWalk" aria-pressed="false">Walk through</button>
           </div>
           <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
           <button type="button" class="btn" id="viewReset">Reset view</button>
           <button type="button" class="btn primary" id="useView">Render this view</button>
+          <button type="button" class="btn" id="saveShot">Save shot</button>
           <span class="spacer"></span>
           <a class="btn" id="dlGlb" download>Download 3D (GLB)</a>
           <a class="btn" id="dlIfc" hidden>Download IFC</a>
         </div>
         <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
+        <div class="walk-panel" id="walkPanel" hidden>
+          <div class="room-list" id="roomList" role="group" aria-label="Rooms"></div>
+          <div class="walk-pad" role="group" aria-label="Move">
+            <button type="button" class="btn" data-hold="0,1" aria-label="Turn left">&#8630;</button>
+            <button type="button" class="btn" data-hold="1,0" aria-label="Walk forward">&#9650;</button>
+            <button type="button" class="btn" data-hold="-1,0" aria-label="Walk back">&#9660;</button>
+            <button type="button" class="btn" data-hold="0,-1" aria-label="Turn right">&#8631;</button>
+          </div>
+          <p class="hint">Pick a room, then drag to look around. Hold the arrows to walk and turn, or on a keyboard use W and S to walk, A and D to step sideways, and the left and right arrows to turn. Frame a view you like and press <b>Save shot</b>.</p>
+        </div>
         <div class="model-info">
           <div class="card" id="elementCard"><h3>Element</h3><p class="muted">Tap any part of the building to see what it is.</p></div>
           <div class="card" id="reportCard"></div>
@@ -181,8 +193,42 @@
       <div class="gallery" id="gallery"></div>
       <div class="empty" id="galleryEmpty" hidden>No concepts yet. Describe the house above and press Create concept.</div>
     </section>
+    <section class="walkthrough" id="walkSection" aria-labelledby="walkTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">Walkthrough</span><h2 id="walkTitle" class="studio-title">Room by room, then a video</h2>
+          <p class="muted">Save shots as you walk through the 3D model, render them all in one go with the same look, then turn the renders into an MP4 walkthrough with slow camera moves, room titles and your project name.</p></div>
+      </div>
+      <div class="empty" id="shotsEmpty">No shots yet. In the 3D model above, press <b>Walk through</b>, pick a room, frame the view and press <b>Save shot</b>. Outside views can be saved too.</div>
+      <ol class="shot-strip" id="shotStrip"></ol>
+      <div class="shot-go" id="shotGo" hidden>
+        <button type="button" class="btn primary" id="renderAllBtn">Render all shots</button>
+        <span class="hint" id="renderAllNote">Renders the ticked shots with the description, style, light and look references set in Concept renders above, so the rooms match. Each shot is one render of your daily allowance.</span>
+      </div>
+      <div class="jobs" id="walkJobs" aria-live="polite"></div>
+      <form class="card video-form" id="videoForm" hidden>
+        <h3>Make the walkthrough video</h3>
+        <p class="muted">Each rendered shot becomes a clip, in the order above. Choose which render to use for each shot and edit the titles.</p>
+        <ol class="video-picks" id="videoPicks"></ol>
+        <div class="video-fields">
+          <label class="field">Format
+            <select id="vFormat"><option value="16:9">Landscape 16:9 (YouTube, presentations)</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1 (feeds)</option></select></label>
+          <label class="field">Seconds per shot
+            <input type="number" id="vSeconds" min="2.5" max="12" step="0.5" value="5"></label>
+          <label class="field">Title <span class="hint">Shown at the start</span>
+            <input type="text" id="vTitle" maxlength="80"></label>
+          <label class="field">Subtitle <span class="hint">Optional, e.g. your firm or the client</span>
+            <input type="text" id="vSubtitle" maxlength="120"></label>
+        </div>
+        <div class="render-go">
+          <button class="btn primary big" type="submit" id="videoBtn">Make video</button>
+          <span class="hint">Takes a few minutes. You can leave this page and come back.</span>
+          <div id="videoMsg" class="notice error" role="status" hidden></div>
+        </div>
+      </form>
+      <div class="video-list" id="videoList"></div>
+    </section>
     <div class="danger-zone">
-      <div><h3>Delete this project</h3><p class="muted">Removes the project, every file and every render in it. This cannot be undone.</p></div>
+      <div><h3>Delete this project</h3><p class="muted">Removes the project, every file, render and video in it. This cannot be undone.</p></div>
       <div class="confirm" id="deleteArea"><button class="btn danger" type="button" id="deleteBtn">Delete project</button></div>
     </div>
   </section>

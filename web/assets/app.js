@@ -83,9 +83,9 @@ async function openProject(id) {
   show("projectView"); $("#uploads").replaceChildren(); resetDelete(); stopPolling();
   $("#gallery").replaceChildren(); $("#jobList").replaceChildren(); message($("#renderMsg"), "");
   $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
-  resetModel(); outputsLoadedOnce = false; seenDone = new Set();
+  resetModel(); resetWalk(); outputsLoadedOnce = false; seenDone = new Set();
   history.replaceState(null, "", `${location.pathname}?project=${encodeURIComponent(id)}`);
-  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); }
+  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadShots(); loadVideos(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
@@ -151,8 +151,9 @@ async function startImport(f, btn) {
 }
 
 /* ---------- 3D models (Phase 3) ---------- */
-let viewer = null, viewerModelId = null;
+let viewer = null, viewerModelId = null, walkRoom = 0;
 function resetModel() {
+  $("#walkPanel").hidden = true; walkRoom = 0;
   $("#viewerWrap").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
   if (viewer) { viewer.dispose(); viewer = null; }
   viewerModelId = null;
@@ -193,12 +194,58 @@ async function loadModels() {
 }
 
 function setViewMode(mode) {
-  viewer?.setMode(mode);
+  if (!viewer) return;
+  if (mode === "walk") {
+    if (!viewer.rooms().length) { toast("This model has no rooms to walk into. In Revit's IFC export settings, include rooms (spaces) and export again."); return; }
+    if (viewer.mode !== "walk") viewer.walkTo(walkRoom);
+    drawRooms();
+    $("#viewer canvas")?.focus({ preventScroll: true });
+  } else viewer.setMode(mode);
   $("#viewOutside").setAttribute("aria-pressed", String(mode === "exterior"));
   $("#viewInside").setAttribute("aria-pressed", String(mode === "interior"));
+  $("#viewWalk").setAttribute("aria-pressed", String(mode === "walk"));
+  $("#walkPanel").hidden = mode !== "walk";
 }
 $("#viewOutside").onclick = () => setViewMode("exterior");
 $("#viewInside").onclick = () => setViewMode("interior");
+$("#viewWalk").onclick = () => setViewMode("walk");
+
+/* walking through the rooms */
+function drawRooms() {
+  const rs = viewer?.rooms() || [], floors = new Set(rs.map(r => r.storey)).size;
+  $("#roomList").replaceChildren(...rs.map(r => el("button", { type: "button", class: "chip room", "aria-pressed": String(r.index === walkRoom),
+    onclick: () => { walkRoom = r.index; viewer.walkTo(r.index); drawRooms(); } }, floors > 1 && r.storey ? `${r.name} · ${r.storey}` : r.name)));
+}
+document.querySelectorAll("[data-hold]").forEach(b => {
+  const [f, t] = b.dataset.hold.split(",").map(Number);
+  const stop = () => viewer?.hold(0, 0);
+  b.addEventListener("pointerdown", e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* not a real pointer */ } viewer?.hold(f, t); });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => b.addEventListener(ev, stop));
+  b.addEventListener("contextmenu", e => e.preventDefault());
+});
+
+async function snapshotFile(name) {
+  const blob = await (await fetch(viewer.snapshot())).blob();
+  return uploadFile(current.id, new File([blob], name, { type: "image/png" }), () => {});
+}
+
+/* "Save shot": a picture of this view plus the camera position, for the walkthrough */
+$("#saveShot").onclick = async () => {
+  if (!viewer) return;
+  const btn = $("#saveShot"); btn.disabled = true;
+  try {
+    const walking = viewer.mode === "walk", room = walking ? viewer.room : null;
+    const base = room || (viewer.mode === "interior" ? "Inside view" : "Outside view");
+    const same = shots.filter(s => s.name === base || s.name.startsWith(base + " ")).length;
+    const name = same ? `${base} ${same + 1}` : base;
+    const saved = await snapshotFile(`Shot - ${name}.png`);
+    await api.saveShot(current.id, { source_file_id: saved.id, name, room, pose: viewer.pose(), model_id: viewerModelId });
+    current = await api.getProject(current.id); renderProject();
+    await loadShots();
+    toast(`Shot “${name}” saved. Find it under Walkthrough.`);
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; }
+};
 $("#viewReset").onclick = () => viewer?.reset();
 $("#storeySelect").onchange = e => { viewer?.setStorey(e.target.value); if (e.target.value) setViewMode("interior"); };
 
@@ -223,9 +270,8 @@ $("#useView").onclick = async () => {
   if (!viewer) return;
   const btn = $("#useView"); btn.disabled = true;
   try {
-    const blob = await (await fetch(viewer.snapshot())).blob();
     const stamp = new Date().toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(/[/:]/g, "-");
-    const saved = await uploadFile(current.id, new File([blob], `3D view ${stamp}.png`, { type: "image/png" }), () => {});
+    const saved = await snapshotFile(`3D view ${stamp}.png`);
     current = await api.getProject(current.id); renderProject();
     $("#rBase").value = saved.id;
     toast("View saved. Describe the materials and press Create concept.");
@@ -235,7 +281,7 @@ $("#useView").onclick = async () => {
 };
 
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", video_export: "Walkthrough video" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
 let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
@@ -249,10 +295,15 @@ async function loadOutputs() {
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
   setupTiers(out);
-  const MODEL_JOBS = ["ifc_import"];
-  drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type)), "#jobList");
+  const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export"];
+  drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type) && !VIDEO_JOBS.includes(j.type)), "#jobList");
   drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
+  drawJobs(out.jobs.filter(j => VIDEO_JOBS.includes(j.type)), "#walkJobs");
   drawGallery(out.images);
+  images = out.images; drawWalk();
+  const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
+  vids.forEach(j => seenDone.add(j.id));
+  if (vids.length && outputsLoadedOnce) { loadVideos(); toast("Your walkthrough video is ready."); }
   const done = out.jobs.filter(j => MODEL_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   done.forEach(j => seenDone.add(j.id));
   if (done.length && outputsLoadedOnce) { loadModels(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
@@ -283,7 +334,7 @@ function drawGallery(images) {
   $("#gallery").replaceChildren(...images.map(i => {
     const o = i.options || {};
     const [w, h] = [i.width || 3, i.height || 2];
-    const tags = [o.view, LIGHT_NAME[o.time_of_day], i.tier === "premium" && o.quality === "high" ? "High detail" : null].filter(Boolean);
+    const tags = [o.shot_name ? `Shot: ${o.shot_name}` : null, o.view, LIGHT_NAME[o.time_of_day], i.tier === "premium" && o.quality === "high" ? "High detail" : null].filter(Boolean);
     const input = el("input", { type: "text", maxlength: "1000", placeholder: "What should change? e.g. make the roof dark grey", "aria-label": "Describe a change" });
     const go = el("button", { class: "btn primary", type: "submit" }, "Revise");
     const parent = i.parent_image_id ? byId[i.parent_image_id] : null;
@@ -323,8 +374,7 @@ function tierChanged() {
 }
 document.querySelectorAll("#tierPick input").forEach(i => i.addEventListener("change", tierChanged));
 
-$("#renderForm").onsubmit = e => {
-  e.preventDefault();
+function briefFromForm() {
   const body = { prompt: $("#rPrompt").value.trim(), view: $("#rView").value, time_of_day: $("#rLight").value, aspect: $("#rAspect").value,
     quality: $("#rQuality").value, materials: $("#rMaterials").value.trim(), landscaping: $("#rLand").value.trim(), tier: chosenTier() };
   const refs = [];
@@ -336,6 +386,13 @@ $("#renderForm").onsubmit = e => {
   body.view = $("#rView").value; body.style = $("#rStyle").value; body.ground_floor = $("#rGround").value;
   const floors = parseInt($("#rStoreys").value, 10);
   if (floors >= 1 && floors <= 60) body.storeys = floors;
+  return body;
+}
+function tickedLooks() { return [...$("#rLooks").querySelectorAll("input:checked")].map(i => i.value); }
+
+$("#renderForm").onsubmit = e => {
+  e.preventDefault();
+  const body = briefFromForm();
   if (body.prompt.length < 3) { message($("#renderMsg"), "Describe what you want to see."); return; }
   const key = newKey();
   busy(e.target, async () => {
@@ -402,6 +459,141 @@ async function doDelete() {
 function handle(err, box) {
   if (err instanceof ApiError && err.status === 401) { session.signOut(); authMode("in"); message($("#authMsg"), "Your session ended. Sign in again."); show("authView"); return; }
   if (box) message(box, err.message); else toast(err.message);
+}
+
+/* ---------- walkthrough: shots, render all shots, video ---------- */
+let shots = [], images = [], videos = [], untickedShots = new Set(), stripKey = "", picksKey = "";
+function resetWalk() {
+  shots = []; images = []; videos = []; untickedShots = new Set(); stripKey = picksKey = "";
+  $("#shotStrip").replaceChildren(); $("#videoPicks").replaceChildren(); $("#videoList").replaceChildren(); $("#walkJobs").replaceChildren();
+  $("#shotsEmpty").hidden = false; $("#shotGo").hidden = true; $("#videoForm").hidden = true; message($("#videoMsg"), "");
+}
+async function loadShots() {
+  if (!current) return;
+  const pid = current.id;
+  try { const s = await api.shots(pid); if (current?.id !== pid) return; shots = s; drawWalk(); }
+  catch (err) { if (err.status === 401) return handle(err); }
+}
+async function loadVideos() {
+  if (!current) return;
+  const pid = current.id;
+  try { const v = await api.videos(pid); if (current?.id !== pid) return; videos = v; drawVideos(); }
+  catch (err) { if (err.status === 401) return handle(err); }
+}
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+function shotRenders(id) { return images.filter(i => (i.options || {}).shot_id === id); }   // newest first
+
+function drawWalk() {
+  $("#shotsEmpty").hidden = shots.length > 0;
+  $("#shotGo").hidden = shots.length === 0;
+  const key = JSON.stringify(shots.map(s => [s.id, s.name, s.picture_url && s.picture_url.split("?")[0], shotRenders(s.id)[0]?.id]));
+  if (key !== stripKey) { stripKey = key; drawStrip(); }
+  const withRenders = shots.filter(s => shotRenders(s.id).length);
+  $("#videoForm").hidden = withRenders.length === 0;
+  const pkey = JSON.stringify(withRenders.map(s => [s.id, shotRenders(s.id).map(i => i.id)]));
+  if (pkey !== picksKey) { picksKey = pkey; drawPicks(withRenders); }
+  if (!$("#vTitle").value && current) $("#vTitle").placeholder = current.name;
+}
+
+function drawStrip() {
+  $("#shotStrip").replaceChildren(...shots.map((s, i) => {
+    const latest = shotRenders(s.id)[0];
+    const name = el("input", { type: "text", value: s.name, maxlength: "80", "aria-label": "Shot name" });
+    name.addEventListener("change", async () => {
+      const v = name.value.trim(); if (!v) { name.value = s.name; return; }
+      try { const r = await api.editShot(s.id, { name: v }); s.name = r.name; name.value = r.name; drawWalk(); } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+    });
+    const tick = el("input", { type: "checkbox", "aria-label": `Render ${s.name}`, ...(untickedShots.has(s.id) ? {} : { checked: "" }) });
+    tick.onchange = () => { if (tick.checked) untickedShots.delete(s.id); else untickedShots.add(s.id); };
+    const src = latest?.url || s.picture_url;
+    return el("li", { class: "shot-card" },
+      el("div", { class: "thumb" }, src ? el("img", { src, alt: latest ? `Render of ${s.name}` : `3D view of ${s.name}`, loading: "lazy" }) : "",
+        el("span", { class: "badge" }, latest ? "Rendered" : "3D view")),
+      el("div", { class: "shot-body" },
+        el("label", { class: "tick" }, tick, el("span", { class: "num" }, String(i + 1))), name,
+        el("div", { class: "shot-tools" },
+          el("button", { class: "btn", type: "button", title: "Show this view in the 3D model", onclick: () => goToShot(s) }, "View"),
+          el("button", { class: "btn", type: "button", "aria-label": `Move ${s.name} earlier`, ...(i === 0 ? { disabled: "" } : {}), onclick: () => moveShot(i, -1) }, "↑"),
+          el("button", { class: "btn", type: "button", "aria-label": `Move ${s.name} later`, ...(i === shots.length - 1 ? { disabled: "" } : {}), onclick: () => moveShot(i, 1) }, "↓"),
+          el("button", { class: "btn danger", type: "button", "aria-label": `Delete ${s.name}`, onclick: () => removeShot(s) }, "Delete"))));
+  }));
+}
+
+function goToShot(s) {
+  if (!viewer) { toast("Open the 3D model to see this view."); return; }
+  viewer.goTo(s.pose, s.room);
+  setViewMode(s.pose.mode === "walk" ? "walk" : "exterior");
+  $("#viewer").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
+}
+async function moveShot(i, d) {
+  const order = shots.slice(); [order[i], order[i + d]] = [order[i + d], order[i]];
+  try {
+    await Promise.all(order.map((s, k) => s.position !== k ? api.editShot(s.id, { position: k }) : null));
+    await loadShots();
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+}
+async function removeShot(s) {
+  try { await api.deleteShot(s.id); untickedShots.delete(s.id); toast(`Shot “${s.name}” deleted. Its renders stay in the gallery.`); await loadShots(); }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+}
+
+$("#renderAllBtn").onclick = async () => {
+  const ids = shots.filter(s => !untickedShots.has(s.id)).map(s => s.id);
+  if (!ids.length) { toast("Tick at least one shot to render."); return; }
+  if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
+  const brief = briefFromForm();
+  delete brief.references;
+  if (brief.prompt.length < 3) {
+    message($("#renderMsg"), "Describe the look you want here first (materials, finishes, furniture style), then press Render all shots again.");
+    $("#rPrompt").focus(); $("#studio").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" }); return;
+  }
+  const btn = $("#renderAllBtn"); btn.disabled = true;
+  try {
+    const r = await api.renderShots(current.id, { shot_ids: ids, brief, look_file_ids: tickedLooks() });
+    toast(`Rendering ${r.jobs.length} shot${r.jobs.length === 1 ? "" : "s"}. Each takes about a minute.`);
+    loadOutputs();
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; }
+};
+
+function drawPicks(withRenders) {
+  $("#videoPicks").replaceChildren(...withRenders.map(s => {
+    const rs = shotRenders(s.id);
+    const use = el("input", { type: "checkbox", checked: "", "aria-label": `Use ${s.name} in the video` });
+    const pick = el("select", { "aria-label": `Render to use for ${s.name}` }, ...rs.map((r, k) => el("option", { value: r.id }, `${k === 0 ? "Newest" : `Earlier ${k}`} · ${r.tier_name || "Render"} · ${fmtDate(r.created_at)}`)));
+    const cap = el("input", { type: "text", value: s.name, maxlength: "80", "aria-label": `Title for ${s.name}` });
+    const thumb = el("img", { src: rs[0].url || "", alt: "", loading: "lazy" });
+    pick.onchange = () => { thumb.src = rs.find(r => r.id === pick.value)?.url || ""; };
+    return el("li", { class: "pick", "data-shot": s.id }, use, thumb, el("div", { class: "pick-body" }, cap, pick));
+  }));
+}
+
+$("#videoForm").onsubmit = e => {
+  e.preventDefault();
+  const rows = [...$("#videoPicks").querySelectorAll("li.pick")].filter(li => li.querySelector("input[type=checkbox]").checked);
+  if (!rows.length) { message($("#videoMsg"), "Tick at least one rendered shot."); return; }
+  const body = { render_ids: rows.map(li => li.querySelector("select").value), captions: rows.map(li => li.querySelector("input[type=text]").value.trim()),
+    format: $("#vFormat").value, seconds: Math.max(2.5, Math.min(12, parseFloat($("#vSeconds").value) || 5)),
+    title: $("#vTitle").value.trim(), subtitle: $("#vSubtitle").value.trim() };
+  busy(e.target, async () => {
+    message($("#videoMsg"), "");
+    try { await api.makeVideo(current.id, body); toast("Making your video. This takes a few minutes."); loadOutputs(); }
+    catch (err) { if (err.status === 401) return handle(err); message($("#videoMsg"), err.message); }
+  });
+};
+
+function drawVideos() {
+  $("#videoList").replaceChildren(...videos.map(v => {
+    const ratio = `${v.width}/${v.height}`;
+    return el("article", { class: "video-card" },
+      el("div", { class: "frame", style: `aspect-ratio:${ratio}` },
+        v.url ? el("video", { src: v.url, controls: "", preload: "metadata", playsinline: "", "aria-label": `Walkthrough video: ${v.title || "untitled"}` }) : el("span", { class: "muted" }, "Video link unavailable")),
+      el("div", { class: "body" },
+        el("h3", {}, v.title || "Walkthrough"),
+        el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
+        el("p", { class: "hint" }, fmtDate(v.created_at)),
+        el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "")));
+  }));
 }
 
 /* ---------- start ---------- */

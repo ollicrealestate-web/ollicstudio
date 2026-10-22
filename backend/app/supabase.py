@@ -37,6 +37,14 @@ class Repository(Protocol):
     def list_jobs(self, user: CurrentUser, project_id: str, limit: int = 20) -> list[dict]: ...
     def count_jobs_since(self, user: CurrentUser, since_iso: str, statuses: tuple[str, ...], tier: str) -> int: ...
     def get_profile(self, user: CurrentUser) -> dict | None: ...
+    # walkthrough shots and videos
+    def create_shot(self, user: CurrentUser, record: dict) -> dict: ...
+    def get_shot(self, user: CurrentUser, shot_id: str) -> dict | None: ...
+    def list_shots(self, user: CurrentUser, project_id: str) -> list[dict]: ...
+    def update_shot(self, user: CurrentUser, shot_id: str, fields: dict) -> dict | None: ...
+    def delete_shot(self, user: CurrentUser, shot_id: str) -> bool: ...
+    def create_video(self, user: CurrentUser, record: dict) -> dict: ...
+    def list_videos(self, user: CurrentUser, project_id: str) -> list[dict]: ...
     # Phase 3
     def create_model(self, user: CurrentUser, record: dict) -> dict: ...
     def get_model(self, user: CurrentUser, model_id: str) -> dict | None: ...
@@ -159,6 +167,30 @@ class SupabaseRepository:
 
     def list_components(self, user, model_id, limit=5000):
         return self._call("GET", "/building_components", user, params={"select": "*", "model_id": _eq(model_id), "owner_id": _eq(user.id), "limit": str(limit)})
+
+    # ------------------------------------------------------------ walkthrough shots and videos
+    def create_shot(self, user, record):
+        return self._insert("camera_shots", user, record)
+
+    def get_shot(self, user, shot_id):
+        return self._one("camera_shots", user, shot_id)
+
+    def list_shots(self, user, project_id):
+        return self._call("GET", "/camera_shots", user, params={"select": "*", "project_id": _eq(project_id), "owner_id": _eq(user.id), "order": "position.asc,created_at.asc"})
+
+    def update_shot(self, user, shot_id, fields):
+        rows = self._call("PATCH", "/camera_shots", user, params={"id": _eq(shot_id), "owner_id": _eq(user.id)}, json=fields, prefer="return=representation")
+        return rows[0] if rows else None
+
+    def delete_shot(self, user, shot_id):
+        rows = self._call("DELETE", "/camera_shots", user, params={"id": _eq(shot_id), "owner_id": _eq(user.id)}, prefer="return=representation")
+        return bool(rows)
+
+    def create_video(self, user, record):
+        return self._insert("final_videos", user, record)
+
+    def list_videos(self, user, project_id):
+        return self._call("GET", "/final_videos", user, params={"select": "*", "project_id": _eq(project_id), "owner_id": _eq(user.id), "order": "created_at.desc"})
 
     def get_profile(self, user):
         rows = self._call("GET", "/profiles", user, params={"select": "id,plan,role", "id": _eq(user.id)})

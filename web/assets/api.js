@@ -42,6 +42,14 @@ export const api = {
   readPlan: (projectId, fileId) => request("POST", `/projects/${projectId}/plan/read`, { source_file_id: fileId }),
   models: projectId => request("GET", `/projects/${projectId}/models`),
   fileLink: (projectId, fileId) => request("GET", `/projects/${projectId}/files/${fileId}/link`),
+  // Walkthrough: saved shots, render all shots, MP4 videos
+  shots: projectId => request("GET", `/projects/${projectId}/shots`),
+  saveShot: (projectId, body) => request("POST", `/projects/${projectId}/shots`, body),
+  editShot: (shotId, fields) => request("PATCH", `/shots/${shotId}`, fields),
+  deleteShot: shotId => request("DELETE", `/shots/${shotId}`),
+  renderShots: (projectId, body) => request("POST", `/projects/${projectId}/shots/render`, body),
+  makeVideo: (projectId, body) => request("POST", `/projects/${projectId}/videos`, body),
+  videos: projectId => request("GET", `/projects/${projectId}/videos`),
 };
 
 export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);

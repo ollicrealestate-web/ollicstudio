@@ -18,7 +18,7 @@ from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import models, projects, renders
+from .routes import models, projects, renders, walkthrough
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
@@ -69,6 +69,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.include_router(projects.router, prefix="/api")
     app.include_router(renders.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
+    app.include_router(walkthrough.router, prefix="/api")
 
     # The website's public settings come from the server's environment, so keys are
     # entered once (e.g. in Railway's variables). Only public values are sent: the
