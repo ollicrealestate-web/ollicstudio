@@ -16,7 +16,8 @@ from .config import Settings
 from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
-from .bim.vision import CloudflareVision
+from .prompt_writer import ClaudePromptWriter
+from .vision import CloudflareVision
 from .routes import models, projects, renders
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
@@ -24,7 +25,7 @@ log = logging.getLogger("ollic")
 
 
 def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None,
-               runner=None, vision="auto") -> FastAPI:
+               runner=None, vision="auto", prompt_writer="auto") -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
@@ -43,6 +44,10 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     if vision == "auto":
         vision = CloudflareVision(settings.cloudflare_account_id, settings.cloudflare_api_token) if settings.standard_available else None
     app.state.vision = vision
+    # Premium prompting (Claude); None means Premium uses the standard written prompt
+    if prompt_writer == "auto":
+        prompt_writer = ClaudePromptWriter(settings.anthropic_api_key, settings.premium_prompt_model) if settings.anthropic_api_key else None
+    app.state.prompt_writer = prompt_writer
 
     if settings.web_origins:
         app.add_middleware(

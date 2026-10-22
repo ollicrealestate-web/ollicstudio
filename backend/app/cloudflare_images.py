@@ -104,14 +104,15 @@ def _error_from(status: int, payload: dict) -> ProviderError:
         msg = "Today's free render allowance is used up. It resets at 01:00 Lagos time (midnight UTC)."
         return ProviderError(msg, status=status, code="daily_allowance_used")
     if status in (401, 403) or code in (10000, 10001):
-        return ProviderError("The server's Cloudflare token was refused. The owner needs to check CLOUDFLARE_API_TOKEN (Workers AI permission) and CLOUDFLARE_ACCOUNT_ID.", status=status, code="auth")
+        log.error("OWNER: the Cloudflare token was refused; check CLOUDFLARE_API_TOKEN (Workers AI) and CLOUDFLARE_ACCOUNT_ID")
+        return ProviderError("Standard render is unavailable right now. Please try again later.", status=status, code="auth")
     if status == 429:
         return ProviderError("The image model is busy. Wait a minute and try again.", status=status, code="rate_limit")
     if "nsfw" in low or "safety" in low or "flagged" in low:
         return ProviderError("The image model declined this request under its content rules. Reword the description and try again.", status=status, code="moderation_blocked")
     if status >= 500:
         return ProviderError("The image model had a problem on its side. Try again in a moment.", status=status, code="server_error")
-    return ProviderError("The image model rejected the request: " + (text or f"HTTP {status}")[:300], status=status, code=str(code) if code else None)
+    return ProviderError("The request could not be rendered. Try rewording the description or using different reference images.", status=status, code=str(code) if code else None)
 
 
 def cost_usd_estimate(usage: dict | None) -> float | None:

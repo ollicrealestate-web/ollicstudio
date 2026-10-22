@@ -68,7 +68,7 @@ def test_reference_images_are_shrunk_below_512_and_sent_as_input_image_0():
 
 @pytest.mark.parametrize("status,body,code,words", [
     (429, {"success": False, "errors": [{"code": 4006, "message": "you have used up your daily free allocation of 10,000 neurons, please upgrade"}]}, "daily_allowance_used", "resets at 01:00"),
-    (403, {"success": False, "errors": [{"code": 10000, "message": "Authentication error"}]}, "auth", "CLOUDFLARE_API_TOKEN"),
+    (403, {"success": False, "errors": [{"code": 10000, "message": "Authentication error"}]}, "auth", "Standard render is unavailable"),
     (400, {"success": False, "errors": [{"code": 3030, "message": "Input flagged as NSFW"}]}, "moderation_blocked", "content rules"),
     (500, {"success": False, "errors": [{"code": 3043, "message": "internal"}]}, "server_error", "on its side"),
 ])
@@ -84,7 +84,7 @@ def test_both_tiers_are_offered_side_by_side():
     both = Settings(**base, openai_api_key="sk", cloudflare_account_id="a", cloudflare_api_token="t")
     assert both.standard_available and both.premium_available
     assert both.model_for("standard", "create") == MODEL == both.model_for("standard", "revise")
-    assert both.model_for("premium", "create") == "gpt-image-2.5-flare" and both.model_for("premium", "revise") == "gpt-image-2.5-sunburst"
+    assert both.model_for("premium", "create") == "gpt-image-2.5-sunburst" == both.model_for("premium", "revise")
     assert Settings(**base, openai_api_key="sk").standard_available is False
     assert Settings(**base).renders_enabled is False
     assert Settings(**base).daily_limit_for("standard") == 3 and Settings(**base).daily_limit_for("premium") == 20
@@ -165,7 +165,7 @@ def test_paid_customers_choose_premium_and_revisions_stay_premium(both_app, alic
     repo.plans[alice["id"]] = "premium"
     pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
     assert go(c, alice, pid, tier="premium", quality="high").status_code == 202
-    assert prem.calls[0]["model"] == "gpt-image-2.5-flare" and std.calls == []
+    assert prem.calls[0]["model"] == "gpt-image-2.5-sunburst" and std.calls == []
     img = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"][0]
     assert img["tier"] == "premium" and img["tier_name"] == "Premium render" and img["label"] == "AI concept — not to scale"
     assert c.post(f"/api/renders/{img['id']}/edit", json={"instruction": "add palms"}, headers=alice["headers"]).status_code == 202

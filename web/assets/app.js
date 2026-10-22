@@ -85,7 +85,7 @@ async function openProject(id) {
   $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
   resetModel(); outputsLoadedOnce = false; seenDone = new Set();
   history.replaceState(null, "", `${location.pathname}?project=${encodeURIComponent(id)}`);
-  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadLayout(); }
+  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
@@ -98,18 +98,49 @@ function renderProject() {
     el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"),
     el("td", {}, el("div", { class: "file-actions" }, ...fileActions(f))))));
   $("#filesWrap").hidden = current.source_files.length === 0;
-  const ref = $("#rRef"), keep = ref.value;
-  ref.replaceChildren(el("option", { value: "" }, "Nothing: a fresh concept"),
-    ...current.source_files.filter(f => f.detected_type === "png" || f.detected_type === "jpeg").map(f => el("option", { value: f.id }, f.original_name)));
-  ref.value = [...ref.options].some(o => o.value === keep) ? keep : "";
+  fillPickers();
 }
+
+/* reference pickers: floor plan, shape to keep, look references */
+function fillPickers() {
+  const imgs = current.source_files.filter(f => f.detected_type === "png" || f.detected_type === "jpeg");
+  const plans = current.source_files.filter(f => ["png", "jpeg", "pdf"].includes(f.detected_type));
+  const keepSel = (sel, first, files) => {
+    const keep = sel.value;
+    sel.replaceChildren(el("option", { value: "" }, first), ...files.map(f => el("option", { value: f.id }, f.original_name)));
+    sel.value = [...sel.options].some(o => o.value === keep) ? keep : "";
+  };
+  keepSel($("#rPlan"), "No plan", plans);
+  keepSel($("#rBase"), "Nothing", imgs);
+  const box = $("#rLooks"), ticked = new Set([...box.querySelectorAll("input:checked")].map(i => i.value));
+  box.replaceChildren(...(imgs.length ? imgs.map(f => el("label", { class: "look" },
+    el("input", { type: "checkbox", value: f.id, ...(ticked.has(f.id) ? { checked: "" } : {}), onchange: limitLooks }), el("span", {}, f.original_name)))
+    : [el("span", { class: "hint" }, "Upload photos of facades you like and they appear here.")]));
+  $("#readPlanBtn").disabled = !$("#rPlan").value;
+}
+function limitLooks(e) {
+  const on = [...$("#rLooks").querySelectorAll("input:checked")];
+  if (on.length > 3) { e.target.checked = false; toast("Use up to three look references."); }
+}
+$("#rPlan").onchange = () => { $("#readPlanBtn").disabled = !$("#rPlan").value; $("#planNote").textContent = ""; };
+$("#readPlanBtn").onclick = async () => {
+  const btn = $("#readPlanBtn"), id = $("#rPlan").value;
+  if (!id) return;
+  btn.disabled = true; btn.textContent = "Reading…";
+  try {
+    const r = await api.readPlan(current.id, id);
+    const box = $("#rPrompt");
+    box.value = box.value.trim() ? `${box.value.trim()}\n\n${r.summary}` : r.summary;
+    if (r.reading.storeys && !$("#rStoreys").value) $("#rStoreys").value = r.reading.storeys;
+    $("#planNote").textContent = `Read by AI from “${r.reading.drawing_title || "your plan"}”. Check and edit it before you render.`;
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; btn.textContent = "Read my plan"; }
+};
 $("#backBtn").onclick = () => { stopPolling(); listProjects(); };
 
 function fileActions(f) {
   if (f.detected_type === "ifc" && f.origin !== "generated")
     return [el("button", { class: "btn", type: "button", onclick: e => startImport(f, e.currentTarget) }, "Import 3D")];
-  if (["png", "jpeg", "pdf"].includes(f.detected_type))
-    return [el("button", { class: "btn", type: "button", onclick: e => startTrace(f, e.currentTarget) }, "Make 3D model")];
   return [];
 }
 async function startImport(f, btn) {
@@ -118,20 +149,13 @@ async function startImport(f, btn) {
   catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
   finally { if (btn) btn.disabled = false; }
 }
-async function startTrace(f, btn) {
-  if (btn) btn.disabled = true;
-  try { await api.tracePlan(current.id, f.id, newKey()); toast("Reading the floor plan: walls, doors, windows and rooms."); loadOutputs(); $("#modelSection").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); }
-  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { if (btn) btn.disabled = false; }
-}
 
-/* ---------- 3D models and plan review (Phases 3 and 3b) ---------- */
-let viewer = null, viewerModelId = null, editor = null;
+/* ---------- 3D models (Phase 3) ---------- */
+let viewer = null, viewerModelId = null;
 function resetModel() {
-  $("#viewerWrap").hidden = true; $("#planReview").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
-  $("#planEditor").replaceChildren(); message($("#planMsg"), "");
+  $("#viewerWrap").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
   if (viewer) { viewer.dispose(); viewer = null; }
-  viewerModelId = null; editor = null;
+  viewerModelId = null;
   $("#viewer").replaceChildren(el("div", { class: "viewer-msg", id: "viewerMsg" }, "Loading the 3D model…"));
 }
 
@@ -143,7 +167,7 @@ async function loadModels() {
   if (current?.id !== pid) return;
   const m = models[0];
   $("#viewerWrap").hidden = !m;
-  $("#modelEmpty").hidden = !!m || !$("#planReview").hidden;
+  $("#modelEmpty").hidden = !!m;
   if (!m || m.id === viewerModelId) return;
   viewerModelId = m.id;
   drawReport(m);
@@ -190,42 +214,28 @@ function showElement(x) {
 function drawReport(m) {
   const r = m.report || {};
   const verdict = { pass: "Model checked: ready to use", warn: "Model checked: usable, with notes", fail: "Model has problems" }[r.status] || "Model report";
-  const fromPlan = m.layout_draft_id ? el("p", { class: "hint" }, "Built by Ollic from your confirmed floor plan.") : "";
-  $("#reportCard").replaceChildren(el("h3", {}, verdict), fromPlan,
+  $("#reportCard").replaceChildren(el("h3", {}, verdict),
     el("ul", { class: "checks" }, ...(r.checks || []).map(c => el("li", { class: c.status }, c.message))));
 }
 
-async function loadLayout() {
-  if (!current) return;
-  const pid = current.id;
-  let res;
-  try { res = await api.layout(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
-  if (current?.id !== pid) return;
-  const d = res.draft;
-  const open = d && d.status === "proposed";
-  $("#planReview").hidden = !open;
-  if (open && editor?.draftId !== d.id) {
-    editor = { draftId: d.id };  // claim it first, so a second refresh does not build the editor twice
-    const { createPlanEditor } = await import("./plan_editor.js");
-    if (editor?.draftId !== d.id || current?.id !== pid) return;
-    Object.assign(editor, createPlanEditor($("#planEditor"), d, { projectName: current.name, onConfirm: body => confirmPlan(pid, body) }));
-  }
-  if (!open) $("#modelEmpty").hidden = !$("#viewerWrap").hidden;
-}
-
-async function confirmPlan(pid, body) {
-  message($("#planMsg"), "");
+/* "Render this view": a picture of the 3D model becomes the shape the render keeps */
+$("#useView").onclick = async () => {
+  if (!viewer) return;
+  const btn = $("#useView"); btn.disabled = true;
   try {
-    const job = await api.confirmLayout(pid, body, newKey());
-    (job.notes || []).forEach(n => toast(n));
-    toast("Building the 3D model from your plan…");
-    $("#planReview").hidden = true; editor = null;
-    loadOutputs();
-  } catch (err) { if (err.status === 401) return handle(err); message($("#planMsg"), err.message); }
-}
+    const blob = await (await fetch(viewer.snapshot())).blob();
+    const stamp = new Date().toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(/[/:]/g, "-");
+    const saved = await uploadFile(current.id, new File([blob], `3D view ${stamp}.png`, { type: "image/png" }), () => {});
+    current = await api.getProject(current.id); renderProject();
+    $("#rBase").value = saved.id;
+    toast("View saved. Describe the materials and press Create concept.");
+    $("#studio").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; }
+};
 
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", plan_trace: "Reading floor plan", model_build: "Building 3D model" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
 let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
@@ -239,13 +249,13 @@ async function loadOutputs() {
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
   setupTiers(out);
-  const MODEL_JOBS = ["ifc_import", "plan_trace", "model_build"];
+  const MODEL_JOBS = ["ifc_import"];
   drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type)), "#jobList");
   drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
   drawGallery(out.images);
   const done = out.jobs.filter(j => MODEL_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   done.forEach(j => seenDone.add(j.id));
-  if (done.length && outputsLoadedOnce) { loadModels(); loadLayout(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
+  if (done.length && outputsLoadedOnce) { loadModels(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
   outputsLoadedOnce = true;
   stopPolling();
   if (out.jobs.some(j => j.status === "queued" || j.status === "running")) pollTimer = setTimeout(loadOutputs, 3000);
@@ -300,7 +310,7 @@ function setupTiers(out) {
   $("#premiumTier").hidden = !prem.available;
   $("#premiumTier").classList.add("premium-tag");
   premInput.disabled = !prem.allowed;
-  $("#premNote").textContent = prem.allowed ? `Sharper detail, follows your brief more closely · ${prem.daily_limit ? `${prem.daily_limit} a day` : "no daily limit"}` : "Paid plans only. Upgrade to unlock.";
+  $("#premNote").textContent = prem.allowed ? `Our best image quality, with expert prompting that studies your plan, sketches and references · ${prem.daily_limit ? `${prem.daily_limit} a day` : "no daily limit"}` : "Paid plans only. Upgrade to unlock.";
   if (!std.available && prem.allowed) premInput.checked = true;
   if (premInput.checked && premInput.disabled) stdInput.checked = true;
   tierChanged();
@@ -317,7 +327,15 @@ $("#renderForm").onsubmit = e => {
   e.preventDefault();
   const body = { prompt: $("#rPrompt").value.trim(), view: $("#rView").value, time_of_day: $("#rLight").value, aspect: $("#rAspect").value,
     quality: $("#rQuality").value, materials: $("#rMaterials").value.trim(), landscaping: $("#rLand").value.trim(), tier: chosenTier() };
-  if ($("#rRef").value) body.reference_file_id = $("#rRef").value;
+  const refs = [];
+  if ($("#rPlan").value) refs.push({ file_id: $("#rPlan").value, role: "plan" });
+  const base = $("#rBase").value;
+  if (base) { const f = current.source_files.find(x => x.id === base); refs.push({ file_id: base, role: /^3D view/i.test(f?.original_name || "") ? "model" : "base" }); }
+  $("#rLooks").querySelectorAll("input:checked").forEach(i => { if (i.value !== base && i.value !== $("#rPlan").value) refs.push({ file_id: i.value, role: "style" }); });
+  body.references = refs;
+  body.view = $("#rView").value; body.style = $("#rStyle").value; body.ground_floor = $("#rGround").value;
+  const floors = parseInt($("#rStoreys").value, 10);
+  if (floors >= 1 && floors <= 60) body.storeys = floors;
   if (body.prompt.length < 3) { message($("#renderMsg"), "Describe what you want to see."); return; }
   const key = newKey();
   busy(e.target, async () => {

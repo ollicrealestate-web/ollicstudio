@@ -74,7 +74,6 @@ def delete_project(project_id: uuid.UUID, request: Request, user: CurrentUser = 
     renders = [r for r in _repo(request).list_rendered_images(user, str(project_id)) if r.get("owner_id") == user.id]
     render_paths = [p for r in renders for p in (r.get("storage_path"), r.get("base_path")) if p]
     model_paths = [m["glb_path"] for m in _repo(request).list_models(user, str(project_id)) if m.get("owner_id") == user.id]
-    model_paths += [((d.get("proposal") or {}).get("image") or {}).get("path") for d in _repo(request).list_drafts(user, str(project_id)) if d.get("owner_id") == user.id]
     # Files first: if storage fails the project stays, so nothing is left orphaned and unreachable.
     settings = request.app.state.settings
     _storage(request).remove(user, paths)

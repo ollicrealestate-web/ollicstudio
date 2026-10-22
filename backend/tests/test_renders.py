@@ -56,7 +56,7 @@ def test_prompt_only_render_runs_on_the_server_and_is_labelled(rclient, alice, p
     render_id = done["result"]["render_id"]
 
     (call,) = fake_images.calls
-    assert call["kind"] == "generate" and call["model"] == "gpt-image-2.5-flare"
+    assert call["kind"] == "generate" and call["model"] == "gpt-image-2.5-sunburst"
     assert call["size"] == "1024x1536" and call["quality"] == "high" and call["user_id"] == alice["id"]
     assert "golden-hour" in call["prompt"] and "iroko timber" in call["prompt"] and "Do not add any text" in call["prompt"]
 
@@ -80,7 +80,7 @@ def test_render_from_a_reference_image_sends_that_image_as_the_base(rclient, ali
     assert r.status_code == 202
     (call,) = fake_images.calls
     assert call["kind"] == "edit" and call["images"] == [(storage.objects[ref["storage_path"]][0], "image/png")]
-    assert "Use the supplied image as the base design" in call["prompt"]
+    assert "Image 1 is the design to render. Keep the building's form" in call["prompt"]
     img = rclient.get(f"/api/projects/{project['id']}/outputs", headers=alice["headers"]).json()["images"][0]
     assert img["source_file_id"] == ref["id"]
 
@@ -128,8 +128,8 @@ def test_pdf_and_ifc_cannot_be_used_as_a_reference(rclient, alice, project, fake
 
 
 @pytest.mark.parametrize("body", [
-    {"prompt": "  "}, {"prompt": "x" * 2001}, {"prompt": "a house", "view": "underwater"},
-    {"prompt": "a house", "quality": "max"}, {"prompt": "a house", "aspect": "panorama"}, {"prompt": "a house", "materials": "m" * 401},
+    {"prompt": "  "}, {"prompt": "x" * 2501}, {"prompt": "a house", "view": "underwater"},
+    {"prompt": "a house", "quality": "ultra"}, {"prompt": "a house", "aspect": "panorama"}, {"prompt": "a house", "materials": "m" * 401},
 ])
 def test_render_options_are_validated(rclient, alice, project, fake_images, body):
     r = rclient.post(f"/api/projects/{project['id']}/architectural-render", json={"tier": "premium", **body}, headers=alice["headers"])
@@ -225,7 +225,7 @@ def test_too_many_renders_at_once_are_refused(render_settings, repo, storage, fa
 
 
 # ---------------------------------------------------------------- cost recording (test 15)
-def test_every_model_call_records_its_cost_from_the_reported_tokens(rclient, alice, project):
+def test_every_model_call_records_its_cost_from_the_reported_tokens(rclient, alice, project, repo):
     render(rclient, alice, project)
     first = rclient.get(f"/api/projects/{project['id']}/outputs", headers=alice["headers"]).json()["images"][0]
     rclient.post(f"/api/renders/{first['id']}/edit", json={"instruction": "add palm trees"}, headers=alice["headers"])
@@ -236,8 +236,9 @@ def test_every_model_call_records_its_cost_from_the_reported_tokens(rclient, ali
     each = Decimal("0.001250") + Decimal("0.008400") + Decimal("0.124800")
     assert [Decimal(e["cost_usd"]) for e in u["events"]] == [each, each]
     assert Decimal(u["total_cost_usd"]) == 2 * each
-    assert {e["operation"] for e in u["events"]} == {"image_generate", "image_edit"}
-    assert {e["model"] for e in u["events"]} == {"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"}
+    assert {e["service"] for e in u["events"]} == {"Premium render"}
+    assert "model" not in u["events"][0] and "provider" not in u["events"][0]   # the customer view names no AI provider
+    assert {e["operation"] for e in repo.usage} == {"image_generate", "image_edit"} and {e["model"] for e in repo.usage} == {"gpt-image-2.5-sunburst"}
 
 
 def test_missing_usage_or_an_unknown_model_is_recorded_without_a_guessed_cost(rclient, alice, project, fake_images, repo):
@@ -264,7 +265,7 @@ def test_prompts_carry_the_options_and_the_keep_the_design_rules():
     p = build_prompt(opts, with_reference=False)
     assert "Aerial" in p and "night" in p and "brick" in p and "palms" in p and "4-bed duplex" in p
     ref = build_prompt(opts, with_reference=True)
-    assert "positions and sizes of walls, doors and windows" in ref and "Aerial" not in ref
+    assert "positions of walls, doors and windows" in ref and "Aerial" not in ref
     assert "Change only what the instruction below asks for" in build_edit_prompt("paint it red")
 
 

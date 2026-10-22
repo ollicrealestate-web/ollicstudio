@@ -1,5 +1,6 @@
-"""Phases 3 and 3b: IFC builder, IFC import, floor-plan reading, review and model build.
-Brief acceptance tests 4, 8, 9 (the honest MEP note), 14, 16, 17, 22 and 37."""
+"""Phase 3: importing an architect's IFC model for rendering and animation.
+Brief acceptance tests 4, 8 (GlobalIds kept), 9 (the honest MEP note), 14 and 22.
+The sample IFC comes from a small builder that lives only in the tests (tests/fixtures)."""
 
 from __future__ import annotations
 
@@ -14,17 +15,13 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.auth import TokenVerifier
-from app.bim.builder import build_ifc
-from app.bim.confirm import ConfirmIn, to_layout
 from app.bim.importer import ImportFailed, import_ifc
-from app.bim.layout import Layout, sample_house
-from app.bim.plan_trace import TraceFailed, load_plan_image, trace
-from app.bim.vision import parse_answer
 from app.jobs import InlineRunner
+from tests.fixtures.builder import build_ifc
+from tests.fixtures.layout import sample_house
 from app.main import create_app
 
 from . import samples
-from .plan_drawing import draw_plan
 
 
 # ---------------------------------------------------------------- builder and importer
@@ -86,119 +83,10 @@ def test_bad_ifc_files_fail_with_plain_reasons():
     assert "geometry" in e.value.message
 
 
-# ---------------------------------------------------------------- reading floor plans
-def labels_for(meta):
-    return [{"name": l["name"].upper(), "area_m2": l["area_m2"], "x": l["x"], "y": l["y"]} for l in meta["labels"]]
-
-
-def test_plan_reader_finds_every_wall_door_window_and_room():
-    png, meta = draw_plan(sample_house())
-    p = trace(load_plan_image(png, "png"), labels_for(meta))
-    kinds = [o["kind"] for o in p["openings"]]
-    assert len(p["walls"]) == 8 and kinds.count("door") == 5 and kinds.count("window") == 6
-    assert sum(w["exterior"] for w in p["walls"]) == 4
-    assert sorted(r["name"] for r in p["rooms"]) == ["Bath", "Bedroom 1", "Bedroom 2", "Kitchen", "Living"]
-    assert all(r["name_source"] == "ai" and r["area_source"] == "ai" for r in p["rooms"])
-    true = 1 / meta["px_per_m"]
-    assert abs(p["scale"]["m_per_px"] - true) / true < 0.06 and p["scale"]["source"] == "ai"   # brief test 37
-    assert any(f["target"] == "heights" for f in p["flags"])  # defaults are flagged, not passed off as read
-
-
-def test_plan_reader_measures_openings():
-    png, meta = draw_plan(sample_house())
-    p = trace(load_plan_image(png, "png"), labels_for(meta))
-    widths = sorted(round(o["width_px"] / meta["px_per_m"], 1) for o in p["openings"] if o["kind"] == "window")
-    assert widths == [0.6, 1.2, 1.5, 1.5, 1.5, 2.4]
-
-
-def test_without_written_areas_the_scale_is_flagged_never_invented():
-    png, meta = draw_plan(sample_house())
-    p = trace(load_plan_image(png, "png"), [])
-    assert p["scale"]["m_per_px"] is None
-    targets = {f["target"]: f["kind"] for f in p["flags"]}
-    assert targets["scale"] == "missing" and targets["rooms"] == "missing"   # brief test 17
-    assert all(r["name_source"] == "default" for r in p["rooms"])
-
-
-def test_double_line_walls_are_read_too():
-    """Many plans draw walls as two thin parallel lines rather than solid black."""
-    png, meta = draw_plan(sample_house(), clutter=False)
-    img = Image.open(io.BytesIO(png)).convert("L")
-    import numpy as np, cv2
-    a = np.array(img)
-    solid = (a < 128).astype(np.uint8) * 255
-    inner = cv2.erode(solid, np.ones((5, 5), np.uint8))
-    outline = cv2.subtract(solid, inner)  # hollow walls: only their edges remain
-    buf = io.BytesIO(); Image.fromarray(255 - outline).save(buf, "PNG")
-    p = trace(load_plan_image(buf.getvalue(), "png"), labels_for(meta))
-    assert len(p["walls"]) >= 8 and len(p["rooms"]) == 5
-
-
-def test_unreadable_images_fail_with_a_reason():
-    buf = io.BytesIO(); Image.new("L", (800, 600), 10).save(buf, "PNG")
-    with pytest.raises(TraceFailed) as e:
-        trace(load_plan_image(buf.getvalue(), "png"))
-    assert "dark" in e.value.message
-    buf = io.BytesIO(); Image.new("L", (800, 600), 255).save(buf, "PNG")
-    with pytest.raises(TraceFailed) as e:
-        trace(load_plan_image(buf.getvalue(), "png"))
-    assert "walls" in e.value.message
-
-
-def test_vision_answers_are_parsed_defensively():
-    out = parse_answer('Here you go:\n```json\n{"rooms":[{"name":"LIVING","area_m2":"38.5 m2","x":30,"y":60},{"name":"","x":0.1,"y":0.1},{"name":"Bath","x":"?"}],"overall_width_m":12}\n```')
-    assert out["rooms"] == [{"name": "LIVING", "area_m2": 38.5, "x": 0.3, "y": 0.6}] and out["overall_width_m"] == 12.0
-
-
-# ---------------------------------------------------------------- confirmed plan -> layout (metres)
-def confirm_from(p, scale, **kw):
-    return ConfirmIn(draft_id="d", scale_m_per_px=scale, scale_source="ai", image_height_px=p["image"]["height"],
-                     walls=[{"id": w["id"], "a": w["a"], "b": w["b"], "thickness_m": max(0.1, round(w["thickness_px"] * scale, 3)), "exterior": w["exterior"]} for w in p["walls"]],
-                     openings=[{"id": o["id"], "wall": o["wall"], "kind": o["kind"], "offset_px": o["offset_px"], "width_m": o["width_px"] * scale,
-                                "height_m": o["height"], "sill_m": o["sill"]} for o in p["openings"]],
-                     rooms=[{"id": r["id"], "name": r["name"], "polygon_px": r["polygon_px"], "area_label": r["area_label"]} for r in p["rooms"]], **kw)
-
-
-def test_confirmed_plan_becomes_a_layout_in_metres_and_a_valid_ifc():
-    png, meta = draw_plan(sample_house())
-    p = trace(load_plan_image(png, "png"), labels_for(meta))
-    layout, notes = to_layout(confirm_from(p, 1 / meta["px_per_m"], roof={"type": "gable", "pitch": 30}))
-    xs = [c for w in layout.walls for c in (w.a[0], w.b[0])]
-    ys = [c for w in layout.walls for c in (w.a[1], w.b[1])]
-    assert math.isclose(max(xs) - min(xs), 12.0, abs_tol=0.1) and math.isclose(max(ys) - min(ys), 9.0, abs_tol=0.1)
-    living = next(r for r in layout.rooms if r.name == "Living")
-    assert min(pt[1] for pt in living.polygon) < 1.0   # living is at the bottom of the page = south: y was flipped
-    report = import_ifc(build_ifc(layout, seed="x")).report
-    assert report["status"] == "pass" and report["counts"]["IfcWindow"] == 6 and report["counts"]["IfcDoor"] == 5   # brief test 16
-
-
-def test_two_storeys_and_impossible_layouts():
-    png, meta = draw_plan(sample_house())
-    p = trace(load_plan_image(png, "png"), labels_for(meta))
-    layout, notes = to_layout(confirm_from(p, 1 / meta["px_per_m"], storeys=2))
-    assert len(layout.levels) == 2 and any(w.level == 1 for w in layout.walls) and "first floor" in notes[0].lower()
-    r = import_ifc(build_ifc(layout, seed="x")).report
-    assert r["storeys"] == ["Ground floor", "First floor"] and r["size_m"][2] > 8
-    with pytest.raises(ValueError):
-        Layout(levels=[{"name": "G", "elevation": 0, "height": 3}], walls=[{"id": "a", "level": 0, "a": (0, 0), "b": (0, 0.05), "thickness": 0.2}] * 3)
-
-
-# ---------------------------------------------------------------- API journeys
-class FakeVision:
-    def __init__(self, labels):
-        self.labels, self.calls = labels, 0
-
-    def read_labels(self, img):
-        self.calls += 1
-        return {"rooms": self.labels, "model": "fake-vision", "usage": {"prompt_tokens": 900}}
-
-
 @pytest.fixture
 def bim(settings, repo, storage):
-    png, meta = draw_plan(sample_house())
-    vision = FakeVision(labels_for(meta))
-    app = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=InlineRunner(), vision=vision)
-    return TestClient(app), png, meta, vision
+    app = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=InlineRunner(), vision=None)
+    return (TestClient(app),)
 
 
 def upload(c, user, pid, name, data):
@@ -240,58 +128,6 @@ def test_a_broken_ifc_fails_the_job_with_its_reason(bim, alice):
     assert job["status"] == "failed" and "geometry" in job["error"]
 
 
-def test_floor_plan_to_3d_model_end_to_end(bim, alice, bob, repo, storage):
-    c, png, meta, vision = bim
-    pid = c.post("/api/projects", json={"name": "From a plan"}, headers=alice["headers"]).json()["id"]
-    f = upload(c, alice, pid, "ground-floor.png", png)
-    job = c.post(f"/api/projects/{pid}/plan/trace", json={"source_file_id": f["id"]}, headers=alice["headers"]).json()
-    job = c.get(f"/api/jobs/{job['id']}", headers=alice["headers"]).json()
-    assert job["status"] == "succeeded" and job["result"]["walls"] == 8 and vision.calls == 1
-    lay = c.get(f"/api/projects/{pid}/layout", headers=alice["headers"]).json()["draft"]
-    p = lay["proposal"]
-    assert lay["status"] == "proposed" and lay["image_url"] and p["vision"]["status"] == "ok"
-    assert repo.usage[-1]["operation"] == "vision_read"
-    assert c.get(f"/api/projects/{pid}/layout", headers=bob["headers"]).status_code == 404
-
-    # the customer confirms (here: exactly what was proposed, with the read scale)
-    body = json.loads(confirm_from(p, p["scale"]["m_per_px"]).model_dump_json())
-    body.update(draft_id=lay["id"], name="From a plan")
-    r = c.put(f"/api/projects/{pid}/layout", json=body, headers=alice["headers"])
-    assert r.status_code == 202, r.text
-    build = c.get(f"/api/jobs/{r.json()['id']}", headers=alice["headers"]).json()
-    assert build["status"] == "succeeded" and build["type"] == "model_build", build
-    (m,) = c.get(f"/api/projects/{pid}/models", headers=alice["headers"]).json()
-    assert m["layout_draft_id"] == lay["id"] and m["report"]["counts"]["IfcSpace"] == 5
-    assert repo.drafts[lay["id"]]["status"] == "built"
-    generated = [x for x in repo.files.values() if x.get("origin") == "generated"]
-    assert len(generated) == 1 and generated[0]["detected_type"] == "ifc"   # the IFC is kept and downloadable
-    assert c.put(f"/api/projects/{pid}/layout", json=body, headers=bob["headers"]).status_code == 404
-
-
-def test_confirming_an_impossible_layout_explains_why(bim, alice):
-    c, png, meta, _ = bim
-    pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
-    f = upload(c, alice, pid, "plan.png", png)
-    c.post(f"/api/projects/{pid}/plan/trace", json={"source_file_id": f["id"]}, headers=alice["headers"])
-    lay = c.get(f"/api/projects/{pid}/layout", headers=alice["headers"]).json()["draft"]
-    body = json.loads(confirm_from(lay["proposal"], 1 / meta["px_per_m"]).model_dump_json())
-    body["draft_id"] = lay["id"]
-    body["walls"] = body["walls"][:2]
-    r = c.put(f"/api/projects/{pid}/layout", json=body, headers=alice["headers"])
-    assert r.status_code == 422
-
-
-def test_plan_reading_without_the_vision_model_still_works_and_says_so(settings, repo, storage, alice):
-    c = TestClient(create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=InlineRunner(), vision=None))
-    png, meta = draw_plan(sample_house())
-    pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
-    f = upload(c, alice, pid, "plan.png", png)
-    job = c.post(f"/api/projects/{pid}/plan/trace", json={"source_file_id": f["id"]}, headers=alice["headers"]).json()
-    assert c.get(f"/api/jobs/{job['id']}", headers=alice["headers"]).json()["status"] == "succeeded"
-    p = c.get(f"/api/projects/{pid}/layout", headers=alice["headers"]).json()["draft"]["proposal"]
-    assert p["vision"]["status"] == "off" and p["scale"]["m_per_px"] is None and p["flags"][0]["target"] == "vision"
-
-
 def test_files_have_private_download_links(bim, alice, bob, sample_ifc):
     c = bim[0]
     pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
@@ -299,43 +135,3 @@ def test_files_have_private_download_links(bim, alice, bob, sample_ifc):
     link = c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=alice["headers"]).json()
     assert "/object/sign/source-files/" in link["url"] and link["download_url"].endswith("&download=house.ifc")
     assert c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=bob["headers"]).status_code == 404
-
-
-def test_sheet_border_and_title_block_are_not_walls():
-    """Real drawings sit inside a thick sheet frame with a boxed title block (found on a customer's A103 sheet)."""
-    from PIL import ImageDraw
-    png, meta = draw_plan(sample_house())
-    plan = Image.open(io.BytesIO(png)).convert("L")
-    W, H = plan.width + 120, plan.height + 260
-    sheet = Image.new("L", (W, H), 255)
-    sheet.paste(plan, (60, 40))
-    d = ImageDraw.Draw(sheet)
-    d.rectangle([8, 8, W - 8, H - 8], outline=0, width=9)                      # sheet frame
-    for x0, x1 in ((30, 260), (270, 520), (530, W - 30)):                       # title block boxes
-        d.rectangle([x0, H - 200, x1, H - 30], outline=0, width=7)
-    d.text((300, H - 150), "Typical 1st Floor Plan", fill=0)
-    buf = io.BytesIO(); sheet.save(buf, "PNG")
-    p = trace(load_plan_image(buf.getvalue(), "png"), [])
-    assert len(p["walls"]) == 8 and len(p["rooms"]) == 5
-    assert max(max(w["a"][1], w["b"][1]) for w in p["walls"]) < (H - 200) * p["image"]["height"] / H   # nothing from the title block
-
-
-def test_ai_labels_that_land_on_a_wall_or_outside_are_handled():
-    """The vision model's positions are approximate: a label may land on a wall line or off the building."""
-    png, meta = draw_plan(sample_house())
-    labels = labels_for(meta)
-    on_wall = dict(labels[0]); on_wall["y"] = 90 / meta["height"]          # exactly on the top wall
-    stray = {"name": "Garden", "area_m2": 99, "x": 0.01, "y": 0.99}        # off the building
-    p = trace(load_plan_image(png, "png"), [on_wall, stray] + labels[1:])
-    assert len(p["rooms"]) == 5 and "Garden" not in [r["name"] for r in p["rooms"]]
-
-
-def test_area_labels_matched_to_the_wrong_room_do_not_set_a_silly_scale():
-    """On a real sheet an AI label 'Bedroom 1, 14 m2' landed in a cupboard and implied a building ~270 m wide."""
-    from app.bim.plan_trace import _scale_from_areas
-    cupboard = {"id": "r1", "name": "Bedroom 1", "area_label": 14.0, "area_px": 166}
-    assert _scale_from_areas([cupboard], (920, 470))["m_per_px"] is None
-    # with good matches too, the odd one out is dropped
-    good = [{"id": f"g{i}", "name": "Room", "area_label": a, "area_px": round(a / 0.033 ** 2)} for i, a in enumerate((14, 20, 24, 8))]
-    s = _scale_from_areas(good + [cupboard], (920, 470))
-    assert abs(s["m_per_px"] - 0.033) < 0.001 and s["rejected"] == 1

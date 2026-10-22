@@ -41,12 +41,12 @@ def test_edit_sends_images_as_data_urls():
 
 @pytest.mark.parametrize("status,error,words", [
     (400, {"code": "moderation_blocked", "message": "Your request was rejected by the safety system."}, "content rules"),
-    (401, {"code": "invalid_api_key", "message": "bad key"}, "OPENAI_API_KEY"),
-    (403, {"message": "Your organization must be verified"}, "permissions or the organisation"),
-    (429, {"code": "insufficient_quota", "message": "quota"}, "run out of credit"),
-    (429, {"code": "rate_limit_exceeded", "message": "You have no credits remaining. Add credits to continue."}, "run out of credit"),
-    (429, {"code": "rate_limit_exceeded", "message": "slow down"}, "OpenAI said: slow down"),
-    (404, {"code": "model_not_found", "message": "nope"}, "not available"),
+    (401, {"code": "invalid_api_key", "message": "bad key"}, "Premium render is unavailable"),
+    (403, {"message": "Your organization must be verified"}, "Premium render is unavailable"),
+    (429, {"code": "insufficient_quota", "message": "quota"}, "Premium render is paused"),
+    (429, {"code": "rate_limit_exceeded", "message": "You have no credits remaining. Add credits to continue."}, "Premium render is paused"),
+    (429, {"code": "rate_limit_exceeded", "message": "slow down"}, "Premium render is busy"),
+    (404, {"code": "model_not_found", "message": "nope"}, "Premium render is unavailable"),
     (500, {"message": "oops"}, "on its side"),
 ])
 def test_provider_errors_become_plain_messages(status, error, words):
@@ -54,6 +54,7 @@ def test_provider_errors_become_plain_messages(status, error, words):
     with pytest.raises(ProviderError) as e:
         c.generate(model="m", prompt="p", size="auto", quality="medium", user_id="u")
     assert words in e.value.message and "sk-test" not in e.value.message
+    assert "OpenAI" not in e.value.message and "gpt" not in e.value.message.lower()   # customers never see the provider
 
 
 def test_a_response_without_an_image_is_an_error_not_a_blank_result():

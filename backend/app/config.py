@@ -27,8 +27,11 @@ class Settings:
     # Phase 2: concept renders. Without a key the render endpoints say so plainly.
     openai_api_key: str | None = field(default=None, repr=False)  # server only; never sent to the browser
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_image_model: str = "gpt-image-2.5-flare"      # new concepts from a prompt or a reference
-    openai_edit_model: str = "gpt-image-2.5-sunburst"    # revisions, where keeping the base matters most
+    openai_image_model: str = "gpt-image-2.5-sunburst"   # Premium: the most precise image model, for new concepts
+    openai_edit_model: str = "gpt-image-2.5-sunburst"    # and for revisions
+    # Premium prompting: Claude reads the plan, sketches and references and writes the prompt
+    anthropic_api_key: str | None = field(default=None, repr=False)
+    premium_prompt_model: str = "claude-opus-5-5"
     renders_bucket: str = "renders"
     models_bucket: str = "models"
     # Cloudflare Workers AI: a free allowance every day (10,000 neurons).
@@ -89,7 +92,9 @@ class Settings:
             web_dir=os.environ.get("WEB_DIR", "").strip() or None,
             openai_api_key=os.environ.get("OPENAI_API_KEY", "").strip() or None,
             openai_base_url=(os.environ.get("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1").rstrip("/"),
-            openai_image_model=os.environ.get("OPENAI_IMAGE_MODEL", "").strip() or "gpt-image-2.5-flare",
+            openai_image_model=os.environ.get("OPENAI_IMAGE_MODEL", "").strip() or "gpt-image-2.5-sunburst",
+            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
+            premium_prompt_model=os.environ.get("PREMIUM_PROMPT_MODEL", "").strip() or "claude-opus-5-5",
             openai_edit_model=os.environ.get("OPENAI_EDIT_MODEL", "").strip() or "gpt-image-2.5-sunburst",
             renders_bucket=os.environ.get("RENDERS_BUCKET", "renders").strip() or "renders",
             models_bucket=os.environ.get("MODELS_BUCKET", "models").strip() or "models",

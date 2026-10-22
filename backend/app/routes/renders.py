@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..auth import CurrentUser, get_current_user
 from ..jobs import ACTIVE, FINISHED, is_stale, now_iso
-from ..renders import REF_MIME, run_render_job
+from ..renders import run_render_job
+from ..supabase import BackendUnavailable
+from ..vision import VisionUnavailable, load_image, summary_text
 from .projects import NOT_FOUND, _owned_project, _repo, _storage
 
 router = APIRouter()
@@ -28,15 +30,24 @@ def _clean(v: str) -> str:
     return " ".join(v.split())
 
 
+class Reference(BaseModel):
+    file_id: uuid.UUID
+    role: Literal["base", "model", "plan", "style"]
+
+
 class ConceptRenderIn(BaseModel):
-    prompt: str = Field(min_length=3, max_length=2000)
-    reference_file_id: uuid.UUID | None = None
-    view: Literal["exterior", "interior", "aerial"] = "exterior"
+    prompt: str = Field(min_length=3, max_length=2500)
+    reference_file_id: uuid.UUID | None = None          # older clients: one base image
+    references: list[Reference] = Field(default_factory=list, max_length=4)
+    view: Literal["exterior", "aerial", "cutaway", "interior"] = "exterior"
+    style: Literal["", "luxury contemporary", "minimalist modern", "classic luxury", "tropical modern"] = ""
+    storeys: int | None = Field(default=None, ge=1, le=60)
+    ground_floor: Literal["", "car park", "shops", "lobby", "flats"] = ""
     time_of_day: Literal["morning", "midday", "golden hour", "dusk", "night"] = "midday"
     materials: str = Field(default="", max_length=400)
     landscaping: str = Field(default="", max_length=400)
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
-    quality: Literal["medium", "high"] = "medium"   # Premium render only; Standard has one level
+    quality: Literal["medium", "high", "max"] = "high"   # Premium render only; Standard has one level
     tier: Literal["standard", "premium"] = "standard"
 
     @field_validator("prompt")
@@ -51,6 +62,21 @@ class ConceptRenderIn(BaseModel):
     @classmethod
     def tidy(cls, v: str) -> str:
         return _clean(v)
+
+    @field_validator("references")
+    @classmethod
+    def one_of_each(cls, refs):
+        roles = [r.role for r in refs]
+        for role in ("base", "model", "plan"):
+            if roles.count(role) > 1:
+                raise ValueError(f"Use one {role} image at most.")
+        if roles.count("style") > 3:
+            raise ValueError("Use up to three style references.")
+        if "base" in roles and "model" in roles:
+            raise ValueError("Choose either a design image or a 3D model view to keep, not both.")
+        if len({r.file_id for r in refs}) != len(refs):
+            raise ValueError("The same file is used twice.")
+        return refs
 
 
 class EditIn(BaseModel):
@@ -145,13 +171,18 @@ def start_concept_render(project_id: uuid.UUID, body: ConceptRenderIn, request: 
     _owned_project(request, user, project_id)
     _require_tier(request, user, body.tier)
     _require_token_life(user)
-    if body.reference_file_id:
-        src = _repo(request).get_source_file(user, str(body.reference_file_id))
+    refs = list(body.references)
+    if body.reference_file_id and not refs:
+        refs = [Reference(file_id=body.reference_file_id, role="base")]
+    for r in refs:
+        src = _repo(request).get_source_file(user, str(r.file_id))
         if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Reference image not found in this project.")
-        if src.get("detected_type") not in REF_MIME:
-            raise HTTPException(422, {"code": "unsupported_reference", "reason": "Concept renders can start from a PNG or JPEG image. For a PDF drawing, export the page as an image first."})
+        if src.get("detected_type") not in ("png", "jpeg", "pdf") or (src["detected_type"] == "pdf" and r.role != "plan"):
+            raise HTTPException(422, {"code": "unsupported_reference", "reason": "References must be PNG or JPEG images (a PDF can be used as the floor plan). For an IFC model, take a 3D view shot instead."})
     job_input = body.model_dump(mode="json")
+    job_input["references"] = [{"file_id": str(r.file_id), "role": r.role} for r in refs]
+    job_input.pop("reference_file_id", None)
     return _start_job(request, user, str(project_id), "concept_render", job_input, idempotency_key, response)
 
 
@@ -212,9 +243,51 @@ def usage(request: Request, user: CurrentUser = Depends(get_current_user)):
     events = [e for e in _repo(request).list_usage_events(user) if e.get("owner_id") == user.id]
     known = [Decimal(str(e["cost_usd"])) for e in events if e.get("cost_usd") is not None]
     return {
-        "events": [{k: e.get(k) for k in ("id", "project_id", "job_id", "provider", "model", "operation", "input_text_tokens", "input_image_tokens", "output_tokens", "cost_usd", "price_source", "created_at")} for e in events],
+        "events": [{k: e.get(k) for k in ("id", "project_id", "job_id", "cost_usd", "created_at")} | {"service": _service(e)} for e in events],
         "total_cost_usd": str(sum(known, Decimal("0"))),
         "calls": len(events),
         "calls_without_cost": len(events) - len(known),
-        "note": "Costs are what the image model charged Ollic, worked out from the tokens it reported. Credits and prices for customers come in Phase 7.",
+        "note": "What each render cost to make. Credits and prices for customers come in Phase 7.",
     }
+
+
+def _service(e: dict) -> str:
+    """Customers see what they used, never which AI provider did it."""
+    if e.get("operation") == "vision_read":
+        return "Plan reading"
+    if e.get("operation") == "prompt_write":
+        return "Premium prompting"
+    return "Premium render" if e.get("provider") == "openai" else "Standard render"
+
+
+# ---------------------------------------------------------------- "Read my plan"
+class PlanReadIn(BaseModel):
+    source_file_id: uuid.UUID
+
+
+@router.post("/projects/{project_id}/plan/read")
+def read_plan(project_id: uuid.UUID, body: PlanReadIn, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """Describes the architect's floor plan in plain words, as a starting point for the render brief."""
+    _owned_project(request, user, project_id)
+    src = _repo(request).get_source_file(user, str(body.source_file_id))
+    if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found in this project.")
+    if src.get("detected_type") not in ("png", "jpeg", "pdf"):
+        raise HTTPException(422, {"code": "not_a_plan", "reason": "Choose a floor plan image (PNG or JPEG) or a PDF drawing."})
+    reader = getattr(request.app.state, "vision", None)
+    if reader is None:
+        raise HTTPException(503, {"code": "not_configured", "reason": "Plan reading is not switched on for this site yet."})
+    try:
+        img = load_image(_storage(request).download(user, src["storage_path"]), src["detected_type"])
+        reading = reader.read_plan(img)
+    except VisionUnavailable as exc:
+        raise HTTPException(502, {"code": "vision_failed", "reason": "The plan could not be read this time. Try again, or write the brief yourself."}) from exc
+    try:
+        _repo(request).create_usage_event(user, {
+            "project_id": str(project_id), "provider": "cloudflare", "model": reading.get("model") or "vision", "operation": "vision_read",
+            "cost_usd": None, "price_source": "inside Cloudflare's free daily allowance; no per-token price on file", "raw_usage": reading.get("usage"),
+        })
+    except BackendUnavailable:
+        pass
+    reading.pop("usage", None)
+    return {"reading": reading, "summary": summary_text(reading)}

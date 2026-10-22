@@ -104,18 +104,10 @@
     </div>
     <section class="model" id="modelSection" aria-labelledby="modelTitle">
       <div class="studio-head">
-        <div><span class="eyebrow">3D model</span><h2 id="modelTitle" class="studio-title">Your building in 3D</h2>
-          <p class="muted">Upload a Revit export (IFC) and Ollic reads it straight away. Or upload a floor plan image or PDF and press <b>Make 3D model</b>: Ollic reads the walls, doors, windows and rooms, you check them, and Ollic builds the model inside and out.</p></div>
+        <div><span class="eyebrow">3D model</span><h2 id="modelTitle" class="studio-title">Your Revit model in 3D</h2>
+          <p class="muted">Upload your model exported from Revit as IFC (File &gt; Export &gt; IFC). Ollic shows it in 3D inside and out, and you can use any view of it as the base of a render, so the picture keeps your exact building.</p></div>
       </div>
       <div class="jobs" id="modelJobs" aria-live="polite"></div>
-      <div id="planReview" class="plan-review" hidden>
-        <div class="review-head">
-          <h3>Check what Ollic read from your plan</h3>
-          <p class="muted">Every value shows where it came from: <span class="chip src-drawing">Read from drawing</span> <span class="chip src-ai">Read by AI</span> <span class="chip src-user">You</span> <span class="chip src-default">Standard value</span>. Nothing is built until you confirm the scale.</p>
-        </div>
-        <div id="planEditor"></div>
-        <div id="planMsg" class="notice error" role="status" hidden></div>
-      </div>
       <div id="viewerWrap" hidden>
         <div class="viewer-bar" role="toolbar" aria-label="3D view">
           <div class="seg" role="group" aria-label="View">
@@ -124,6 +116,7 @@
           </div>
           <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
           <button type="button" class="btn" id="viewReset">Reset view</button>
+          <button type="button" class="btn primary" id="useView">Render this view</button>
           <span class="spacer"></span>
           <a class="btn" id="dlGlb" download>Download 3D (GLB)</a>
           <a class="btn" id="dlIfc" hidden>Download IFC</a>
@@ -134,12 +127,12 @@
           <div class="card" id="reportCard"></div>
         </div>
       </div>
-      <div class="empty" id="modelEmpty" hidden>No 3D model yet. Upload an IFC file, or a floor plan and press <b>Make 3D model</b> next to it.</div>
+      <div class="empty" id="modelEmpty" hidden>No 3D model yet. Upload your Revit export (.ifc) above to see it here.</div>
     </section>
     <section class="studio" id="studio" aria-labelledby="studioTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>
-          <p class="muted">Describe the house, or start from one of your sketches. Each image takes about a minute. These are AI concept images for ideas and finishes, labelled <b>AI concept — not to scale</b>; renders that match your drawings exactly come from the 3D model in a later phase.</p></div>
+          <p class="muted">Start from your floor plan, a view of your 3D model, or just a description. Add photos of the look you want, describe the front (glass, cantilevers, cladding) and choose the view. Each image takes about a minute and is labelled <b>AI concept — not to scale</b>.</p></div>
       </div>
       <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
       <form id="renderForm" class="render-form card" hidden>
@@ -148,13 +141,26 @@
           <label class="tier"><input type="radio" name="tier" value="standard" checked><span><b>Standard render</b><small id="stdNote">Free</small></span></label>
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
         </fieldset>
+        <div class="span2 start-from">
+          <div class="field">Floor plan <span class="hint">Optional. The render follows its layout.</span>
+            <div class="row"><select id="rPlan"><option value="">No plan</option></select>
+              <button type="button" class="btn" id="readPlanBtn" disabled>Read my plan</button></div></div>
+          <label class="field">Keep the shape from <span class="hint">Optional. A 3D model view or a sketch whose shape and camera are kept.</span>
+            <select id="rBase"><option value="">Nothing</option></select></label>
+          <fieldset class="field looks"><legend>Look and materials from <span class="hint">Up to 3 photos or images</span></legend>
+            <div id="rLooks" class="look-list"><span class="hint">Upload photos of facades you like and they appear here.</span></div></fieldset>
+        </div>
         <label class="field span2">Describe it
-          <textarea id="rPrompt" rows="3" maxlength="2000" required placeholder="e.g. Modern two-storey 4-bed duplex, flat roof with parapet, large windows, gated compound in Lekki"></textarea></label>
-        <label class="field">Start from
-          <select id="rRef"><option value="">Nothing: a fresh concept</option></select>
-          <span class="hint">Your PNG or JPEG sketches and photos. The design and camera are kept.</span></label>
+          <textarea id="rPrompt" rows="4" maxlength="2500" required placeholder="e.g. Six-storey luxury apartment block, glass balconies on every floor, cantilevered penthouse, dark stone base, central glazed stair core"></textarea>
+          <span class="hint" id="planNote"></span></label>
         <label class="field">View
-          <select id="rView"><option value="exterior">Exterior</option><option value="interior">Interior</option><option value="aerial">Aerial</option></select></label>
+          <select id="rView"><option value="exterior">Exterior, street level</option><option value="aerial">Aerial</option><option value="cutaway">Cutaway (inside visible)</option><option value="interior">Interior room</option></select></label>
+        <label class="field">Style
+          <select id="rStyle"><option value="">As described</option><option value="luxury contemporary">Luxury contemporary</option><option value="minimalist modern">Minimalist modern</option><option value="classic luxury">Classic luxury</option><option value="tropical modern">Tropical modern</option></select></label>
+        <label class="field">Floors
+          <input type="number" id="rStoreys" min="1" max="60" inputmode="numeric" placeholder="e.g. 6"></label>
+        <label class="field">Ground floor
+          <select id="rGround"><option value="">As described</option><option value="car park">Car park</option><option value="shops">Shops</option><option value="lobby">Entrance lobby</option><option value="flats">Flats</option></select></label>
         <label class="field">Light
           <select id="rLight"><option value="morning">Morning</option><option value="midday" selected>Midday</option><option value="golden hour">Golden hour</option><option value="dusk">Dusk, lights on</option><option value="night">Night</option></select></label>
         <label class="field">Shape
@@ -164,7 +170,7 @@
         <label class="field">Landscaping <span class="hint">Optional</span>
           <input type="text" id="rLand" maxlength="400" placeholder="e.g. palm trees, interlocking paving, low hedge"></label>
         <label class="field" id="qualityField" hidden>Detail
-          <select id="rQuality"><option value="medium">Standard</option><option value="high">High (slower, costs more)</option></select></label>
+          <select id="rQuality"><option value="high" selected>High</option><option value="max">Maximum (slower)</option></select></label>
         <div class="render-go span2">
           <button class="btn primary big" type="submit" id="renderBtn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 10 4h4l6 16M7 13h10"/></svg>Create concept</button>
           <span class="hint" id="renderLimit"></span>

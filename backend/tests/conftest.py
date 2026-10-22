@@ -36,7 +36,6 @@ class FakeRepo:
         self.plans: dict[str, str] = {}  # user id -> "premium"; everyone else is on "free"
         self.models: dict[str, dict] = {}
         self.components: list[dict] = []
-        self.drafts: dict[str, dict] = {}
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
@@ -65,7 +64,7 @@ class FakeRepo:
         if not p or p["owner_id"] != user.id:
             return False
         del self.projects[project_id]
-        for table in (self.files, self.jobs, self.images, self.models, self.drafts):  # on delete cascade
+        for table in (self.files, self.jobs, self.images, self.models):  # on delete cascade
             for k in [k for k, r in table.items() if r["project_id"] == project_id]:
                 del table[k]
         self.components = [c for c in self.components if c["project_id"] != project_id]
@@ -128,7 +127,7 @@ class FakeRepo:
     def count_jobs_since(self, user, since_iso, statuses, tier):
         return sum(1 for j in self.jobs.values() if j["owner_id"] == user.id and j["created_at"] >= since_iso and j["status"] in statuses and j["input"].get("tier") == tier)
 
-    # Phase 3 and 3b
+    # Phase 3
     def create_model(self, user, record):
         self._owned_project(user, record["project_id"])
         assert record["glb_path"].split("/")[:2] == [user.id, record["project_id"]], "path check constraint"
@@ -152,26 +151,6 @@ class FakeRepo:
 
     def list_components(self, user, model_id, limit=5000):
         return [copy.deepcopy(c) for c in self.components if c["model_id"] == model_id and c["owner_id"] == user.id][:limit]
-
-    def create_draft(self, user, record):
-        self._owned_project(user, record["project_id"])
-        row = {"layout": None, **record, "owner_id": user.id, "created_at": self._now(), "updated_at": self._now()}
-        self.drafts[row["id"]] = row
-        return copy.deepcopy(row)
-
-    def get_draft(self, user, draft_id):
-        return self._own("drafts", user, draft_id)
-
-    def update_draft(self, user, draft_id, fields):
-        d = self.drafts.get(draft_id)
-        if not d or d["owner_id"] != user.id:
-            return None
-        d.update(fields, updated_at=self._now())
-        return copy.deepcopy(d)
-
-    def list_drafts(self, user, project_id):
-        rows = [d for d in self.drafts.values() if d["project_id"] == project_id and d["owner_id"] == user.id]
-        return [copy.deepcopy(d) for d in sorted(rows, key=lambda d: d["created_at"], reverse=True)]
 
     def get_profile(self, user):
         return {"id": user.id, "plan": self.plans.get(user.id, "free"), "role": "customer"}
@@ -320,3 +299,10 @@ def alice():
 def bob():
     uid = str(uuid.uuid4())
     return {"id": uid, "headers": {"Authorization": f"Bearer {make_token(uid)}"}}
+
+
+@pytest.fixture(scope="session")
+def sample_ifc_bytes():
+    from tests.fixtures.builder import build_ifc
+    from tests.fixtures.layout import sample_house
+    return build_ifc(sample_house(), seed="fixture")

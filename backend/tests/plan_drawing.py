@@ -10,7 +10,7 @@ import math
 
 from PIL import Image, ImageDraw, ImageFont
 
-from app.bim.layout import Layout
+from tests.fixtures.layout import Layout
 
 
 def draw_plan(L: Layout, px_per_m: float = 60, margin: int = 90, clutter: bool = True) -> tuple[bytes, dict]:

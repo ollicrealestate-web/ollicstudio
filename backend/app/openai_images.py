@@ -101,18 +101,21 @@ def _error_from(res: httpx.Response) -> ProviderError:
     if code == "moderation_blocked" or "safety" in str(err.get("message", "")).lower():
         msg = "The image model declined this request under its content rules. Reword the description and try again."
     elif status == 401:
-        msg = "The server's OpenAI key was refused. The owner needs to check OPENAI_API_KEY."
+        log.error("OWNER: the OpenAI key was refused; check OPENAI_API_KEY")
+        msg = "Premium render is unavailable right now. Please try again later."
     elif status == 403:
-        msg = "The server's OpenAI key is not allowed to use this image model. The owner needs to check the key's permissions or the organisation's verification."
+        log.error("OWNER: the OpenAI key may not use this image model; check its permissions or organisation verification")
+        msg = "Premium render is unavailable right now. Please try again later."
     elif status == 429 and (code == "insufficient_quota" or "credit" in str(err.get("message", "")).lower() or "quota" in str(err.get("message", "")).lower()):
-        msg = "The OpenAI account has run out of credit. The owner needs to add credit at platform.openai.com."
+        log.error("OWNER: the OpenAI account has no credit; add credit at platform.openai.com")
+        msg = "Premium render is paused for the moment. Please try again later, or use Standard render."
     elif status == 429:
-        detail = str(err.get("message") or "")[:240]
-        msg = "The image model refused for now (rate limit). Wait a minute and try again." + (f" OpenAI said: {detail}" if detail else "")
+        msg = "Premium render is busy. Wait a minute and try again."
     elif status == 404 or code == "model_not_found":
-        msg = "The configured image model is not available to this OpenAI account."
+        log.error("OWNER: the configured OpenAI image model is not available to this account")
+        msg = "Premium render is unavailable right now. Please try again later."
     elif status >= 500:
         msg = "The image model had a problem on its side. Try again in a moment."
     else:
-        msg = "The image model rejected the request: " + (str(err.get("message")) or f"HTTP {status}")[:300]
+        msg = "The request could not be rendered. Try rewording the description or using different reference images."
     return ProviderError(msg, status=status, code=code or None)

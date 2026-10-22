@@ -39,10 +39,8 @@ export const api = {
   cancelJob: id => request("POST", `/jobs/${id}/cancel`),
   // Phases 3 and 3b: 3D models
   importIfc: (projectId, fileId, key) => request("POST", `/projects/${projectId}/import-ifc`, { source_file_id: fileId }, true, { "Idempotency-Key": key }),
-  tracePlan: (projectId, fileId, key) => request("POST", `/projects/${projectId}/plan/trace`, { source_file_id: fileId }, true, { "Idempotency-Key": key }),
+  readPlan: (projectId, fileId) => request("POST", `/projects/${projectId}/plan/read`, { source_file_id: fileId }),
   models: projectId => request("GET", `/projects/${projectId}/models`),
-  layout: projectId => request("GET", `/projects/${projectId}/layout`),
-  confirmLayout: (projectId, body, key) => request("PUT", `/projects/${projectId}/layout`, body, true, { "Idempotency-Key": key }),
   fileLink: (projectId, fileId) => request("GET", `/projects/${projectId}/files/${fileId}/link`),
 };
 

@@ -84,10 +84,10 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.wait_for_selector("#renderForm:not([hidden])")
         assert page.is_visible("#galleryEmpty") and not page.is_visible("#studioOff")
 
-        # the uploaded sketch becomes a choice in "Start from"
+        # the uploaded sketch becomes a choice in "Keep the shape from"
         page.set_input_files("#fileInput", str(sketch)); page.wait_for_selector("#fileRows tr")
-        page.wait_for_function("document.querySelectorAll('#rRef option').length === 2")
-        page.select_option("#rRef", label="front-elevation.png")
+        page.wait_for_function("document.querySelectorAll('#rBase option').length === 2")
+        page.select_option("#rBase", label="front-elevation.png")
         page.fill("#rPrompt", "Two-storey villa, white render, bronze window frames")
         page.select_option("#rLight", "golden hour"); page.fill("#rMaterials", "white render, bronze frames")
         page.click("#renderBtn")
@@ -99,7 +99,7 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         card = page.inner_text(".shot")
         assert "AI CONCEPT — NOT TO SCALE" in card.upper() and "Two-storey villa" in card and "GOLDEN HOUR" in card.upper()
         (call,) = stack["images"].calls
-        assert call["kind"] == "edit" and "golden-hour" in call["prompt"]   # the sketch was sent as the base
+        assert call["kind"] == "edit" and "golden-hour" in call["prompt"] and "Image 1 is the design to render" in call["prompt"]   # the sketch was sent as the base
         page.screenshot(path=str(shots / "e2e-render.png"), full_page=True)
 
         # revise it: a second image appears and the original stays
@@ -121,7 +121,7 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.fill("#rPrompt", "Same villa, evening"); page.click("#renderBtn")
         page.wait_for_function("document.querySelectorAll('.shot').length === 3", timeout=20000)
         assert "PREMIUM RENDER" in page.inner_text(".shot >> nth=0").upper()
-        assert stack["premium"].calls[0]["model"] == "gpt-image-2.5-flare"
+        assert stack["premium"].calls[0]["model"] == "gpt-image-2.5-sunburst"
 
         # phone width: no sideways scrolling
         page.set_viewport_size({"width": 390, "height": 844})
