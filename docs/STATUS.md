@@ -41,6 +41,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 - Standard render (account B, free plan): description 29 s, sketch 13 s (kept the sketch's roof, windows and door), revision 10 s. Labels and download names correct; 4th render refused by the daily limit; Premium refused for a free plan; 3 costs recorded ($0.005 at list price, $0 actual).
 - Premium: refused by OpenAI ("no credits remaining"); reported correctly, no cost recorded.
 - IFC import of a generated bungalow: 6 s, report "pass", 26 elements.
+- Construction animation (migration 8 run by the owner): a VP9 upload was checked, converted to H.264 and saved on the free instance in about 15 s; the animation director (free text model) turned "make it portrait for Instagram and slower on the roof" into format 9:16 and roof 6 s.
 - Walkthrough (migrations 6 and 7 run by the owner): a walk-mode shot of the Living room rendered by Standard render in about 15 s, as a furnished interior that kept the model's doors and window. First video crashed the free server (out of memory); after the fix, a 1-shot 16:9 video took 110 s on the free instance (about 30 s per clip, 10 s long, H.264 1920x1080 with AAC).
 - Vision model on a test plan: read all 5 room names, areas and the overall width.
 - The owner's A103 sheet (6-storey block, two flats per floor) exposed bugs in the now-removed plan tracer; the lesson that stays: AI labels and readings are suggestions, never measurements.
@@ -71,7 +72,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 
 ## Next session should do first
 
-1. **Owner:** run `supabase/migrations/20261022000008_construction_animation.sql` (6 and 7 are done); add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
+1. **Owner:** (migrations 6, 7 and 8 are done) add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
 2. Live check of the construction animation with a real Revit IFC: preview, a plain-language change, a 16:9 export in Chrome.
 3. Live check of the walkthrough with a real Revit IFC with rooms and furniture: several shots, render all, a 9:16 video.
 4. Live check: Read my plan on the owner's A103 sheet; a Standard and a Premium render from it with a look reference; a render from a real Revit IFC view. Record results here.
