@@ -104,7 +104,7 @@ def _error_from(res: httpx.Response) -> ProviderError:
         msg = "The server's OpenAI key was refused. The owner needs to check OPENAI_API_KEY."
     elif status == 403:
         msg = "The server's OpenAI key is not allowed to use this image model. The owner needs to check the key's permissions or the organisation's verification."
-    elif status == 429 and code == "insufficient_quota":
+    elif status == 429 and (code == "insufficient_quota" or "credit" in str(err.get("message", "")).lower() or "quota" in str(err.get("message", "")).lower()):
         msg = "The OpenAI account has run out of credit. The owner needs to add credit at platform.openai.com."
     elif status == 429:
         detail = str(err.get("message") or "")[:240]
