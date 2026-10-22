@@ -57,3 +57,37 @@ def test_request_handlers_never_touch_the_service_role_key():
     app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
     for path in app_dir.rglob("*.py"):
         assert not re.search(r"service[_-]?role", path.read_text(), re.IGNORECASE), f"{path.name} mentions the service role"
+
+
+def test_phase2_tables_are_read_and_written_as_the_user_with_owner_filters():
+    calls, handler = _recorder(lambda r: [{"id": "j1", "owner_id": USER.id}])
+    repo = SupabaseRepository(SETTINGS, httpx.Client(base_url="https://proj.supabase.co/rest/v1", transport=httpx.MockTransport(handler)))
+    repo.create_job(USER, {"project_id": "p", "type": "concept_render", "input": {}})
+    repo.get_job(USER, "j1")
+    repo.update_job(USER, "j1", {"status": "running"})
+    repo.list_rendered_images(USER, "p")
+    repo.create_usage_event(USER, {"provider": "openai"})
+    repo.list_usage_events(USER)
+    for req in calls:
+        assert req.headers["authorization"] == "Bearer user-access-token"
+        if req.method in ("GET", "PATCH"):
+            assert req.url.params["owner_id"] == f"eq.{USER.id}"
+        else:
+            assert json.loads(req.content)["owner_id"] == USER.id
+    assert [c.url.path for c in calls] == ["/rest/v1/jobs", "/rest/v1/jobs", "/rest/v1/jobs", "/rest/v1/rendered_images", "/rest/v1/usage_events", "/rest/v1/usage_events"]
+
+
+def test_storage_signs_and_downloads_in_the_named_bucket():
+    def handler(request: httpx.Request):
+        if request.url.path.startswith("/storage/v1/object/sign/"):
+            paths = json.loads(request.content)["paths"]
+            return httpx.Response(200, json=[{"path": p, "signedURL": f"/object/sign/renders/{p}?token=abc", "error": None} for p in paths])
+        return httpx.Response(200, content=b"jpeg-bytes")
+    calls = []
+    store = SupabaseStorage(SETTINGS, httpx.Client(base_url="https://proj.supabase.co/storage/v1", transport=httpx.MockTransport(lambda r: calls.append(r) or handler(r))))
+    links = store.signed_urls(USER, [f"{USER.id}/p/r.jpg"], bucket="renders", expires_in=600)
+    assert links == {f"{USER.id}/p/r.jpg": f"https://proj.supabase.co/storage/v1/object/sign/renders/{USER.id}/p/r.jpg?token=abc"}
+    assert json.loads(calls[0].content) == {"expiresIn": 600, "paths": [f"{USER.id}/p/r.jpg"]}
+    assert store.download(USER, f"{USER.id}/p/r.jpg", bucket="renders") == b"jpeg-bytes"
+    assert calls[1].url.path == f"/storage/v1/object/renders/{USER.id}/p/r.jpg"
+    assert all(c.headers["authorization"] == "Bearer user-access-token" for c in calls)

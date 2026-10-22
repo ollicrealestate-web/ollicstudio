@@ -11,16 +11,16 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body, retry = true) {
+async function request(method, path, body, retry = true, extra = {}) {
   const token = await accessToken();
   if (!token) throw new ApiError(401, "Sign in to continue.");
   let res;
   try {
-    res = await fetch(base() + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(base() + path, { method, headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}), ...extra }, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw new ApiError(0, "Could not reach the Ollic server. Check your connection and try again.");
   }
-  if (res.status === 401 && retry && (await accessToken(true))) return request(method, path, body, false);
+  if (res.status === 401 && retry && (await accessToken(true))) return request(method, path, body, false, extra);
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.detail || "Request failed.");
@@ -32,7 +32,14 @@ export const api = {
   createProject: name => request("POST", "/projects", { name }),
   getProject: id => request("GET", `/projects/${id}`),
   deleteProject: id => request("DELETE", `/projects/${id}`),
+  // Phase 2: concept renders. The key makes a double-click or a retry start one render, not two.
+  startRender: (projectId, body, key) => request("POST", `/projects/${projectId}/architectural-render`, body, true, { "Idempotency-Key": key }),
+  editRender: (renderId, instruction, key) => request("POST", `/renders/${renderId}/edit`, { instruction }, true, { "Idempotency-Key": key }),
+  outputs: projectId => request("GET", `/projects/${projectId}/outputs`),
+  cancelJob: id => request("POST", `/jobs/${id}/cancel`),
 };
+
+export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 /** Uploads one file with progress. Resolves with the stored file record. */
 export async function uploadFile(projectId, file, onProgress) {

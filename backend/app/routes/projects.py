@@ -71,8 +71,11 @@ def delete_project(project_id: uuid.UUID, request: Request, user: CurrentUser = 
     _owned_project(request, user, project_id)
     files = _repo(request).list_source_files(user, str(project_id))
     paths = [f["storage_path"] for f in files if f.get("owner_id") == user.id]
+    renders = [r for r in _repo(request).list_rendered_images(user, str(project_id)) if r.get("owner_id") == user.id]
+    render_paths = [p for r in renders for p in (r.get("storage_path"), r.get("base_path")) if p]
     # Files first: if storage fails the project stays, so nothing is left orphaned and unreachable.
     _storage(request).remove(user, paths)
+    _storage(request).remove(user, render_paths, bucket=request.app.state.settings.renders_bucket)
     if not _repo(request).delete_project(user, str(project_id)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
 

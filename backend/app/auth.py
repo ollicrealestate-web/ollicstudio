@@ -7,7 +7,7 @@ checks in code. The privileged admin key is never used here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import jwt
@@ -22,7 +22,8 @@ ASYMMETRIC_ALGORITHMS = ("RS256", "ES256")
 class CurrentUser:
     id: str
     email: str | None
-    token: str
+    token: str = field(repr=False)
+    expires_at: int | None = None  # the token's exp claim; background jobs need it to stay valid
 
 
 class AuthError(Exception):
@@ -75,7 +76,7 @@ class TokenVerifier:
             raise AuthError("The sign-in token is not valid.") from exc
         if claims.get("role") != "authenticated":
             raise AuthError("This token is not a signed-in user's token.")
-        return CurrentUser(id=str(claims["sub"]), email=claims.get("email"), token=token)
+        return CurrentUser(id=str(claims["sub"]), email=claims.get("email"), token=token, expires_at=int(claims["exp"]))
 
 
 def get_current_user(request: Request, authorization: str | None = Header(default=None)) -> CurrentUser:

@@ -1,4 +1,4 @@
-import { api, uploadFile, ApiError } from "./api.js";
+import { api, uploadFile, ApiError, newKey } from "./api.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -49,7 +49,7 @@ $("#newPasswordForm").onsubmit = e => { e.preventDefault(); busy(e.target, async
   try { await session.setNewPassword($("#newPassword").value); toast("Password updated."); await enterApp(); }
   catch (err) { message($("#authMsg"), err.message); }
 }); };
-$("#signOutBtn").onclick = async () => { await session.signOut(); $("#userNav").hidden = true; authMode("in"); show("authView"); };
+$("#signOutBtn").onclick = async () => { stopPolling(); await session.signOut(); $("#userNav").hidden = true; authMode("in"); show("authView"); };
 
 /* ---------- projects ---------- */
 async function enterApp() {
@@ -80,9 +80,11 @@ $("#newProjectForm").onsubmit = e => { e.preventDefault(); busy(e.target, async 
 
 let current = null;
 async function openProject(id) {
-  show("projectView"); $("#uploads").replaceChildren(); resetDelete();
+  show("projectView"); $("#uploads").replaceChildren(); resetDelete(); stopPolling();
+  $("#gallery").replaceChildren(); $("#jobList").replaceChildren(); message($("#renderMsg"), "");
+  $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
   history.replaceState(null, "", `${location.pathname}?project=${encodeURIComponent(id)}`);
-  try { current = await api.getProject(id); renderProject(); }
+  try { current = await api.getProject(id); renderProject(); loadOutputs(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
@@ -93,8 +95,99 @@ function renderProject() {
     el("td", {}, f.original_name), el("td", {}, TYPE[f.detected_type] || f.detected_type), el("td", { class: "mono" }, fmtBytes(f.size_bytes)),
     el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"))));
   $("#filesWrap").hidden = current.source_files.length === 0;
+  const ref = $("#rRef"), keep = ref.value;
+  ref.replaceChildren(el("option", { value: "" }, "Nothing: a fresh concept"),
+    ...current.source_files.filter(f => f.detected_type === "png" || f.detected_type === "jpeg").map(f => el("option", { value: f.id }, f.original_name)));
+  ref.value = [...ref.options].some(o => o.value === keep) ? keep : "";
 }
-$("#backBtn").onclick = () => listProjects();
+$("#backBtn").onclick = () => { stopPolling(); listProjects(); };
+
+/* ---------- concept renders (Phase 2) ---------- */
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision" };
+const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
+let pollTimer = null, outputsFor = null, seenFailed = new Set();
+function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
+
+async function loadOutputs() {
+  if (!current) return;
+  const pid = current.id; outputsFor = pid;
+  let out;
+  try { out = await api.outputs(pid); }
+  catch (err) { if (err.status === 401) return handle(err); pollTimer = setTimeout(loadOutputs, 8000); return; }
+  if (outputsFor !== pid || $("#projectView").hidden) return;
+  $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
+  drawJobs(out.jobs); drawGallery(out.images);
+  stopPolling();
+  if (out.jobs.some(j => j.status === "queued" || j.status === "running")) pollTimer = setTimeout(loadOutputs, 3000);
+}
+
+function drawJobs(jobs) {
+  const now = Date.now();
+  const show = jobs.filter(j => j.status === "queued" || j.status === "running"
+    || ((j.status === "failed" || j.status === "cancelled") && now - new Date(j.finished_at || j.created_at).getTime() < 30 * 60 * 1000 && !seenFailed.has(j.id)));
+  $("#jobList").replaceChildren(...show.map(j => {
+    const active = j.status === "queued" || j.status === "running";
+    const text = j.status === "failed" ? j.error : j.status === "cancelled" ? (j.stage || "Cancelled.") : (j.stage || (j.status === "queued" ? "Waiting to start" : "Working"));
+    return el("div", { class: `job ${j.status}` },
+      el("span", { class: "spinner", "aria-hidden": "true" }),
+      el("span", { class: "what" }, `${JOB_NAME[j.type] || "Render"} · ${j.status === "running" ? "working" : j.status}`),
+      active ? el("button", { class: "btn", type: "button", onclick: () => cancel(j.id) }, "Cancel")
+             : el("button", { class: "btn", type: "button", onclick: () => { seenFailed.add(j.id); loadOutputs(); } }, "Dismiss"),
+      el("span", { class: "stage" }, text));
+  }));
+}
+
+function drawGallery(images) {
+  $("#galleryEmpty").hidden = images.length > 0;
+  const byId = Object.fromEntries(images.map(i => [i.id, i]));
+  $("#gallery").replaceChildren(...images.map(i => {
+    const o = i.options || {};
+    const [w, h] = [i.width || 3, i.height || 2];
+    const tags = [o.view, LIGHT_NAME[o.time_of_day], o.quality === "high" ? "High detail" : null].filter(Boolean);
+    const input = el("input", { type: "text", maxlength: "1000", placeholder: "What should change? e.g. make the roof dark grey", "aria-label": "Describe a change" });
+    const go = el("button", { class: "btn primary", type: "submit" }, "Revise");
+    const parent = i.parent_image_id ? byId[i.parent_image_id] : null;
+    return el("article", { class: "shot" },
+      el("div", { class: "frame", style: `aspect-ratio:${w}/${h}` },
+        i.url ? el("img", { src: i.url, alt: `AI concept render: ${i.prompt}`, loading: "lazy", width: String(w), height: String(h) }) : el("span", { class: "muted" }, "Image link unavailable"),
+        el("span", { class: "badge" }, i.label)),
+      el("div", { class: "body" },
+        el("p", { class: "prompt" }, i.parent_image_id ? `Revision: ${i.prompt}` : i.prompt),
+        el("div", { class: "tags" }, ...tags.map(t => el("span", { class: "chip" }, t)), parent ? el("span", { class: "chip" }, "Revised") : ""),
+        el("p", { class: "hint" }, `${fmtDate(i.created_at)} · ${i.model}`),
+        el("div", { class: "actions" }, i.download_url ? el("a", { class: "btn", href: i.download_url, download: "" }, "Download") : ""),
+        el("form", { class: "revise", onsubmit: e => { e.preventDefault(); revise(i.id, input, go); } }, input, go)));
+  }));
+}
+
+$("#renderForm").onsubmit = e => {
+  e.preventDefault();
+  const body = { prompt: $("#rPrompt").value.trim(), view: $("#rView").value, time_of_day: $("#rLight").value, aspect: $("#rAspect").value,
+    quality: $("#rQuality").value, materials: $("#rMaterials").value.trim(), landscaping: $("#rLand").value.trim() };
+  if ($("#rRef").value) body.reference_file_id = $("#rRef").value;
+  if (body.prompt.length < 3) { message($("#renderMsg"), "Describe what you want to see."); return; }
+  const key = newKey();
+  busy(e.target, async () => {
+    message($("#renderMsg"), "");
+    try { await api.startRender(current.id, body, key); toast("Concept started. It takes about a minute."); loadOutputs(); }
+    catch (err) { if (err.status === 401) return handle(err); message($("#renderMsg"), err.message); }
+  });
+};
+
+async function revise(id, input, btn) {
+  const text = input.value.trim();
+  if (text.length < 3) { input.focus(); toast("Say what should change."); return; }
+  btn.disabled = true;
+  try { await api.editRender(id, text, newKey()); input.value = ""; toast("Revision started. The original stays as it is."); loadOutputs(); }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; }
+}
+
+async function cancel(id) {
+  try { const j = await api.cancelJob(id); toast(j.stage || "Cancelled."); }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  loadOutputs();
+}
 
 /* ---------- uploads ---------- */
 async function uploadAll(files) {

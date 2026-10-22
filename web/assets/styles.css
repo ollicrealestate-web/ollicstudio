@@ -223,6 +223,52 @@ tr:last-child td { border-bottom: 0; }
 .setup { max-width: 640px; margin: 32px auto; }
 .setup code { font-family: var(--f-mono); background: var(--surface-3); padding: 2px 6px; border-radius: 6px; font-size: 0.9em; }
 
+/* ---------- concept render studio (Phase 2) ---------- */
+.studio { margin-top: 48px; display: grid; gap: 18px; }
+.studio-title { font-size: clamp(1.6rem, 3.4vw, 2.3rem); margin-top: 10px; }
+.studio-head p { margin-top: 10px; max-width: 46em; }
+.render-form { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 22px; }
+.render-form .span2 { grid-column: 1 / -1; }
+textarea, select { width: 100%; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink); font: 400 1rem var(--f-ui); transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease); }
+textarea { padding: 12px 14px; resize: vertical; min-height: 96px; line-height: 1.5; }
+select { min-height: 48px; padding: 0 40px 0 14px; appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 20px) 21px, calc(100% - 15px) 21px; background-size: 5px 5px; background-repeat: no-repeat; }
+textarea::placeholder { color: #75757f; }
+textarea:hover, select:hover { border-color: #4a4a52; }
+textarea:focus, select:focus { border-color: var(--red); outline: none; box-shadow: 0 0 0 4px rgba(212, 33, 39, 0.22); }
+.render-go { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.render-go .notice { flex: 1 1 260px; }
+.jobs { display: grid; gap: 10px; }
+.job { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.job .what { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job .stage { grid-column: 2; color: var(--muted); font-size: 0.9rem; }
+.job.failed { border-color: rgba(255, 74, 79, 0.55); background: var(--red-tint); }
+.job.failed .stage { color: var(--red-soft); }
+.job .btn { min-height: 38px; padding: 0 14px; font-size: 0.88rem; }
+.spinner { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--surface-3); border-top-color: var(--red); animation: spin 0.9s linear infinite; }
+.job.failed .spinner, .job.cancelled .spinner { animation: none; border-color: var(--red); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 18px; }
+.shot { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; display: grid; align-content: start; min-width: 0; }
+.shot .frame { position: relative; background: var(--surface-2); aspect-ratio: 3 / 2; }
+.shot .frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.shot .badge { position: absolute; top: 12px; left: 12px; height: 28px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 8px; background: rgba(7, 7, 7, 0.82); border-left: 3px solid var(--red); font: 600 0.72rem var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: #fff; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.shot .body { padding: 16px; display: grid; gap: 10px; }
+.shot .prompt { font-size: 0.95rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.shot .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.shot .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.shot .actions .btn { min-height: 40px; padding: 0 16px; font-size: 0.9rem; }
+.revise { display: flex; gap: 8px; }
+.revise input { min-height: 44px; }
+.revise .btn { flex: none; }
+@media (max-width: 820px) { .render-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) {
+  .render-form { grid-template-columns: minmax(0, 1fr); padding: 18px; }
+  .render-go .btn { width: 100%; }
+  .revise { flex-direction: column; }
+}
+
 @keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(212, 33, 39, 0); } }
 @keyframes slide { to { transform: translateX(-50%); } }
 @keyframes draw { from { stroke-dashoffset: var(--len, 600); } to { stroke-dashoffset: 0; } }

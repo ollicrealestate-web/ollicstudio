@@ -101,8 +101,41 @@
         <tbody id="fileRows"></tbody>
       </table>
     </div>
+    <section class="studio" id="studio" aria-labelledby="studioTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>
+          <p class="muted">Describe the house, or start from one of your sketches. Each image takes about a minute. These are AI concept images for ideas and finishes, labelled <b>AI concept — not to scale</b>; renders that match your drawings exactly come from the 3D model in a later phase.</p></div>
+      </div>
+      <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add an OpenAI key to the server.</div>
+      <form id="renderForm" class="render-form card" hidden>
+        <label class="field span2">Describe it
+          <textarea id="rPrompt" rows="3" maxlength="2000" required placeholder="e.g. Modern two-storey 4-bed duplex, flat roof with parapet, large windows, gated compound in Lekki"></textarea></label>
+        <label class="field">Start from
+          <select id="rRef"><option value="">Nothing: a fresh concept</option></select>
+          <span class="hint">Your PNG or JPEG sketches and photos. The design and camera are kept.</span></label>
+        <label class="field">View
+          <select id="rView"><option value="exterior">Exterior</option><option value="interior">Interior</option><option value="aerial">Aerial</option></select></label>
+        <label class="field">Light
+          <select id="rLight"><option value="morning">Morning</option><option value="midday" selected>Midday</option><option value="golden hour">Golden hour</option><option value="dusk">Dusk, lights on</option><option value="night">Night</option></select></label>
+        <label class="field">Shape
+          <select id="rAspect"><option value="landscape">Landscape 3:2</option><option value="portrait">Portrait 2:3</option><option value="square">Square</option></select></label>
+        <label class="field">Materials and colours <span class="hint">Optional</span>
+          <input type="text" id="rMaterials" maxlength="400" placeholder="e.g. white render, dark grey roof, timber cladding"></label>
+        <label class="field">Landscaping <span class="hint">Optional</span>
+          <input type="text" id="rLand" maxlength="400" placeholder="e.g. palm trees, interlocking paving, low hedge"></label>
+        <label class="field">Detail
+          <select id="rQuality"><option value="medium">Standard</option><option value="high">High (slower, costs more)</option></select></label>
+        <div class="render-go span2">
+          <button class="btn primary big" type="submit" id="renderBtn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 10 4h4l6 16M7 13h10"/></svg>Create concept</button>
+          <div id="renderMsg" class="notice error" role="status" hidden></div>
+        </div>
+      </form>
+      <div class="jobs" id="jobList" aria-live="polite"></div>
+      <div class="gallery" id="gallery"></div>
+      <div class="empty" id="galleryEmpty" hidden>No concepts yet. Describe the house above and press Create concept.</div>
+    </section>
     <div class="danger-zone">
-      <div><h3>Delete this project</h3><p class="muted">Removes the project and every file in it. This cannot be undone.</p></div>
+      <div><h3>Delete this project</h3><p class="muted">Removes the project, every file and every render in it. This cannot be undone.</p></div>
       <div class="confirm" id="deleteArea"><button class="btn danger" type="button" id="deleteBtn">Delete project</button></div>
     </div>
   </section>

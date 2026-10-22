@@ -1,4 +1,4 @@
-"""Ollic Design Studio API (Phase 1: foundation)."""
+"""Ollic Design Studio API (Phase 1: foundation, Phase 2: concept renders)."""
 
 from __future__ import annotations
 
@@ -13,26 +13,32 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import TokenVerifier
 from .config import Settings
-from .routes import projects
+from .jobs import ThreadRunner
+from .openai_images import OpenAIImages
+from .routes import projects, renders
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
 
 
-def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, runner=None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
     app.state.verifier = verifier or TokenVerifier(settings)
     app.state.repo = repo or SupabaseRepository(settings)
     app.state.storage = storage or SupabaseStorage(settings)
+    if image_client is None and settings.renders_enabled:
+        image_client = OpenAIImages(settings.openai_api_key, settings.openai_base_url)
+    app.state.image_client = image_client  # None until OPENAI_API_KEY is set; the render endpoints then say so
+    app.state.runner = runner or ThreadRunner()
 
     if settings.web_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(settings.web_origins),
             allow_methods=["GET", "POST", "PATCH", "DELETE"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
         )
 
     @app.exception_handler(BackendUnavailable)
@@ -42,9 +48,10 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        return {"status": "ok", "renders": "on" if settings.renders_enabled else "off"}
 
     app.include_router(projects.router, prefix="/api")
+    app.include_router(renders.router, prefix="/api")
 
     # The website's public settings come from the server's environment, so keys are
     # entered once (e.g. in Railway's variables). Only public values are sent: the

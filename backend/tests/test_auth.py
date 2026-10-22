@@ -12,7 +12,7 @@ from .conftest import make_token
 
 
 def test_health_needs_no_sign_in(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "renders": "off"}
 
 
 def test_missing_token_is_rejected(client):

@@ -25,6 +25,13 @@ app.html + assets/*.js  ──►   /api/*  verify JWT (auth.py)    ──►   
 - If the database write fails after the upload, the stored object is deleted, so no orphan files are left.
 - Deleting a project removes its storage objects first, then the rows. The database cascades from project to source files.
 
+## Concept renders (Phase 2)
+
+1. The browser posts a render or revision request with an `Idempotency-Key`. The API checks ownership, validates the options, refuses tokens with under 5 minutes left, and writes a `jobs` row (`queued`).
+2. A thread pool in the web service (`app/jobs.py`) runs `app/renders.py::run_render_job` as the same user. It calls OpenAI's Image API from the server (`app/openai_images.py`). The key never leaves the server.
+3. Straight after the call, the cost is written to `usage_events` from the reported tokens (`app/pricing.py`). Then the image is checked with Pillow and stored twice in the private `renders` bucket: an unlabelled base (used for revisions) and a copy stamped "AI concept - not to scale". A `rendered_images` row links them, with `parent_image_id` for revisions.
+4. The page reads `GET /api/projects/{id}/outputs` (signed one-hour links plus job states) and polls while anything is running. A job untouched for 10 minutes is marked failed with an explanation.
+
 ## Decisions
 
 | Decision | Why |
