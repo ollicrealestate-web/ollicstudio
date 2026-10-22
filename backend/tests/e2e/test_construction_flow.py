@@ -1,6 +1,7 @@
 """End-to-end in a real browser with WebGL and WebCodecs: an architect uploads a two-storey
-IFC, opens the construction animation, scrubs through it, changes it in plain words, and
-exports an MP4 that the server checks, converts and saves. Supabase Auth and the AI director
+IFC, opens the construction animation (luxury style: gold wireframe, photoreal reveal), makes
+the photoreal views, scrubs through it, changes it in plain words, and exports an MP4 that the
+server checks, converts and saves. Supabase Auth and the AI director
 are stand-ins; IFC processing, the animation, the browser's video encoder and FFmpeg are real."""
 
 from __future__ import annotations
@@ -41,9 +42,9 @@ def stack(tmp_path_factory):
     settings = Settings(supabase_url=f"http://127.0.0.1:{auth_port}", supabase_anon_key="anon", supabase_jwt_secret=SECRET, web_dir=str(web),
                         cloudflare_account_id="acct", cloudflare_api_token="cf")
     director = FakeDirector(settings={"format": "1:1", "phases": {"roof": {"seconds": 2}}, "rooms": ["Kitchen", "Attic"]})
-    repo, storage = FakeRepo(), MediaLinkStorage()
+    repo, storage, images = FakeRepo(), MediaLinkStorage(), FakeImages()
     api = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=ThreadRunner(),
-                     image_clients={"standard": FakeImages(), "premium": None}, vision=None, prompt_writer=None, directors={"standard": director})
+                     image_clients={"standard": images, "premium": None}, vision=None, prompt_writer=None, directors={"standard": director})
     auth = fake_supabase_auth()
     from fastapi.middleware.cors import CORSMiddleware
     auth.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -53,14 +54,15 @@ def stack(tmp_path_factory):
     for s in servers:
         while not s.started:
             time.sleep(0.05)
-    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "storage": storage, "director": director, "dir": web}
+    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "storage": storage, "director": director, "dir": web, "images": images}
     for s in servers:
         s.should_exit = True
 
 
 # A short animation, so the test exports in a few minutes on a machine without a graphics card.
 SHORT = {"phases": {"site": {"seconds": 1}, "foundation": {"seconds": 1}, "structure": {"seconds": 1}, "walls": {"seconds": 1}, "openings": {"seconds": 1},
-                    "roof": {"seconds": 1}, "orbit": {"seconds": 2}, "furnish": {"on": False}, "interior": {"on": False}}, "renders": False, "title": "Villa build"}
+                    "roof": {"seconds": 1}, "orbit": {"seconds": 2}, "furnish": {"on": False}, "interior": {"on": False}}, "renders": False, "title": "Villa build",
+         "style": "luxury", "heroes": 1}
 
 
 def test_construction_animation_in_the_browser(stack, tmp_path):
@@ -86,16 +88,27 @@ def test_construction_animation_in_the_browser(stack, tmp_path):
         page.wait_for_selector("#animPanel:not([hidden])")
         assert page.get_attribute("#viewBuild", "aria-pressed") == "true" and not page.is_visible("#useView")
         chapters = [c.title() for c in page.locator("#animChapters button").all_text_contents()]
-        assert chapters == ["Site", "Foundation", "Structure", "Walls", "Structure", "Walls", "Doors And Windows", "Roof", "Completed Building", "Furniture", "Inside"]
-        assert "0:56" in page.inner_text("#animTime")       # 3+4+(4+3)*2+3+4+8+4+4*4 rooms
+        assert chapters == ["Site", "Foundation", "Structure", "Walls", "Structure", "Walls", "Doors And Windows", "Roof", "Completed Building"]
+        assert "0:44" in page.inner_text("#animTime")       # 3+4+(4+3)*2+3+4, then 2 photoreal views of 8 s
+        assert page.is_visible("#animHeroes") and page.locator("#heroList .hero-card").count() == 2
+        assert "Make photoreal views (2)" in page.inner_text("#heroBtn")
+
+        # the photoreal views: one render per hero view, of the plain finished model, tagged with its key
+        page.fill("#aLook", "white render, bronze glass, palm trees")
+        page.click("#heroBtn")
+        page.wait_for_function("[...document.querySelectorAll('#heroList .hero-card')].every(c => c.textContent.includes('Ready'))", timeout=60000)
+        heroes = [c for c in stack["images"].calls]
+        assert len(heroes) == 2 and all("Photorealistic luxury architectural visualisation" in c["prompt"] and "white render, bronze glass" in c["prompt"] for c in heroes)
+        tags = sorted(i["options"]["anim_hero"]["index"] for i in stack["repo"].images.values() if (i.get("options") or {}).get("anim_hero"))
+        assert tags == [0, 1] and "Remake" in page.inner_text("#heroBtn")
         page.click("#animChapters button:has-text('Roof')")
         assert "Roof" in page.inner_text("#animTime")
         page.locator("#viewer").screenshot(path=str(shots / "e2e-construction-roof.png"))
+        page.fill("#animScrub", "3300"); page.dispatch_event("#animScrub", "input")     # mid-sweep of view 1
+        page.locator("#viewer").screenshot(path=str(shots / "e2e-construction-reveal.png"))
         page.fill("#animScrub", "1500")      # 15 s: first-floor structure (site 3, foundation 4, ground floor 4 + 3)
         page.dispatch_event("#animScrub", "input")
         assert "First floor · structure" in page.inner_text("#animTime")
-        page.click("#animChapters button:has-text('Inside')")
-        assert "Kitchen" in page.inner_text("#animTime")
 
         # 2. plain words
         page.fill("#animAsk", "Make it square for Instagram, slower roof, and only show the kitchen")
@@ -113,13 +126,14 @@ def test_construction_animation_in_the_browser(stack, tmp_path):
                       {**SHORT, "format": "1:1"})
         page.click("#viewOutside"); page.click("#viewBuild")
         assert "0:10" in page.inner_text("#animTime")
+        page.wait_for_function("document.querySelector('#heroList')?.textContent.includes('Ready') || document.querySelector('#heroList')?.textContent.includes('Wireframe')")
         page.screenshot(path=str(shots / "e2e-construction.png"), full_page=True)
         page.click("#animExport")
         page.wait_for_selector("#animProgress:not([hidden])")
         page.wait_for_selector("#animVideos .video-card video", timeout=900000)
         (vid,) = stack["repo"].videos.values()
         assert vid["kind"] == "construction" and (vid["width"], vid["height"], vid["format"]) == (1080, 1080, "1:1") and vid["title"] == "Villa build"
-        assert abs(float(vid["duration_s"]) - 16) < 0.2               # 3 s card + 10 s build + 3 s card
+        assert abs(float(vid["duration_s"]) - 16) < 0.2               # 3 s card + 8 s build + 2 s photoreal view + 3 s card
         assert vid["script"]["phases"]["furnish"]["on"] is False
         assert "CONSTRUCTION" in page.inner_text("#animVideos").upper() and page.locator("#videoList .video-card").count() == 0
         data = stack["storage"].buckets["videos"][vid["storage_path"]][0]

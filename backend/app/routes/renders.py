@@ -35,6 +35,12 @@ class Reference(BaseModel):
     role: Literal["base", "model", "plan", "style"]
 
 
+class AnimHero(BaseModel):
+    """Marks a render as the photoreal version of one of the construction animation's hero views."""
+    index: int = Field(ge=0, le=2)
+    key: str = Field(pattern=r"^[A-Za-z0-9_-]{4,64}$")
+
+
 class ConceptRenderIn(BaseModel):
     prompt: str = Field(min_length=3, max_length=2500)
     reference_file_id: uuid.UUID | None = None          # older clients: one base image
@@ -49,6 +55,7 @@ class ConceptRenderIn(BaseModel):
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
     quality: Literal["medium", "high", "max"] = "high"   # Premium render only; Standard has one level
     tier: Literal["standard", "premium"] = "standard"
+    anim_hero: AnimHero | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -222,14 +229,16 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
     _owned_project(request, user, project_id)
     repo, settings = _repo(request), request.app.state.settings
     images = [i for i in repo.list_rendered_images(user, str(project_id)) if i.get("owner_id") == user.id]
-    links = _storage(request).signed_urls(user, [i["storage_path"] for i in images], bucket=settings.renders_bucket) if images else {}
+    paths = [i["storage_path"] for i in images] + [i["base_path"] for i in images if i.get("base_path")]
+    links = _storage(request).signed_urls(user, paths, bucket=settings.renders_bucket) if images else {}
     out = []
     for i in images:
         url = links.get(i["storage_path"])
         name = f"ollic-{i['kind']}-{i['id'][:8]}{'-AI-concept-not-to-scale' if i['kind'] == 'concept' else ''}.jpg"
         tier = (i.get("options") or {}).get("tier") or ("premium" if str(i.get("model", "")).startswith("gpt-") else "standard")
         out.append({k: i.get(k) for k in ("id", "kind", "label", "prompt", "parent_image_id", "source_file_id", "options", "width", "height", "created_at", "job_id")}
-                   | {"tier": tier, "tier_name": TIER_NAME[tier], "url": url, "download_url": f"{url}&download={name}" if url else None})
+                   | {"tier": tier, "tier_name": TIER_NAME[tier], "url": url, "download_url": f"{url}&download={name}" if url else None,
+                      "base_url": links.get(i.get("base_path") or "")})   # unlabelled, for videos that draw the label themselves
     jobs = [_settle_stale(request, user, j) for j in repo.list_jobs(user, str(project_id)) if j.get("owner_id") == user.id]
     plan = user_plan(request, user)
     clients = request.app.state.image_clients

@@ -49,6 +49,9 @@ class Phase(BaseModel):
 class Script(BaseModel):
     """Everything the customer (or the director) can change. Out-of-range numbers are brought into range, not refused."""
     version: Literal[1] = 1
+    style: Literal["luxury", "technical"] = "luxury"
+    heroes: int = Field(default=2, ge=1, le=3, description="luxury: how many photoreal reveal views")
+    look: str = Field(default="", max_length=400, description="luxury: materials, landscaping and mood for the photoreal views")
     phases: dict[str, Phase] = Field(default_factory=dict)
     rooms: list[str] = Field(default_factory=list, max_length=40, description="rooms to visit inside, in order; empty means all")
     time_of_day: Literal["morning", "midday", "golden hour", "dusk"] = "midday"
@@ -91,7 +94,7 @@ class Script(BaseModel):
     def unique(cls, v):
         return list(dict.fromkeys(v))
 
-    @field_validator("title", "subtitle")
+    @field_validator("title", "subtitle", "look")
     @classmethod
     def one_line(cls, v):
         return " ".join(v.split())
@@ -121,7 +124,12 @@ def restrict_rooms(script: Script, known: list[str]) -> Script:
 
 # ---------------------------------------------------------------- the director
 SYSTEM = (
-    "You direct construction animations of buildings for architects. The animation is generated from the architect's BIM model in this order: "
+    "You direct construction animations of buildings for architects. There are two styles. style 'luxury' (default): a night scene; glowing gold "
+    "setting-out lines on the plot, then a glowing gold wireframe of the building rises floor by floor, then for each of 'heroes' (1-3) camera views a "
+    "line of light sweeps up the building turning the wireframe into a photoreal AI render, then still AI renders of the rooms. In luxury, the 'orbit' "
+    "phase is that photoreal reveal (seconds PER VIEW), 'look' describes materials, landscaping and mood for the photoreal views (e.g. 'white render, "
+    "bronze glass, palm trees, warm lights'), and furnish and interior are not shown. style 'technical': a daylight build of the plain model. "
+    "The build is generated from the architect's BIM model in this order: "
     "site (empty plot, setting-out lines), foundation (footings and ground slab rise), then for each floor in turn: structure (columns grow, beams and slabs drop in) "
     "and walls (walls rise), then openings (doors and windows), roof (comes down), orbit (camera flies around the finished building), "
     "furnish (roof lifts off and furniture drops into the rooms), interior (camera stands in each room and pans slowly), then still AI renders of the rooms. "
@@ -134,6 +142,7 @@ SYSTEM = (
     "time_of_day: one of " + ", ".join(TIMES) + " (sunset means golden hour; evening means dusk). "
     "direction: clockwise or anticlockwise (the fly-around). hide: groups not to show, from: " + ", ".join(HIDEABLE) + ". "
     "renders: true to end with the AI renders of the rooms; render_seconds 2.5-10 each. captions: true to show stage names. "
+    "style: luxury or technical. heroes: 1-3. look: up to 400 characters. "
     "title, subtitle: text on the opening card. format: 16:9, 9:16 or 1:1 (portrait for Instagram Reels, TikTok and WhatsApp Status is 9:16). "
     "If the request asks for something these settings cannot do (people, cranes, weather, sound, changing the design), do what you can and say plainly in notes what is not possible. "
     'Answer with JSON only, no prose: {"settings": {...all settings...}, "notes": "one or two short sentences for the architect on what changed"}'

@@ -129,7 +129,7 @@ export async function exportVideo({ seq, script, stills = [], brand = "Ollic Des
     } else if (p.kind === "build") {
       const canvas = seq.renderFrame(lt, w, h);
       g.drawImage(canvas, 0, 0, w, h);
-      drawCaption(g, w, h, { title: script.captions ? seq.labelAt(lt) : "", tag: "Indicative sequence — not to scale", brand });
+      drawCaption(g, w, h, { title: script.captions ? seq.labelAt(lt) : "", tag: seq.tagAt ? seq.tagAt(lt) : "Indicative sequence — not to scale", brand });
     } else {
       g.fillStyle = BLACK; g.fillRect(0, 0, w, h);
       drawStill(g, w, h, p.still.img, k, p.index);

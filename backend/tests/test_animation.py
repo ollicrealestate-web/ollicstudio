@@ -68,6 +68,8 @@ def test_browser_and_server_share_the_same_rules():
     assert js["p"] == list(PHASES) and js["d"] == DEFAULT_SECONDS and {k: tuple(v) for k, v in js["l"].items()} == LIMITS
     py = Script.model_validate({"phases": {"roof": {"seconds": 99}}}).model_dump()
     assert js["n"]["phases"] == py["phases"] and js["n"]["render_seconds"] == py["render_seconds"]
+    out = subprocess.run([node, "--input-type=module", "-e", f"import * as c from '{src}'; console.log(JSON.stringify(c.defaultScript()))"], capture_output=True, text=True, check=True)
+    assert json.loads(out.stdout) == Script().model_dump()     # the same starting settings everywhere
 
 
 def test_director_replies_are_parsed_and_checked():
@@ -206,3 +208,19 @@ def test_export_refusals(anim, alice, bob, repo, tmp_path):
     assert post(alice, clip, meta(items=[{"caption": "Kitchen", "render_id": rid}])).status_code == 404
     assert not [j for j in repo.jobs.values() if j["type"] == "animation_export"]
     assert not any(UPLOAD_DIR.glob("*.video"))   # refused uploads are deleted
+
+
+def test_photoreal_views_are_tagged_and_unlabelled_links_are_given(anim, alice, repo):
+    c, _, _ = anim
+    pid = new_project(c, alice)
+    from .test_studio import upload
+    from . import samples
+    view = upload(c, alice, pid, "Photoreal view 1.png", samples.png(150, 100))
+    body = {"prompt": "White render, bronze glass, at night", "view": "exterior", "time_of_day": "night", "aspect": "landscape",
+            "references": [{"file_id": view["id"], "role": "model"}], "anim_hero": {"index": 0, "key": "hvabc1230"}}
+    r = c.post(f"/api/projects/{pid}/architectural-render", json=body, headers={**alice["headers"], "Idempotency-Key": "hero-test-0001"})
+    assert r.status_code == 202, r.text
+    (img,) = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"]
+    assert img["options"]["anim_hero"] == {"index": 0, "key": "hvabc1230"} and img["base_url"] and img["base_url"] != img["url"]
+    bad = {**body, "anim_hero": {"index": 5, "key": "x"}}
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=bad, headers={**alice["headers"], "Idempotency-Key": "hero-test-0002"}).status_code == 422

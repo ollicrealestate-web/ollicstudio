@@ -31,6 +31,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | **Render all shots**: one brief, style and look references for every ticked shot; inside shots render as interiors; the whole batch is checked against the daily allowance first | Built and tested | `test_walkthrough.py`, e2e walkthrough test |
 | **Walkthrough video**: chosen renders become an MP4 (16:9, 9:16 or 1:1) with slow camera moves, dips through black, room titles, title and end cards, made by FFmpeg on our server; private, downloadable, removed with the project | Built and tested with real FFmpeg (6 shots in 38 s on 2 CPUs, 250 MB peak); **verified live** (see below) | `test_walkthrough.py`, e2e walkthrough test |
 | **Construction animation**: site, foundation, each floor's structure and walls, doors and windows, roof, fly-around, furniture, rooms, then the AI room renders; preview with play, scrub and stage chapters; settings for every stage's seconds, light, direction, format, hidden groups, rooms, captions, title | Built and tested in a browser | e2e construction test, `test_animation.py` |
+| **Luxury style** (default): night, gold setting-out grid, glowing gold wireframe rising floor by floor, then a line of light sweeping each hero view into its photoreal AI render; **Make photoreal views** (one render per view) | Built and tested in a browser, including a real export; the look was approved by the owner from a test clip made with a live render | e2e construction test |
 | **Animation director**: plain words change the settings (Standard: free text model; paid plans: Claude); 40 a day | Built and tested with stand-ins; live once migration 8 is run | `test_animation.py` |
 | **Construction video export**: made in the browser (H.264, or VP9 converted by the server), checked, made phone-friendly and saved; 16:9, 9:16, 1:1 | Built and tested (VP9 path end to end; H.264 path on the server) | e2e construction test, `test_animation.py` |
 | **3D viewer**: outside, inside with roof off and room names, floor picker, element details, GLB and IFC downloads; draws only on change; fits phones | Built and tested in a browser (WebGL) | e2e model test |
@@ -45,7 +46,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 
 ## Test run (session 2)
 
-`cd backend && python -m pytest`: **139 passed, 0 failed**, Python 3.13. (`test_web_flow.py` failed once in one of four full runs and passed in every other run, alone and in the suite; not yet explained.)
+`cd backend && python -m pytest`: **140 passed, 0 failed**, Python 3.13. (`test_web_flow.py` failed once in one of four full runs and passed in every other run, alone and in the suite; not yet explained.)
 
 - Phase 1: `test_auth.py` 10, `test_projects.py` 6, `test_uploads.py` 20, `test_supabase_client.py` 5
 - Renders: `test_renders.py` 25, `test_openai_client.py` 11, `test_cloudflare.py` 12, `test_studio.py` 12, `test_prompting.py` 5

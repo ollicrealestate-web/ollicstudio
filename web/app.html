@@ -143,6 +143,15 @@
             <span class="mono" id="animTime">0:00 / 0:00</span>
           </div>
           <div class="anim-chapters" id="animChapters" role="group" aria-label="Jump to a stage"></div>
+          <div class="anim-heroes" id="animHeroes">
+            <div class="anim-heroes-head">
+              <div><b>Photoreal views</b> <span class="hint" id="heroNote">The gold wireframe turns into these AI renders as the line of light sweeps up. Each view uses one render from your daily allowance.</span></div>
+              <button type="button" class="btn primary" id="heroBtn">Make photoreal views</button>
+            </div>
+            <label class="field">Look of the finished building <span class="hint">Materials, colours, landscaping, mood. Look photos ticked under Concept renders are used too.</span>
+              <input type="text" id="aLook" maxlength="400" placeholder="e.g. white render, dark bronze glass, timber soffits, palm trees, warm uplights"></label>
+            <div class="hero-list" id="heroList"></div>
+          </div>
           <form class="anim-direct" id="animDirect">
             <label class="field" for="animAsk">Tell the director what you want <span class="hint">In plain words, e.g. “slow down on the roof, show it at sunset, spend more time in the kitchen, skip the stairs”.</span></label>
             <div class="row"><input type="text" id="animAsk" maxlength="600" placeholder="e.g. make it portrait for Instagram and visit the master bedroom first">
@@ -154,7 +163,9 @@
             <div class="anim-grid">
               <fieldset class="field phase-list"><legend>Stages and seconds</legend><div id="animPhases"></div></fieldset>
               <div class="anim-side">
-                <label class="field">Light <select id="aTime"><option value="morning">Morning</option><option value="midday">Midday</option><option value="golden hour">Golden hour (sunset)</option><option value="dusk">Dusk</option></select></label>
+                <label class="field">Style <select id="aStyle"><option value="luxury">Luxury: night, gold wireframe, photoreal reveal</option><option value="technical">Technical: daylight build of the model</option></select></label>
+                <label class="field" id="aHeroesField">Photoreal views <select id="aHeroes"><option value="1">1 view</option><option value="2">2 views</option><option value="3">3 views</option></select></label>
+                <label class="field" id="aTimeField">Light <select id="aTime"><option value="morning">Morning</option><option value="midday">Midday</option><option value="golden hour">Golden hour (sunset)</option><option value="dusk">Dusk</option></select></label>
                 <label class="field">Fly-around <select id="aDir"><option value="anticlockwise">Anticlockwise</option><option value="clockwise">Clockwise</option></select></label>
                 <label class="field">Format <select id="aFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
                 <label class="field">Title <input type="text" id="aTitle" maxlength="80"></label>

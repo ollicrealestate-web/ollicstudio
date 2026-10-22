@@ -310,7 +310,7 @@ async function loadOutputs() {
   drawJobs(out.jobs.filter(j => j.type === "video_export"), "#walkJobs");
   drawJobs(out.jobs.filter(j => j.type === "animation_export"), "#animJobs");
   drawGallery(out.images);
-  images = out.images; drawWalk();
+  images = out.images; drawWalk(); if (seq) refreshHeroes();
   const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   vids.forEach(j => seenDone.add(j.id));
   if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "animation_export") ? "Your construction video is ready." : "Your walkthrough video is ready."); }
@@ -612,7 +612,7 @@ function drawVideos() {
 const PHASE_UI = { site: "Site", foundation: "Foundation", structure: "Structure (per floor)", walls: "Walls (per floor)", openings: "Doors and windows",
   roof: "Roof", orbit: "Fly-around", furnish: "Furniture", interior: "Rooms (per room)" };
 const HIDE_UI = { furniture: "Furniture", stairs: "Stairs", beams: "Beams", columns: "Columns", footings: "Footings", doors: "Doors", windows: "Windows", railings: "Railings" };
-let C = null, seq = null, animScript = null, animT = 0, animPlaying = false, animRaf = 0, lastTick = 0, exporting = null;
+let C = null, LUX = null, heroImgs = [], heroPending = new Set(), seq = null, animScript = null, animT = 0, animPlaying = false, animRaf = 0, lastTick = 0, exporting = null;
 const fmtClock = x => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
 const scriptKey = () => `ollic-anim-${current?.id}`;
 function saveScript() { try { localStorage.setItem(scriptKey(), JSON.stringify(animScript)); } catch { /* private mode: settings last until the page closes */ } }
@@ -642,8 +642,9 @@ function previewSize() { const e = viewer.engine(); e.renderer.setPixelRatio(Mat
 function buildSeq() {
   if (seq) seq.dispose();
   previewSize();
-  seq = C.createConstruction(viewer.engine(), animScript);
+  seq = C.createConstruction(viewer.engine(), animScript, { lux: LUX, heroImages: heroImgs });
   animScript = seq.script;
+  refreshHeroes();
   animT = Math.min(animT, seq.duration);
   $("#animScrub").max = String(Math.round(seq.duration * 100));
   $("#animChapters").replaceChildren(...seq.segments.filter((s, i, a) => i === 0 || s.phase !== a[i - 1].phase).map(s =>
@@ -656,7 +657,7 @@ function buildSeq() {
 function showAt(t) {
   if (!seq) return;
   animT = Math.max(0, Math.min(seq.duration, t));
-  seq.frameAt(animT); viewer.engine().render();
+  seq.frameAt(animT); seq.draw();
   $("#animScrub").value = String(Math.round(animT * 100));
   $("#animTime").textContent = `${fmtClock(animT)} / ${fmtClock(seq.duration)} · ${seq.labelAt(animT)}`;
 }
@@ -678,14 +679,19 @@ $("#animPlay").onclick = () => {
 $("#animScrub").oninput = e => { stopAnim(); showAt(Number(e.target.value) / 100); };
 
 function drawAnimSettings() {
-  const s = animScript;
+  const s = animScript, lux = s.style === "luxury" && !!LUX;
+  $("#aStyle").value = s.style; $("#aHeroes").value = String(s.heroes); $("#aLook").value = s.look;
+  $("#aHeroesField").hidden = !lux; $("#aTimeField").hidden = lux; $("#animHeroes").hidden = !lux;
   $("#animPhases").replaceChildren(...C.PHASES.map(p => {
     const [lo, hi] = C.LIMITS[p];
     const on = el("input", { type: "checkbox", ...(s.phases[p].on ? { checked: "" } : {}), "aria-label": `Show ${PHASE_UI[p]}` });
     const sec = el("input", { type: "number", min: String(lo), max: String(hi), step: "0.5", value: String(s.phases[p].seconds), "aria-label": `Seconds for ${PHASE_UI[p]}` });
     on.onchange = () => { s.phases[p].on = on.checked; changed(); };
     sec.onchange = () => { s.phases[p].seconds = Number(sec.value); changed(); };
-    return el("div", { class: "phase-row" }, el("label", { class: "check" }, on, PHASE_UI[p]), el("span", { class: "sec" }, sec, "s"));
+    const off = lux && (p === "furnish" || p === "interior");
+    if (off) { on.disabled = true; sec.disabled = true; }
+    const name = lux && p === "orbit" ? "Photoreal reveal (per view)" : off ? `${PHASE_UI[p]}: shown as AI renders in this style` : PHASE_UI[p];
+    return el("div", { class: `phase-row${off ? " off" : ""}` }, el("label", { class: "check" }, on, name), el("span", { class: "sec" }, sec, "s"));
   }));
   $("#aTime").value = s.time_of_day; $("#aDir").value = s.direction; $("#aFormat").value = s.format;
   $("#aTitle").value = s.title; $("#aSub").value = s.subtitle; $("#aCaptions").checked = s.captions;
@@ -701,6 +707,9 @@ function changed(redraw = false) {
   animScript = C.normalise(animScript); saveScript(); frameViewer(); buildSeq();
   if (redraw) drawAnimSettings();
 }
+$("#aStyle").onchange = e => { animScript.style = e.target.value; changed(true); };
+$("#aHeroes").onchange = e => { animScript.heroes = Number(e.target.value); changed(true); };
+$("#aLook").onchange = e => { animScript.look = e.target.value.trim(); saveScript(); };
 $("#aTime").onchange = e => { animScript.time_of_day = e.target.value; changed(); };
 $("#aDir").onchange = e => { animScript.direction = e.target.value; changed(); };
 $("#aFormat").onchange = e => { animScript.format = e.target.value; changed(); };
@@ -759,6 +768,68 @@ $("#animExport").onclick = async () => {
 $("#animCancel").onclick = () => exporting?.abort();
 
 import("./construction.js").then(m => { C = m; }).catch(() => { /* the button explains */ });
+import("./luxury.js").then(m => { LUX = m; }).catch(() => { /* without it, the technical style is used */ });
+
+/* photoreal views for the luxury style: the AI render of each hero view, matched by its key */
+function refreshHeroes() {
+  if (!seq) return;
+  const n = seq.luxury ? animScript.heroes : 0;
+  heroImgs.length = n;
+  for (let k = 0; k < n; k++) {
+    const key = seq.heroKey(k);
+    const r = images.find(i => (i.options || {}).anim_hero?.key === key && (i.base_url || i.url));
+    if (!r) { heroImgs[k] = null; continue; }
+    heroPending.delete(key);
+    if (heroImgs[k]?._rid === r.id) continue;
+    heroImgs[k] = null;
+    const img = new Image(); img.crossOrigin = "anonymous"; img._rid = r.id; img._url = r.url;
+    img.onload = () => { if (seq && seq.heroKey(k) === key) { heroImgs[k] = img; drawHeroes(); showAt(animT); } };
+    img.src = r.base_url || r.url;
+  }
+  drawHeroes();
+}
+function drawHeroes() {
+  if (!seq || !seq.luxury) return;
+  const n = animScript.heroes;
+  $("#heroList").replaceChildren(...Array.from({ length: n }, (_, k) => {
+    const img = heroImgs[k], key = seq.heroKey(k), waiting = heroPending.has(key);
+    return el("div", { class: "hero-card" },
+      el("div", { class: "thumb" }, img ? el("img", { src: img._url || img.src, alt: `Photoreal view ${k + 1}` }) : waiting ? "Rendering…" : "Not made yet"),
+      el("div", { class: "cap" }, el("span", {}, `View ${k + 1}`), el("span", { class: "hint" }, img ? "Ready" : waiting ? "About a minute" : "Wireframe only")));
+  }));
+  const missing = Array.from({ length: n }, (_, k) => !heroImgs[k] && !heroPending.has(seq.heroKey(k))).filter(Boolean).length;
+  $("#heroBtn").textContent = missing ? `Make photoreal view${missing > 1 ? "s" : ""} (${missing})` : "Remake photoreal views";
+}
+$("#heroBtn").onclick = async () => {
+  if (!seq || !seq.luxury) return;
+  if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
+  const n = animScript.heroes, keys = Array.from({ length: n }, (_, k) => seq.heroKey(k));
+  let todo = keys.map((key, k) => k).filter(k => !heroImgs[k] && !heroPending.has(keys[k]));
+  if (!todo.length) todo = keys.map((_, k) => k);
+  const [w, h, aspect] = { "16:9": [1536, 1024, "landscape"], "9:16": [1024, 1536, "portrait"], "1:1": [1024, 1024, "square"] }[animScript.format];
+  stopAnim();
+  const shots = [];
+  for (const k of todo) {
+    const canvas = seq.heroSnapshot(k, w, h);
+    shots.push({ k, blob: await new Promise(res => canvas.toBlob(res, "image/png")) });
+  }
+  previewSize(); showAt(animT);
+  const btn = $("#heroBtn"); btn.disabled = true;
+  const look = $("#aLook").value.trim() || animScript.look;
+  const prompt = `${look ? look + ". " : ""}Photorealistic luxury architectural visualisation of this exact building at night: blue hour sky with stars, warm light glowing from every window, `
+    + "subtle warm facade uplighting, refined landscaping, cinematic low-angle architectural photography. Keep the building's exact shape, floors, roof and window positions from the model view.";
+  try {
+    for (const { k, blob } of shots) {
+      const f = await uploadFile(current.id, new File([blob], `Photoreal view ${k + 1}.png`, { type: "image/png" }), () => {});
+      const looks = tickedLooks().filter(id => id !== f.id).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
+      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", materials: look.slice(0, 400),
+        tier: chosenTier(), quality: $("#rQuality").value, references: [{ file_id: f.id, role: "model" }, ...looks], anim_hero: { index: k, key: keys[k] } }, newKey());
+      heroPending.add(keys[k]); drawHeroes();
+    }
+    toast(`Making ${shots.length} photoreal view${shots.length > 1 ? "s" : ""}. Each takes about a minute.`);
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; current = await api.getProject(current.id).catch(() => current); renderProject(); loadOutputs(); }
+};
 
 /* ---------- start ---------- */
 (async function start() {

@@ -12,7 +12,7 @@ export const PHASE_LABEL = { site: "Site", foundation: "Foundation", structure: 
   orbit: "Completed building", furnish: "Furniture", interior: "Inside" };
 
 export function defaultScript() {
-  return { version: 1, phases: Object.fromEntries(PHASES.map(p => [p, { on: true, seconds: DEFAULT_SECONDS[p] }])), rooms: [], time_of_day: "midday",
+  return { version: 1, style: "luxury", heroes: 2, look: "", phases: Object.fromEntries(PHASES.map(p => [p, { on: true, seconds: DEFAULT_SECONDS[p] }])), rooms: [], time_of_day: "midday",
     direction: "anticlockwise", hide: [], renders: true, render_seconds: 4, captions: true, title: "", subtitle: "", format: "16:9" };
 }
 
@@ -28,6 +28,9 @@ export function normalise(s) {
   out.render_seconds = Math.min(10, Math.max(2.5, Number(out.render_seconds) || 4));
   out.rooms = Array.isArray(out.rooms) ? out.rooms : [];
   out.hide = Array.isArray(out.hide) ? out.hide : [];
+  out.style = out.style === "technical" ? "technical" : "luxury";
+  out.heroes = Math.min(3, Math.max(1, Math.round(Number(out.heroes) || 2)));
+  out.look = String(out.look || "").split(/\s+/).join(" ").trim().slice(0, 400);
   return out;
 }
 
@@ -56,13 +59,15 @@ const lerp = (a, b, k) => a + (b - a) * k;
  * ctx: viewer.engine(). script: animation settings. Returns the animation:
  * { duration, segments, frameAt(t), labelAt(t), rooms, context(), renderFrame(t, w, h), dispose() }
  */
-export function createConstruction(ctx, script) {
+export function createConstruction(ctx, script, extras = {}) {
   const { THREE, scene, camera, ground, sun, hemi } = ctx;
   script = normalise(script);
   const P = script.phases;
   const groundY = ctx.groundY;
   const storeys = ctx.storeys.slice();
   const hiddenBy = script.hide.map(h => HIDE_GROUPS[h]).filter(Boolean);
+  const luxury = script.style === "luxury" && !!extras.lux;     // the night, gold-wireframe and photoreal-reveal look
+  const heroImages = extras.heroImages || [];
 
   // ---------------------------------------------------------------- the elements and their groups
   const items = [];
@@ -159,11 +164,15 @@ export function createConstruction(ctx, script) {
   const rf = pick("roof");
   if (rf.length) { const s = segment("roof", P.roof.seconds, "Roof"); schedule(rf, s.start, s.end - s.start, () => "drop", (a, b) => (a.base - b.base) || sweep(a) - sweep(b)); }
   const buildEnd = clock;
-  const orbit = segment("orbit", P.orbit.seconds, "Completed building");
+  const reveals = [];
+  if (luxury) for (let k = 0; k < script.heroes; k++) reveals.push(segment("orbit", P.orbit.seconds, "Completed building", { hero: k }));
+  const orbit = luxury ? (reveals[0] || segment("orbit", 0, "")) : segment("orbit", P.orbit.seconds, "Completed building");
   const furn = pick("furnish").filter(it => !it.hidden);
   const furnFloors = [...new Set(furn.map(it => it.floor))].sort((a, b) => a - b);
   const furnSegs = [];
-  if (furn.length && P.furnish.on) {
+  if (luxury) {
+    furn.forEach(it => { it.start = Math.max(0, buildEnd - 0.8); it.dur = 0.6; it.style = "drop"; });
+  } else if (furn.length && P.furnish.on) {
     const each = P.furnish.seconds / Math.max(1, furnFloors.length);
     for (const k of furnFloors) {
       const s = segment("furnish", each, `Furniture · ${floorNames[k] || "ground floor"}`, { floor: k });
@@ -174,7 +183,7 @@ export function createConstruction(ctx, script) {
     furn.forEach(it => { it.start = orbit.end; it.dur = 0; it.style = "drop"; });
   }
   const roomSegs = [];
-  if (P.interior.on) for (const r of visit) roomSegs.push(segment("interior", P.interior.seconds, r.name, { room: r }));
+  if (P.interior.on && !luxury) for (const r of visit) roomSegs.push(segment("interior", P.interior.seconds, r.name, { room: r }));
   const duration = Math.max(clock, 0.5);
   // elements of switched-off phases (zero-length windows) simply appear
   for (const it of items) if (it.start === undefined) { it.start = 0; it.dur = 0; it.style = "grow"; }
@@ -228,6 +237,7 @@ export function createConstruction(ctx, script) {
     if (t <= buildEnd) {
       const k = buildEnd > 0 ? t / buildEnd : 1;
       const built = lerp(groundY + 1, centre.y, easeInOut(k));
+      if (luxury) return orbitPose(theta0 + sign * buildSpin * k, lerp(0.55, 0.14, easeInOut(k)), d * lerp(1.2, 0.98, k), built);
       return orbitPose(theta0 + sign * buildSpin * k, lerp(0.85, 0.42, easeInOut(k)), d * lerp(1.12, 1.0, k), built);
     }
     const k = orbit.end > orbit.start ? clamp01((t - orbit.start) / (orbit.end - orbit.start)) : 1;
@@ -248,6 +258,17 @@ export function createConstruction(ctx, script) {
     const yaw = (alongX ? -Math.PI / 2 : 0) + sign * lerp(-0.32, 0.32, easeInOut(k));
     const dir = new THREE.Vector3(-Math.sin(yaw), -0.06, -Math.cos(yaw));
     return { pos, target: pos.clone().add(dir), fov: 70 };
+  }
+  // hero views for the photoreal reveal: low, looking up at the building, from different corners
+  const HERO_ANGLES = [0, 1.75, -1.6];
+  function heroPose(k, aspect = camera.aspect) {
+    const fov = 40, vf = THREE.MathUtils.degToRad(fov), hf = 2 * Math.atan(Math.tan(vf / 2) * aspect);
+    const d = radius / Math.sin(Math.min(vf, hf) / 2) * 0.86;
+    const theta = theta0 + sign * (buildSpin + HERO_ANGLES[k % 3]);
+    const eyeY = groundY + Math.max(1.6, size.y * 0.06);
+    const flat = Math.sqrt(Math.max(1, d * d - Math.pow(centre.y - eyeY, 2)));
+    const pos = new THREE.Vector3(centre.x + Math.cos(theta) * flat, eyeY, centre.z + Math.sin(theta) * flat);
+    return { pos, target: new THREE.Vector3(centre.x, lerp(centre.y, all.max.y, 0.15), centre.z), fov };
   }
   function blend(a, b, k) {
     k = easeInOut(k);
@@ -304,6 +325,9 @@ export function createConstruction(ctx, script) {
       pose = roomPose(t, seg);
       const into = t - seg.start, left = seg.end - t;
       black = Math.max(0, 1 - into / 0.35, 1 - left / 0.35);
+    } else if (luxury && seg && seg.hero !== undefined) {
+      pose = heroPose(seg.hero);
+      black = Math.max(0, 1 - (t - seg.start) / 0.3);
     } else if (seg && seg.phase === "furnish") {
       const prev = exteriorPose(orbit.end);
       pose = seg === furnSegs[0] && t - seg.start < 1.2 ? blend(prev, furnishPose(t, seg), (t - seg.start) / 1.2) : furnishPose(t, seg);
@@ -323,16 +347,58 @@ export function createConstruction(ctx, script) {
     camera.updateProjectionMatrix();
     camera.lookAt(pose.target);
     fade.material.opacity = clamp01(black);
-    fade.visible = black > 0.001;
+    fade.visible = !luxury && black > 0.001;
+    if (luxury) {
+      setout.visible = pegs.visible = false;
+      const u = seg && seg.hero !== undefined ? clamp01((t - seg.start) / Math.max(0.01, seg.end - seg.start)) : null;
+      const image = u !== null ? heroImages[seg.hero] || null : null;
+      luxState = {
+        setK: siteK, black,
+        gridOpacity: t < segments[0].end ? 0.9 : lerp(0.9, 0.22, clamp01((t - segments[0].end) / Math.max(1, buildEnd - segments[0].end))),
+        reveal: u === null ? null : { h: lerp(groundY - 0.3, all.max.y + 0.5, easeInOut(clamp01(u / 0.62))), image,
+          groundK: clamp01(u / 0.15), skyK: image ? clamp01((u - 0.62) / 0.16) : 0, zoom: 1 + 0.06 * u },
+      };
+    }
   }
 
+  let luxState = null, lux = null;
+  if (luxury) lux = extras.lux.createLuxury(ctx, items.filter(it => !it.hidden), { centre, radius, groundY, footprint: all.clone().expandByScalar(0) });
+  function draw() { if (lux && luxState) lux.render(luxState); else ctx.render(); }
+
+  /** The finished building from hero view k, without lines, at w x h, for the AI to make photoreal. */
+  function heroSnapshot(k, w, h) {
+    const r = ctx.renderer;
+    r.setPixelRatio(1); r.setSize(w, h, false);
+    frameAt(duration);
+    const frameAspect = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1 }[script.format] || 16 / 9, imgAspect = w / h;
+    const pose = heroPose(k, frameAspect);
+    // the video frame must be a centred crop of the AI image: same width of view, taller (or the reverse)
+    let fov = pose.fov;
+    if (imgAspect < frameAspect) fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(fov) / 2) * frameAspect / imgAspect));
+    camera.aspect = imgAspect; camera.fov = fov; camera.updateProjectionMatrix();
+    camera.position.copy(pose.pos); camera.lookAt(pose.target);
+    if (lux) lux.renderSolid(); else ctx.render();
+    return r.domElement;
+  }
+  /** Identifies a hero view: the same model, view and format give the same key, so its AI render can be reused. */
+  function heroKey(k) {
+    const fa = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1 }[script.format] || 16 / 9;
+    const p = heroPose(k, fa), raw = [script.format, k, ...p.pos.toArray(), ...p.target.toArray(), ctx.elements.length].map(v => typeof v === "number" ? v.toFixed(2) : v).join("|");
+    let h = 2166136261; for (let i = 0; i < raw.length; i++) { h ^= raw.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return `hv${(h >>> 0).toString(36)}${k}`;
+  }
+
+  function tagAt(t) {
+    const sg = segmentAt(Math.min(t, duration - 1e-3));
+    return luxury && sg && sg.hero !== undefined && heroImages[sg.hero] && t - sg.start > 0.15 * (sg.end - sg.start) ? "AI concept — not to scale" : "Indicative sequence — not to scale";
+  }
   function labelAt(t) { const s = segmentAt(Math.min(t, duration - 1e-3)); return s ? s.label : ""; }
 
   /** Draws time t at w x h for export, and returns the canvas. */
   function renderFrame(t, w, h) {
     const r = ctx.renderer;
     if (r.domElement.width !== w || r.domElement.height !== h) { r.setPixelRatio(1); r.setSize(w, h, false); camera.aspect = w / h; }
-    frameAt(t); ctx.render();
+    frameAt(t); draw();
     return r.domElement;
   }
 
@@ -348,6 +414,7 @@ export function createConstruction(ctx, script) {
   }
 
   function dispose() {
+    if (lux) { lux.dispose(); lux = null; }
     for (const it of items) { it.mesh.scale.copy(it.s0); it.mesh.position.copy(it.p0); it.mesh.visible = true; }
     scene.remove(setout, pegs); setout.geometry.dispose(); camera.remove(fade);
     scene.background = saved.bg; scene.fog = saved.fog;
@@ -357,6 +424,6 @@ export function createConstruction(ctx, script) {
     camera.fov = saved.fov; camera.near = saved.near; camera.far = saved.far; camera.updateProjectionMatrix();
   }
 
-  return { script, duration, segments: segments.filter(s => s.end > s.start), frameAt, labelAt, renderFrame, context, dispose,
+  return { script, duration, segments: segments.filter(s => s.end > s.start), frameAt, labelAt, tagAt, renderFrame, draw, context, dispose, heroSnapshot, heroKey, luxury,
     rooms: allRooms.map(r => r.name), visiting: visit.map(r => r.name), counts: Object.fromEntries(["foundation", "structure", "walls", "openings", "roof", "furnish"].map(g => [g, items.filter(i => i.group === g).length])) };
 }
