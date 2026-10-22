@@ -219,6 +219,34 @@ class FakeRepo:
         self.videos[row["id"]] = row
         return copy.deepcopy(row)
 
+    def get_video(self, user, video_id):
+        return self._own("videos", user, video_id)
+
+    def _del(self, table, user, row_id, nulls=()):
+        t = getattr(self, table); r = t.get(row_id)
+        if not r or r["owner_id"] != user.id:
+            return False
+        del t[row_id]
+        for other, col in nulls:   # "on delete set null" in the database
+            for x in getattr(self, other).values():
+                if x.get(col) == row_id:
+                    x[col] = None
+        return True
+
+    def delete_video(self, user, video_id):
+        return self._del("videos", user, video_id)
+
+    def delete_source_file(self, user, file_id):
+        return self._del("files", user, file_id, (("images", "source_file_id"), ("models", "source_file_id"), ("shots", "source_file_id")))
+
+    def delete_rendered_image(self, user, image_id):
+        return self._del("images", user, image_id, (("images", "parent_image_id"),))
+
+    def delete_model(self, user, model_id):
+        ok = self._del("models", user, model_id, (("shots", "model_id"),))
+        self.components = [c for c in self.components if c["model_id"] != model_id]
+        return ok
+
     def list_videos(self, user, project_id):
         rows = [v for v in self.videos.values() if v["project_id"] == project_id and v["owner_id"] == user.id]
         return [copy.deepcopy(v) for v in sorted(rows, key=lambda v: v["created_at"], reverse=True)]

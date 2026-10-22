@@ -138,10 +138,28 @@ $("#readPlanBtn").onclick = async () => {
 };
 $("#backBtn").onclick = () => { stopPolling(); listProjects(); };
 
+/** A delete button that asks once ("Delete?" then "Yes, delete") before acting. */
+function deleteButton(what, onDelete, small = true) {
+  const b = el("button", { class: `btn danger${small ? " sm" : ""}`, type: "button", "aria-label": `Delete ${what}` }, "Delete");
+  let armed = null;
+  b.onclick = async () => {
+    if (!armed) { b.textContent = "Yes, delete"; b.classList.add("solid"); armed = setTimeout(() => { armed = null; b.textContent = "Delete"; b.classList.remove("solid"); }, 4000); return; }
+    clearTimeout(armed); armed = null; b.disabled = true; b.textContent = "Deleting…";
+    try { await onDelete(); }
+    catch (err) { if (err.status === 401) return handle(err); toast(err.message); b.disabled = false; b.textContent = "Delete"; b.classList.remove("solid"); }
+  };
+  return b;
+}
+
 function fileActions(f) {
+  const del = deleteButton(f.original_name, async () => {
+    await api.deleteFile(current.id, f.id);
+    toast(f.detected_type === "ifc" ? "File and its 3D model deleted." : "File deleted.");
+    current = await api.getProject(current.id); renderProject(); loadModels(); loadShots(); loadOutputs();
+  });
   if (f.detected_type === "ifc" && f.origin !== "generated")
-    return [el("button", { class: "btn", type: "button", onclick: e => startImport(f, e.currentTarget) }, "Import 3D")];
-  return [];
+    return [el("button", { class: "btn", type: "button", onclick: e => startImport(f, e.currentTarget) }, "Import 3D"), del];
+  return [del];
 }
 async function startImport(f, btn) {
   if (btn) btn.disabled = true;
@@ -168,6 +186,7 @@ async function loadModels() {
   try { models = await api.models(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
   if (current?.id !== pid) return;
   const m = models[0];
+  if (!m && viewerModelId) resetModel();
   $("#viewerWrap").hidden = !m;
   $("#modelEmpty").hidden = !!m;
   if (!m || m.id === viewerModelId) return;
@@ -357,7 +376,8 @@ function drawGallery(images) {
         el("p", { class: "prompt" }, i.parent_image_id ? `Revision: ${i.prompt}` : i.prompt),
         el("div", { class: "tags" }, el("span", { class: `chip ${i.tier === "premium" ? "premium" : ""}` }, i.tier_name || "Render"), ...tags.map(t => el("span", { class: "chip" }, t)), parent ? el("span", { class: "chip" }, "Revised") : ""),
         el("p", { class: "hint" }, fmtDate(i.created_at)),
-        el("div", { class: "actions" }, i.download_url ? el("a", { class: "btn", href: i.download_url, download: "" }, "Download") : ""),
+        el("div", { class: "actions" }, i.download_url ? el("a", { class: "btn", href: i.download_url, download: "" }, "Download") : "",
+          deleteButton("this render", async () => { await api.deleteRender(i.id); toast("Render deleted."); loadOutputs(); loadShots(); }, false)),
         el("form", { class: "revise", onsubmit: e => { e.preventDefault(); revise(i.id, input, go); } }, input, go)));
   }));
 }
@@ -603,7 +623,8 @@ function drawVideos() {
         el("h3", {}, v.title || (v.kind === "construction" ? "Construction sequence" : "Walkthrough")),
         el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, v.kind === "construction" ? "Construction" : `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
         el("p", { class: "hint" }, fmtDate(v.created_at)),
-        el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "")));
+        el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "",
+          deleteButton("this video", async () => { await api.deleteVideo(v.id); toast("Video deleted."); loadVideos(); }, false))));
   };
   $("#videoList").replaceChildren(...videos.filter(v => v.kind !== "construction").map(card));
   $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction").map(card));

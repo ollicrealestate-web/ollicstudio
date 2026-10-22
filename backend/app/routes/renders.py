@@ -273,6 +273,18 @@ def usage(request: Request, user: CurrentUser = Depends(get_current_user)):
     }
 
 
+@router.delete("/renders/{render_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_render(render_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """Deletes a render and its stored pictures. Revisions made from it stay."""
+    repo = _repo(request)
+    img = repo.get_rendered_image(user, str(render_id))
+    if not img or img.get("owner_id") != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Render not found.")
+    paths = [p for p in (img.get("storage_path"), img.get("base_path")) if p]
+    _storage(request).remove(user, paths, bucket=request.app.state.settings.renders_bucket)
+    repo.delete_rendered_image(user, img["id"])
+
+
 def _service(e: dict) -> str:
     """Customers see what they used, never which AI provider did it."""
     if e.get("operation") == "vision_read":

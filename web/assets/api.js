@@ -50,6 +50,9 @@ export const api = {
   renderShots: (projectId, body) => request("POST", `/projects/${projectId}/shots/render`, body),
   makeVideo: (projectId, body) => request("POST", `/projects/${projectId}/videos`, body),
   videos: projectId => request("GET", `/projects/${projectId}/videos`),
+  deleteFile: (projectId, fileId) => request("DELETE", `/projects/${projectId}/files/${fileId}`),
+  deleteRender: renderId => request("DELETE", `/renders/${renderId}`),
+  deleteVideo: videoId => request("DELETE", `/videos/${videoId}`),
   // Construction animation
   directAnimation: (projectId, body) => request("POST", `/projects/${projectId}/animation/direct`, body),
 };

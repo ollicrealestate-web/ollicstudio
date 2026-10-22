@@ -177,6 +177,16 @@ def make_video(project_id: uuid.UUID, body: VideoIn, request: Request, response:
     return _start_job(request, user, str(project_id), "video_export", job_input, None, response, run=run_video_job, max_active=2)
 
 
+@router.delete("/videos/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_video(video_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
+    repo = _repo(request)
+    v = repo.get_video(user, str(video_id))
+    if not v or v.get("owner_id") != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Video not found.")
+    _storage(request).remove(user, [v["storage_path"]], bucket=request.app.state.settings.videos_bucket)
+    repo.delete_video(user, v["id"])
+
+
 @router.get("/projects/{project_id}/videos")
 def list_videos(project_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
     _owned_project(request, user, project_id)

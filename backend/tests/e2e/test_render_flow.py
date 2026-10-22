@@ -123,6 +123,18 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         assert "PREMIUM RENDER" in page.inner_text(".shot >> nth=0").upper()
         assert stack["premium"].calls[0]["model"] == "gpt-image-2.5-sunburst"
 
+        # delete: asks once, then the card and the stored picture go
+        n = page.locator(".shot").count()
+        page.click(".shot >> nth=0 >> button[aria-label='Delete this render']")
+        assert page.inner_text(".shot >> nth=0 >> button[aria-label='Delete this render']") == "Yes, delete" and page.locator(".shot").count() == n
+        page.click(".shot >> nth=0 >> button[aria-label='Delete this render']")
+        page.wait_for_function(f"document.querySelectorAll('.shot').length === {n - 1}")
+        assert len(stack["repo"].images) == n - 1
+        # and an uploaded file
+        page.click("#fileRows tr >> nth=0 >> button:has-text('Delete')"); page.click("#fileRows tr >> nth=0 >> button:has-text('Yes, delete')")
+        page.wait_for_function("document.querySelectorAll('#fileRows tr').length === 0")
+        assert stack["storage"].objects == {}
+
         # phone width: no sideways scrolling
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

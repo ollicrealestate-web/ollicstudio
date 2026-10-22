@@ -44,6 +44,11 @@ class Repository(Protocol):
     def update_shot(self, user: CurrentUser, shot_id: str, fields: dict) -> dict | None: ...
     def delete_shot(self, user: CurrentUser, shot_id: str) -> bool: ...
     def create_video(self, user: CurrentUser, record: dict) -> dict: ...
+    def get_video(self, user: CurrentUser, video_id: str) -> dict | None: ...
+    def delete_video(self, user: CurrentUser, video_id: str) -> bool: ...
+    def delete_source_file(self, user: CurrentUser, file_id: str) -> bool: ...
+    def delete_rendered_image(self, user: CurrentUser, image_id: str) -> bool: ...
+    def delete_model(self, user: CurrentUser, model_id: str) -> bool: ...
     def list_videos(self, user: CurrentUser, project_id: str) -> list[dict]: ...
     # Phase 3
     def create_model(self, user: CurrentUser, record: dict) -> dict: ...
@@ -188,6 +193,25 @@ class SupabaseRepository:
 
     def create_video(self, user, record):
         return self._insert("final_videos", user, record)
+
+    def _delete(self, table, user, row_id):
+        rows = self._call("DELETE", f"/{table}", user, params={"id": _eq(row_id), "owner_id": _eq(user.id)}, prefer="return=representation")
+        return bool(rows)
+
+    def get_video(self, user, video_id):
+        return self._one("final_videos", user, video_id)
+
+    def delete_video(self, user, video_id):
+        return self._delete("final_videos", user, video_id)
+
+    def delete_source_file(self, user, file_id):
+        return self._delete("source_files", user, file_id)
+
+    def delete_rendered_image(self, user, image_id):
+        return self._delete("rendered_images", user, image_id)
+
+    def delete_model(self, user, model_id):
+        return self._delete("building_models", user, model_id)
 
     def list_videos(self, user, project_id):
         return self._call("GET", "/final_videos", user, params={"select": "*", "project_id": _eq(project_id), "owner_id": _eq(user.id), "order": "created_at.desc"})

@@ -85,6 +85,29 @@ def delete_project(project_id: uuid.UUID, request: Request, user: CurrentUser = 
         raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_FOUND)
 
 
+@router.delete("/projects/{project_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_source_file(project_id: uuid.UUID, file_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """Deletes an uploaded file. A 3D model made from it goes too, and so do walkthrough shots
+    whose picture it is; renders made from it stay (they are finished work)."""
+    _owned_project(request, user, project_id)
+    repo, storage, settings = _repo(request), _storage(request), request.app.state.settings
+    f = repo.get_source_file(user, str(file_id))
+    if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found in this project.")
+    models = [m for m in repo.list_models(user, str(project_id)) if m.get("owner_id") == user.id and m.get("source_file_id") == f["id"]]
+    shots = [s for s in repo.list_shots(user, str(project_id)) if s.get("owner_id") == user.id and s.get("source_file_id") == f["id"]]
+    # files first, as for projects: if storage fails, the records stay and nothing is orphaned
+    storage.remove(user, [f["storage_path"]])
+    glbs = [m["glb_path"] for m in models if m.get("glb_path")]
+    if glbs:
+        storage.remove(user, glbs, bucket=settings.models_bucket)
+    for m in models:
+        repo.delete_model(user, m["id"])
+    for s in shots:
+        repo.delete_shot(user, s["id"])
+    repo.delete_source_file(user, f["id"])
+
+
 @router.post("/projects/{project_id}/uploads", status_code=status.HTTP_201_CREATED)
 def upload_source_file(project_id: uuid.UUID, request: Request, file: UploadFile = File(...), user: CurrentUser = Depends(get_current_user)):
     project = _owned_project(request, user, project_id)

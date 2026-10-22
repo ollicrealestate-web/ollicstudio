@@ -55,3 +55,55 @@ def test_website_config_is_served_from_settings_with_public_values_only(client, 
     assert res.status_code == 200 and res.headers["content-type"].startswith("application/javascript")
     assert settings.supabase_url in res.text and settings.supabase_anon_key in res.text
     assert settings.supabase_jwt_secret not in res.text
+
+
+# ---------------------------------------------------------------- deleting files, renders and videos
+def test_files_renders_and_videos_can_be_deleted(render_settings, repo, storage, alice, bob, sample_ifc_bytes):
+    from fastapi.testclient import TestClient
+    from app.auth import TokenVerifier
+    from app.jobs import InlineRunner
+    from app.main import create_app
+    from .conftest import FakeImages
+    from .test_studio import new_project, upload
+    from .test_walkthrough import save_shot
+    from . import samples
+    c = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner()))
+    pid = new_project(c, alice)
+    sketch = upload(c, alice, pid, "front.png", samples.png(64, 48))
+    # a render, and a revision of it
+    c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": "white villa", "references": [{"file_id": sketch["id"], "role": "base"}]},
+           headers={**alice["headers"], "Idempotency-Key": "del-test-0001"})
+    (r1,) = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"]
+    c.post(f"/api/renders/{r1['id']}/edit", json={"instruction": "dark roof"}, headers={**alice["headers"], "Idempotency-Key": "del-test-0002"})
+    assert len(repo.images) == 2
+    # others cannot delete
+    assert c.delete(f"/api/renders/{r1['id']}", headers=bob["headers"]).status_code == 404
+    assert c.delete(f"/api/projects/{pid}/files/{sketch['id']}", headers=bob["headers"]).status_code == 404
+    # delete the first render: its pictures go, the revision stays
+    paths = [repo.images[r1["id"]]["storage_path"], repo.images[r1["id"]]["base_path"]]
+    assert c.delete(f"/api/renders/{r1['id']}", headers=alice["headers"]).status_code == 204
+    assert r1["id"] not in repo.images and not any(p in storage.buckets["renders"] for p in paths)
+    (left,) = repo.images.values(); assert left["parent_image_id"] is None
+    # delete the uploaded sketch: file and record go, the render made from it stays
+    path = repo.files[sketch["id"]]["storage_path"]
+    assert c.delete(f"/api/projects/{pid}/files/{sketch['id']}", headers=alice["headers"]).status_code == 204
+    assert sketch["id"] not in repo.files and path not in storage.objects and len(repo.images) == 1
+    # an IFC: its 3D model goes with it
+    ifc = upload(c, alice, pid, "house.ifc", sample_ifc_bytes)
+    c.post(f"/api/projects/{pid}/import-ifc", json={"source_file_id": ifc["id"]}, headers={**alice["headers"], "Idempotency-Key": "del-test-0003"})
+    (m,) = repo.models.values()
+    assert c.delete(f"/api/projects/{pid}/files/{ifc['id']}", headers=alice["headers"]).status_code == 204
+    assert repo.models == {} and m["glb_path"] not in storage.buckets["models"] and not repo.components
+    # a shot's picture: the shot goes too
+    s = save_shot(c, alice, pid)
+    assert c.delete(f"/api/projects/{pid}/files/{s['source_file_id']}", headers=alice["headers"]).status_code == 204
+    assert repo.shots == {}
+    # a video
+    vid = "11111111-2222-3333-4444-555555555555"
+    vpath = f"{alice['id']}/{pid}/{vid}.mp4"
+    storage.buckets["videos"][vpath] = (b"mp4", "video/mp4")
+    repo.videos[vid] = {"id": vid, "project_id": pid, "owner_id": alice["id"], "storage_path": vpath, "format": "16:9", "created_at": "2026-10-22T00:00:00+00:00"}
+    assert c.delete(f"/api/videos/{vid}", headers=bob["headers"]).status_code == 404
+    assert c.delete(f"/api/videos/{vid}", headers=alice["headers"]).status_code == 204
+    assert repo.videos == {} and storage.buckets["videos"] == {}
+    assert c.delete(f"/api/videos/{vid}", headers=alice["headers"]).status_code == 404

@@ -16,7 +16,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | Feature | Status | Evidence |
 | --- | --- | --- |
 | Sign-up, sign-in, password reset, token verification (ES256 via JWKS) | Operational live | `test_auth.py`; live use |
-| Projects, uploads, ownership in code plus RLS and storage policies; deletion removes files | **Verified live**: `scripts/verify_isolation.py` 14/14 | `test_projects.py`, `test_uploads.py` |
+| Projects, uploads, ownership in code plus RLS and storage policies; deletion removes files; delete buttons (with a confirm step) for uploaded files (an IFC takes its 3D model, a shot picture its shot), renders and videos | **Verified live**: `scripts/verify_isolation.py` 14/14 | `test_projects.py`, `test_uploads.py` |
 | **Standard render** (free daily allowance), 3 a day per customer; owner and test accounts (`profiles.role` admin or reviewer) have no daily limits (`supabase/owner_test_accounts.sql`) | **Verified live** | live check below |
 | **Premium render**: the most precise image model, High or Maximum detail, paid plans only (`profiles.plan = 'premium'`, set by the owner until Phase 7), 20 a day | Built and tested; **awaiting OpenAI credit** | `test_cloudflare.py`, `test_openai_client.py` |
 | **Premium prompting**: Claude (`claude-opus-5-5`, configurable) studies the plan, model view, sketches and look references with the brief and writes the image prompt; turns plain-words revisions into precise edits; falls back to the standard prompt on any failure; its cost is recorded | Built and tested with a mocked API; **awaiting `ANTHROPIC_API_KEY`** | `test_prompting.py` |
