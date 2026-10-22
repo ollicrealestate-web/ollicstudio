@@ -16,13 +16,15 @@ from .config import Settings
 from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
-from .routes import projects, renders
+from .bim.vision import CloudflareVision
+from .routes import models, projects, renders
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
 
 
-def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None, runner=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None,
+               runner=None, vision="auto") -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
@@ -37,6 +39,10 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
         }
     app.state.image_clients = {t: (c if settings.tier_available(t) else None) for t, c in image_clients.items()}
     app.state.runner = runner or ThreadRunner()
+    # reads room names and areas off floor plans (free Cloudflare allowance); None means plans are traced without it
+    if vision == "auto":
+        vision = CloudflareVision(settings.cloudflare_account_id, settings.cloudflare_api_token) if settings.standard_available else None
+    app.state.vision = vision
 
     if settings.web_origins:
         app.add_middleware(
@@ -57,6 +63,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     app.include_router(projects.router, prefix="/api")
     app.include_router(renders.router, prefix="/api")
+    app.include_router(models.router, prefix="/api")
 
     # The website's public settings come from the server's environment, so keys are
     # entered once (e.g. in Railway's variables). Only public values are sent: the

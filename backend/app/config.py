@@ -30,6 +30,7 @@ class Settings:
     openai_image_model: str = "gpt-image-2.5-flare"      # new concepts from a prompt or a reference
     openai_edit_model: str = "gpt-image-2.5-sunburst"    # revisions, where keeping the base matters most
     renders_bucket: str = "renders"
+    models_bucket: str = "models"
     # Cloudflare Workers AI: a free allowance every day (10,000 neurons).
     cloudflare_account_id: str | None = None
     cloudflare_api_token: str | None = field(default=None, repr=False)  # server only
@@ -91,6 +92,7 @@ class Settings:
             openai_image_model=os.environ.get("OPENAI_IMAGE_MODEL", "").strip() or "gpt-image-2.5-flare",
             openai_edit_model=os.environ.get("OPENAI_EDIT_MODEL", "").strip() or "gpt-image-2.5-sunburst",
             renders_bucket=os.environ.get("RENDERS_BUCKET", "renders").strip() or "renders",
+            models_bucket=os.environ.get("MODELS_BUCKET", "models").strip() or "models",
             cloudflare_account_id=os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip() or None,
             cloudflare_api_token=os.environ.get("CLOUDFLARE_API_TOKEN", "").strip() or None,
             cloudflare_image_model=os.environ.get("CLOUDFLARE_IMAGE_MODEL", "").strip() or "@cf/black-forest-labs/flux-2-klein-4b",

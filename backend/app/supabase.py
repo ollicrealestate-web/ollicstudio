@@ -37,6 +37,16 @@ class Repository(Protocol):
     def list_jobs(self, user: CurrentUser, project_id: str, limit: int = 20) -> list[dict]: ...
     def count_jobs_since(self, user: CurrentUser, since_iso: str, statuses: tuple[str, ...], tier: str) -> int: ...
     def get_profile(self, user: CurrentUser) -> dict | None: ...
+    # Phase 3 and 3b
+    def create_model(self, user: CurrentUser, record: dict) -> dict: ...
+    def get_model(self, user: CurrentUser, model_id: str) -> dict | None: ...
+    def list_models(self, user: CurrentUser, project_id: str) -> list[dict]: ...
+    def add_components(self, user: CurrentUser, rows: list[dict]) -> None: ...
+    def list_components(self, user: CurrentUser, model_id: str, limit: int = 5000) -> list[dict]: ...
+    def create_draft(self, user: CurrentUser, record: dict) -> dict: ...
+    def get_draft(self, user: CurrentUser, draft_id: str) -> dict | None: ...
+    def update_draft(self, user: CurrentUser, draft_id: str, fields: dict) -> dict | None: ...
+    def list_drafts(self, user: CurrentUser, project_id: str) -> list[dict]: ...
     def create_rendered_image(self, user: CurrentUser, record: dict) -> dict: ...
     def get_rendered_image(self, user: CurrentUser, image_id: str) -> dict | None: ...
     def list_rendered_images(self, user: CurrentUser, project_id: str) -> list[dict]: ...
@@ -135,6 +145,36 @@ class SupabaseRepository:
         rows = self._call("GET", "/jobs", user, params={"select": "id", "owner_id": _eq(user.id), "created_at": f"gte.{since_iso}",
                                                        "status": f"in.({','.join(statuses)})", "input->>tier": _eq(tier), "limit": "1000"})
         return len(rows)
+
+    # ------------------------------------------------------------ Phase 3 and 3b
+    def create_model(self, user, record):
+        return self._insert("building_models", user, record)
+
+    def get_model(self, user, model_id):
+        return self._one("building_models", user, model_id)
+
+    def list_models(self, user, project_id):
+        return self._call("GET", "/building_models", user, params={"select": "*", "project_id": _eq(project_id), "owner_id": _eq(user.id), "order": "created_at.desc"})
+
+    def add_components(self, user, rows):
+        for i in range(0, len(rows), 500):  # PostgREST bulk insert, in batches
+            self._call("POST", "/building_components", user, json=[{**r, "owner_id": user.id} for r in rows[i:i + 500]], prefer="return=minimal")
+
+    def list_components(self, user, model_id, limit=5000):
+        return self._call("GET", "/building_components", user, params={"select": "*", "model_id": _eq(model_id), "owner_id": _eq(user.id), "limit": str(limit)})
+
+    def create_draft(self, user, record):
+        return self._insert("layout_drafts", user, record)
+
+    def get_draft(self, user, draft_id):
+        return self._one("layout_drafts", user, draft_id)
+
+    def update_draft(self, user, draft_id, fields):
+        rows = self._call("PATCH", "/layout_drafts", user, params={"id": _eq(draft_id), "owner_id": _eq(user.id)}, json=fields, prefer="return=representation")
+        return rows[0] if rows else None
+
+    def list_drafts(self, user, project_id):
+        return self._call("GET", "/layout_drafts", user, params={"select": "*", "project_id": _eq(project_id), "owner_id": _eq(user.id), "order": "created_at.desc"})
 
     def get_profile(self, user):
         rows = self._call("GET", "/profiles", user, params={"select": "id,plan,role", "id": _eq(user.id)})

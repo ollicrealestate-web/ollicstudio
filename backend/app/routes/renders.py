@@ -112,7 +112,7 @@ def _utc_midnight() -> str:
     return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
 
-def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: str, job_input: dict, key: str | None, response: Response) -> dict:
+def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: str, job_input: dict, key: str | None, response: Response, run=None) -> dict:
     repo = _repo(request)
     if key is not None:
         if not KEY_RE.match(key):
@@ -123,8 +123,8 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
                 raise HTTPException(409, {"code": "idempotency_conflict", "reason": "That Idempotency-Key was already used for a different request."})
             response.status_code = status.HTTP_200_OK
             return public_job(_settle_stale(request, user, existing))
-    tier = job_input["tier"]
-    limit = request.app.state.settings.daily_limit_for(tier)
+    tier = job_input.get("tier")
+    limit = request.app.state.settings.daily_limit_for(tier) if tier else 0
     if limit > 0:
         used = repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), tier)
         if used >= limit:
@@ -135,7 +135,7 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
         raise HTTPException(429, {"code": "too_many_active", "reason": f"This project already has {len(active)} renders in progress. Wait for one to finish."})
     job = repo.create_job(user, {"project_id": project_id, "type": job_type, "status": "queued", "stage": "Waiting to start",
                                  "input": job_input, "idempotency_key": key})
-    request.app.state.runner.submit(run_render_job, request.app.state, user, job["id"])
+    request.app.state.runner.submit(run or run_render_job, request.app.state, user, job["id"])
     return public_job(repo.get_job(user, job["id"]) or job)
 
 
