@@ -196,6 +196,49 @@
       </div>
       <div class="empty" id="modelEmpty" hidden>No 3D model yet. Upload your Revit export (.ifc) above to see it here.</div>
     </section>
+    <section class="img-anim" id="imgAnimSection" aria-labelledby="iaTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">Construction animation</span><h2 id="iaTitle" class="studio-title">From a 3D image</h2>
+          <p class="muted">No model file? Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). The AI makes it photoreal at night, Ollic draws the building's lines in glowing gold from the ground up, then a line of light sweeps up and reveals the finished building. Up to three images become three shots of one video.</p></div>
+      </div>
+      <div class="card ia-card">
+        <fieldset class="field"><legend>Images to animate <span class="hint">Tick up to 3, in order</span></legend>
+          <div class="ia-pick" id="iaPick"><span class="hint">Upload a 3D image of the building above and it appears here.</span></div></fieldset>
+        <div class="anim-heroes">
+          <div class="anim-heroes-head">
+            <div><b>Photoreal views</b> <span class="hint">One render from your daily allowance per image. Tick “already photoreal” to use an image as it is.</span></div>
+            <button type="button" class="btn primary" id="iaMake">Make photoreal views</button>
+          </div>
+          <label class="field">Look of the finished building <span class="hint">Materials, colours, landscaping, mood</span>
+            <input type="text" id="iaLook" maxlength="400" placeholder="e.g. white render, dark bronze glass, palm trees, warm uplights"></label>
+        </div>
+        <div class="ia-stage" id="iaStage" hidden>
+          <div class="ia-frame" id="iaFrame"><canvas id="iaCanvas" width="640" height="360" aria-label="Animation preview"></canvas></div>
+          <div class="anim-player">
+            <button type="button" class="btn primary" id="iaPlay">Play</button>
+            <input type="range" id="iaScrub" min="0" max="1000" value="0" step="1" aria-label="Position in the animation">
+            <span class="mono" id="iaTime">0:00 / 0:00</span>
+          </div>
+        </div>
+        <div class="video-fields">
+          <label class="field">Format <select id="iaFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
+          <label class="field">Seconds per image <input type="number" id="iaSeconds" min="6" max="20" step="1" value="10"></label>
+          <label class="field">Title <input type="text" id="iaTitle2" maxlength="80"></label>
+          <label class="field">Subtitle <input type="text" id="iaSub" maxlength="120" placeholder="e.g. your firm or the client"></label>
+        </div>
+        <div class="render-go">
+          <button type="button" class="btn primary big" id="iaExport" disabled>Export MP4</button>
+          <span class="hint" id="iaEst">Make or tick a photoreal view first.</span>
+        </div>
+        <div class="export-progress" id="iaProgress" hidden>
+          <div class="progress"><i id="iaBar"></i></div><span class="hint" id="iaProgText"></span>
+          <button type="button" class="btn" id="iaCancel">Cancel</button>
+        </div>
+        <div id="iaMsg" class="notice" role="status" hidden></div>
+        <div class="jobs" id="iaJobs" aria-live="polite"></div>
+        <div class="video-list" id="iaVideos"></div>
+      </div>
+    </section>
     <section class="studio" id="studio" aria-labelledby="studioTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>

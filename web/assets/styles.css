@@ -451,3 +451,18 @@ input[type=number]:focus { border-color: var(--red); outline: none; box-shadow: 
 .hero-card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hero-card .cap { padding: 8px 10px; font-size: 0.82rem; display: flex; justify-content: space-between; gap: 6px; }
 .phase-row.off { opacity: 0.45; }
+.img-anim { margin-top: 48px; display: grid; gap: 18px; }
+.ia-card { gap: 16px; }
+.ia-card fieldset { border: 0; padding: 0; margin: 0; }
+.ia-card legend { font-weight: 600; font-size: 0.9rem; margin-bottom: 8px; padding: 0; }
+.ia-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 10px; }
+.ia-item { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); overflow: hidden; display: grid; }
+.ia-item.on { border-color: var(--red); }
+.ia-item .thumb { aspect-ratio: 3 / 2; background: #050810; display: grid; place-items: center; color: var(--muted); font-size: 0.8rem; position: relative; }
+.ia-item .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ia-item .thumb .badge { position: absolute; top: 6px; left: 6px; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 6px; background: rgba(7,7,7,.82); border-left: 3px solid var(--red); font: 600 0.62rem var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: #fff; }
+.ia-item .body { padding: 8px 10px; display: grid; gap: 6px; font-size: 0.85rem; }
+.ia-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ia-frame { margin-inline: auto; width: min(100%, calc(70vh * var(--arw, 1.778))); aspect-ratio: var(--ar, 16 / 9); border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); background: #02040a; }
+.ia-frame canvas { width: 100%; height: 100%; display: block; }
+.ia-stage { display: grid; gap: 12px; }

@@ -83,7 +83,7 @@ async function openProject(id) {
   show("projectView"); $("#uploads").replaceChildren(); resetDelete(); stopPolling();
   $("#gallery").replaceChildren(); $("#jobList").replaceChildren(); message($("#renderMsg"), "");
   $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
-  resetModel(); resetWalk(); outputsLoadedOnce = false; seenDone = new Set();
+  resetModel(); resetWalk(); resetIA(); outputsLoadedOnce = false; seenDone = new Set();
   history.replaceState(null, "", `${location.pathname}?project=${encodeURIComponent(id)}`);
   try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadShots(); loadVideos(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
@@ -98,7 +98,7 @@ function renderProject() {
     el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"),
     el("td", {}, el("div", { class: "file-actions" }, ...fileActions(f))))));
   $("#filesWrap").hidden = current.source_files.length === 0;
-  fillPickers();
+  fillPickers(); drawIA();
 }
 
 /* reference pickers: floor plan, shape to keep, look references */
@@ -309,8 +309,9 @@ async function loadOutputs() {
   drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
   drawJobs(out.jobs.filter(j => j.type === "video_export"), "#walkJobs");
   drawJobs(out.jobs.filter(j => j.type === "animation_export"), "#animJobs");
+  drawJobs(out.jobs.filter(j => j.type === "animation_export"), "#iaJobs");
   drawGallery(out.images);
-  images = out.images; drawWalk(); if (seq) refreshHeroes();
+  images = out.images; drawWalk(); if (seq) refreshHeroes(); drawIA();
   const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   vids.forEach(j => seenDone.add(j.id));
   if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "animation_export") ? "Your construction video is ready." : "Your walkthrough video is ready."); }
@@ -606,6 +607,7 @@ function drawVideos() {
   };
   $("#videoList").replaceChildren(...videos.filter(v => v.kind !== "construction").map(card));
   $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction").map(card));
+  $("#iaVideos").replaceChildren(...videos.filter(v => v.kind === "construction").map(card));
 }
 
 /* ---------- construction animation ---------- */
@@ -830,6 +832,163 @@ $("#heroBtn").onclick = async () => {
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
   finally { btn.disabled = false; current = await api.getProject(current.id).catch(() => current); renderProject(); loadOutputs(); }
 };
+
+/* ---------- construction animation from 3D images ---------- */
+let IA = null, iaSel = [], iaAsIs = new Set(), iaPending = new Set(), iaAnim = null, iaT = 0, iaPlaying = false, iaRaf = 0, iaLast = 0, iaExporting = null, iaKey = "", iaBuildKey = "";
+const imgCache = new Map(), linkCache = new Map();
+const IA_SIZE = { "16:9": [960, 540], "9:16": [540, 960], "1:1": [720, 720] };
+function resetIA() {
+  iaSel = []; iaAsIs = new Set(); iaPending = new Set(); iaAnim = null; iaT = 0; iaKey = iaBuildKey = ""; iaStop();
+  $("#iaPick").replaceChildren(el("span", { class: "hint" }, "Upload a 3D image of the building above and it appears here."));
+  $("#iaStage").hidden = true; $("#iaExport").disabled = true; message($("#iaMsg"), "");
+}
+function loadImg(url) {
+  if (!imgCache.has(url)) imgCache.set(url, new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = url; }));
+  return imgCache.get(url);
+}
+async function sourceLink(fid) {
+  if (!linkCache.has(fid)) linkCache.set(fid, api.fileLink(current.id, fid).then(r => r.url).catch(() => null));
+  return linkCache.get(fid);
+}
+const iaFiles = () => (current?.source_files || []).filter(f => (f.detected_type === "png" || f.detected_type === "jpeg") && !/^Photoreal view \d/.test(f.original_name));
+const iaRender = fid => images.find(i => (i.options || {}).anim_hero?.key === `img-${fid}` && (i.base_url || i.url));
+
+function drawIA() {
+  if (!current) return;
+  const files = iaFiles();
+  iaSel = iaSel.filter(id => files.some(f => f.id === id));
+  const key = JSON.stringify([files.map(f => f.id), iaSel, [...iaAsIs], [...iaPending], files.map(f => iaRender(f.id)?.id || "")]);
+  if (key !== iaKey) {
+    iaKey = key;
+    $("#iaPick").replaceChildren(...(files.length ? files.map(f => {
+      const r = iaRender(f.id), on = iaSel.includes(f.id), asIs = iaAsIs.has(f.id);
+      if (r) iaPending.delete(`img-${f.id}`);
+      const pending = iaPending.has(`img-${f.id}`);
+      const thumb = el("img", { alt: `Photoreal view of ${f.original_name}`, loading: "lazy" });
+      if (r && !asIs) thumb.src = r.url; else sourceLink(f.id).then(u => { if (u) thumb.src = u; });
+      const use = el("input", { type: "checkbox", ...(on ? { checked: "" } : {}), "aria-label": `Animate ${f.original_name}` });
+      use.onchange = () => {
+        if (use.checked && iaSel.length >= 3) { use.checked = false; toast("Use up to three images."); return; }
+        iaSel = use.checked ? [...iaSel, f.id] : iaSel.filter(x => x !== f.id); drawIA();
+      };
+      const real = el("input", { type: "checkbox", ...(asIs ? { checked: "" } : {}) });
+      real.onchange = () => { if (real.checked) iaAsIs.add(f.id); else iaAsIs.delete(f.id); drawIA(); };
+      const badge = asIs ? "Used as it is" : r ? "Photoreal ready" : pending ? "Rendering…" : "3D image";
+      return el("div", { class: `ia-item${on ? " on" : ""}` },
+        el("div", { class: "thumb" }, thumb, el("span", { class: "badge" }, on ? `${iaSel.indexOf(f.id) + 1} · ${badge}` : badge)),
+        el("div", { class: "body" }, el("span", { class: "name", title: f.original_name }, f.original_name),
+          el("label", { class: "check" }, use, "Animate this"), el("label", { class: "check" }, real, "Already photoreal")));
+    }) : [el("span", { class: "hint" }, "Upload a 3D image of the building above and it appears here.")]));
+  }
+  buildIA();
+}
+
+async function buildIA() {
+  const views = [];
+  for (const fid of iaSel) {
+    const f = iaFiles().find(x => x.id === fid), r = iaRender(fid);
+    if (iaAsIs.has(fid)) views.push({ fid, url: await sourceLink(fid), caption: "", render_id: null, name: f?.original_name });
+    else if (r) views.push({ fid, url: r.base_url || r.url, caption: "", render_id: r.id, name: f?.original_name });
+  }
+  const fmt = $("#iaFormat").value, secs = Number($("#iaSeconds").value) || 10;
+  const bkey = JSON.stringify([views.map(v => v.url), fmt, secs, iaSel]);
+  if (bkey === iaBuildKey) return;
+  iaBuildKey = bkey;
+  const missing = iaSel.length - views.length;
+  if (!views.length || !IA) {
+    iaAnim = null; $("#iaStage").hidden = true; $("#iaExport").disabled = true;
+    $("#iaEst").textContent = iaSel.length ? "Make the photoreal views first (or tick “already photoreal”)." : "Tick the images to animate.";
+    return;
+  }
+  try {
+    const imgs = await Promise.all(views.map(v => loadImg(v.url)));
+    if (bkey !== iaBuildKey) return;
+    iaStop();
+    iaAnim = IA.createImageAnimation(views.map((v, i) => ({ image: imgs[i], caption: "", render_id: v.render_id })), { seconds: secs });
+    iaAnim.items = views.map(v => ({ caption: v.name || "", render_id: v.render_id }));
+    const [w, h] = IA_SIZE[fmt];
+    const c = $("#iaCanvas"); c.width = w; c.height = h;
+    $("#iaFrame").style.setProperty("--ar", `${w} / ${h}`); $("#iaFrame").style.setProperty("--arw", String(w / h));
+    $("#iaScrub").max = String(Math.round(iaAnim.duration * 100));
+    $("#iaStage").hidden = false; $("#iaExport").disabled = false;
+    $("#iaEst").textContent = `${fmtClock(iaAnim.duration + 6)} video, ${fmt}${missing ? `. ${missing} ticked image${missing > 1 ? "s have" : " has"} no photoreal view yet and ${missing > 1 ? "are" : "is"} left out` : ""}.`;
+    iaShow(Math.min(iaT, iaAnim.duration));
+  } catch { $("#iaEst").textContent = "One of the images could not be loaded. Reload the page and try again."; }
+}
+function iaShow(t) {
+  if (!iaAnim) return;
+  iaT = Math.max(0, Math.min(iaAnim.duration, t));
+  const c = $("#iaCanvas"), frame = iaAnim.renderFrame(iaT, c.width, c.height);
+  c.getContext("2d").drawImage(frame, 0, 0);
+  $("#iaScrub").value = String(Math.round(iaT * 100));
+  $("#iaTime").textContent = `${fmtClock(iaT)} / ${fmtClock(iaAnim.duration)} · ${iaAnim.labelAt(iaT)}`;
+}
+function iaStop() { iaPlaying = false; cancelAnimationFrame(iaRaf); const b = $("#iaPlay"); if (b) b.textContent = "Play"; }
+function iaStep(now) {
+  if (!iaPlaying) return;
+  iaShow(iaT + Math.min(0.1, (now - iaLast) / 1000)); iaLast = now;
+  if (iaT >= iaAnim.duration) { iaStop(); return; }
+  iaRaf = requestAnimationFrame(iaStep);
+}
+$("#iaPlay").onclick = () => {
+  if (!iaAnim) return;
+  if (iaPlaying) { iaStop(); return; }
+  if (iaT >= iaAnim.duration - 0.05) iaT = 0;
+  iaPlaying = true; $("#iaPlay").textContent = "Pause"; iaLast = performance.now(); iaRaf = requestAnimationFrame(iaStep);
+};
+$("#iaScrub").oninput = e => { iaStop(); iaShow(Number(e.target.value) / 100); };
+$("#iaFormat").onchange = () => { iaBuildKey = ""; buildIA(); };
+$("#iaSeconds").onchange = () => { iaBuildKey = ""; buildIA(); };
+
+$("#iaMake").onclick = async () => {
+  if (!current) return;
+  if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
+  const todo = iaSel.filter(fid => !iaAsIs.has(fid) && !iaPending.has(`img-${fid}`) && !iaRender(fid));
+  const redo = todo.length ? todo : iaSel.filter(fid => !iaAsIs.has(fid));
+  if (!redo.length) { toast(iaSel.length ? "These images are used as they are." : "Tick the images to animate first."); return; }
+  const look = $("#iaLook").value.trim();
+  const aspect = { "16:9": "landscape", "9:16": "portrait", "1:1": "square" }[$("#iaFormat").value];
+  const prompt = `${look ? look + ". " : ""}Photorealistic luxury architectural visualisation of this exact building at night: blue hour sky with stars, warm light glowing from every window, `
+    + "subtle warm facade uplighting, refined landscaping, cinematic low-angle architectural photography. Keep the building's exact shape, floors, roof and window positions from the 3D image.";
+  const btn = $("#iaMake"); btn.disabled = true;
+  try {
+    for (const fid of redo) {
+      const looks = tickedLooks().filter(id => id !== fid).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
+      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", materials: look.slice(0, 400), tier: chosenTier(),
+        quality: $("#rQuality").value, references: [{ file_id: fid, role: "model" }, ...looks], anim_hero: { index: Math.max(0, iaSel.indexOf(fid)), key: `img-${fid}` } }, newKey());
+      iaPending.add(`img-${fid}`);
+    }
+    toast(`Making ${redo.length} photoreal view${redo.length > 1 ? "s" : ""}. Each takes about a minute.`);
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; drawIA(); loadOutputs(); }
+};
+
+$("#iaExport").onclick = async () => {
+  if (!iaAnim || iaExporting) return;
+  const { canExport, exportVideo } = await import("./export.js");
+  if (!canExport()) { message($("#iaMsg"), "This browser cannot make videos. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
+  iaStop(); message($("#iaMsg"), "");
+  const base = C ? C.defaultScript() : {};
+  const script = C ? C.normalise({ ...base, format: $("#iaFormat").value, title: $("#iaTitle2").value.trim() || current.name, subtitle: $("#iaSub").value.trim(), renders: false, look: $("#iaLook").value.trim() })
+    : { format: $("#iaFormat").value, title: current.name, subtitle: "", renders: false, captions: true, render_seconds: 4 };
+  const ctl = new AbortController(); iaExporting = ctl;
+  const btn = $("#iaExport"); btn.disabled = true; $("#iaProgress").hidden = false;
+  const say = (f, text) => { $("#iaBar").style.width = `${Math.round(f * 100)}%`; $("#iaProgText").textContent = text; };
+  try {
+    const out = await exportVideo({ seq: iaAnim, script, stills: [], title: current.name, signal: ctl.signal, onProgress: (f, text) => say(f * 0.85, `Making the video: ${text.toLowerCase()}. Keep this tab open.`) });
+    say(0.86, `Uploading ${(out.blob.size / 1048576).toFixed(1)} MB…`);
+    await uploadAnimation(current.id, out.blob, { script, model_id: null, items: iaAnim.items.filter(i => i.render_id).map(i => ({ caption: i.caption.slice(0, 120), render_id: i.render_id })) },
+      f => say(0.86 + f * 0.14, `Uploading… ${Math.round(f * 100)}%`));
+    say(1, "Uploaded. Ollic is preparing it for phones; it appears below in a minute or two.");
+    toast("Video uploaded. It will appear below when it is ready."); loadOutputs();
+  } catch (err) {
+    if (err.name === "AbortError") message($("#iaMsg"), "Export cancelled.", "ok");
+    else if (err.status === 401) handle(err);
+    else message($("#iaMsg"), err.message || "The video could not be made.");
+  } finally { iaExporting = null; btn.disabled = false; setTimeout(() => { $("#iaProgress").hidden = true; }, 4000); iaShow(iaT); }
+};
+$("#iaCancel").onclick = () => iaExporting?.abort();
+import("./imageanim.js").then(m => { IA = m; iaBuildKey = ""; if (current) buildIA(); }).catch(() => {});
 
 /* ---------- start ---------- */
 (async function start() {
