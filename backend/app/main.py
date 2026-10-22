@@ -17,16 +17,19 @@ from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
 from .animation import ClaudeDirector, CloudflareDirector
+from .gemini_images import GeminiImages
+from .fal import FalImages, FalVideo
+from .kling import KlingVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import animation, models, projects, renders, walkthrough
+from .routes import animation, cinematic, models, projects, renders, walkthrough
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
 
 
 def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None,
-               runner=None, vision="auto", prompt_writer="auto", directors="auto") -> FastAPI:
+               runner=None, vision="auto", prompt_writer="auto", directors="auto", kling="auto", gemini="auto", fal="auto") -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
@@ -56,6 +59,23 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
             "premium": ClaudeDirector(settings.anthropic_api_key, settings.premium_prompt_model) if settings.anthropic_api_key else None,
         }
     app.state.directors = directors or {}
+    # direct connections: Kling for cinematic clips, Google Gemini (Nano Banana) for line drawings
+    if kling == "auto":
+        kling = KlingVideo(settings.kling_api_key, settings.kling_base_url, settings.kling_model) if settings.kling_api_key else None
+    app.state.kling = kling
+    if gemini == "auto":
+        gemini = GeminiImages(settings.gemini_api_key) if settings.gemini_api_key else None
+    app.state.gemini = gemini
+    # the added options sit beside Standard and Premium (which are unchanged): Ollic Swift and Ultra
+    for t in ("swift", "ultra"):
+        app.state.image_clients.setdefault(t, gemini)
+    # Ollic VS (fal.ai): an image option and a video option; fal may be a dict {"images", "video"} in tests
+    if fal == "auto":
+        fal = {"images": FalImages(settings.fal_key), "video": FalVideo(settings.fal_key)} if settings.fal_key else {}
+    fal = fal or {}
+    app.state.image_clients.setdefault("vs", fal.get("images"))
+    # video options by id; an option with no client is listed as not connected
+    app.state.video_clients = {"motion": kling, "vs": fal.get("video")}
 
     if settings.web_origins:
         app.add_middleware(
@@ -79,6 +99,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.include_router(models.router, prefix="/api")
     app.include_router(walkthrough.router, prefix="/api")
     app.include_router(animation.router, prefix="/api")
+    app.include_router(cinematic.router, prefix="/api")
 
     # The website's public settings come from the server's environment, so keys are
     # entered once (e.g. in Railway's variables). Only public values are sent: the

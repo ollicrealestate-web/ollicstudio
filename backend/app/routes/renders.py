@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from ..auth import CurrentUser, get_current_user
+from ..engines import IMAGE_ENGINES, VIDEO_ENGINES
 from ..jobs import ACTIVE, FINISHED, is_stale, now_iso
 from ..renders import run_render_job
 from ..supabase import BackendUnavailable
@@ -54,7 +55,7 @@ class ConceptRenderIn(BaseModel):
     landscaping: str = Field(default="", max_length=400)
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
     quality: Literal["medium", "high", "max"] = "high"   # Premium render only; Standard has one level
-    tier: Literal["standard", "premium"] = "standard"
+    tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs"] = "standard"
     anim_hero: AnimHero | None = None
     anim_line: AnimHero | None = None     # the result is the line drawing of an animation view
 
@@ -89,7 +90,7 @@ class ConceptRenderIn(BaseModel):
 
 class EditIn(BaseModel):
     instruction: str = Field(min_length=3, max_length=1000)
-    tier: Literal["standard", "premium"] | None = None  # default: the same tier as the render being revised
+    tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs"] | None = None  # default: the same option as the render being revised
     anim_line: "AnimHero | None" = None   # marks the result as the line drawing of an animation view
 
     @field_validator("instruction")
@@ -105,7 +106,7 @@ def public_job(job: dict) -> dict:
     return {k: job.get(k) for k in JOB_FIELDS}
 
 
-TIER_NAME = {"standard": "Standard render", "premium": "Premium render"}
+TIER_NAME = {"standard": "Standard render", "premium": "Premium render", **{k: e["name"] for k, e in IMAGE_ENGINES.items()}}
 
 
 def user_plan(request: Request, user: CurrentUser) -> str:
@@ -127,8 +128,11 @@ def daily_limit(request: Request, user: CurrentUser, tier: str) -> int:
 
 def _require_tier(request: Request, user: CurrentUser, tier: str) -> None:
     if request.app.state.image_clients.get(tier) is None:
-        raise HTTPException(503, {"code": "not_configured", "reason": f"{TIER_NAME[tier]} is not switched on for this site yet."})
-    if tier == "premium" and user_plan(request, user) != "premium":
+        reason = f"{TIER_NAME[tier]} is not connected yet." if tier in IMAGE_ENGINES else f"{TIER_NAME[tier]} is not switched on for this site yet."
+        raise HTTPException(503, {"code": "not_configured", "reason": reason})
+    if tier in IMAGE_ENGINES and user_plan(request, user) != "premium" and (_repo(request).get_profile(user) or {}).get("role") not in UNLIMITED_ROLES:
+        raise HTTPException(403, {"code": "premium_only", "reason": f"{TIER_NAME[tier]} is for paid plans. Standard renders are free."})
+    if tier == "premium" and user_plan(request, user) != "premium" and (_repo(request).get_profile(user) or {}).get("role") not in UNLIMITED_ROLES:
         raise HTTPException(403, {"code": "premium_only", "reason": "Premium render is for paid plans. Standard renders are free."})
 
 
@@ -176,7 +180,7 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
     if limit > 0:
         used = repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), tier)
         if used >= limit:
-            kind = "premium renders" if tier == "premium" else "free renders"
+            kind = "free renders" if tier == "standard" else f"{TIER_NAME.get(tier, 'premium')} renders" if tier in IMAGE_ENGINES else "premium renders"
             raise HTTPException(429, {"code": "daily_limit", "reason": f"You have used today's {limit} {kind}. They reset at 01:00 Lagos time (midnight UTC)."})
     active = [j for j in repo.list_jobs(user, project_id) if j.get("status") in ACTIVE and not is_stale(j)]
     if len(active) >= max_active:
@@ -257,9 +261,16 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
     jobs = [_settle_stale(request, user, j) for j in repo.list_jobs(user, str(project_id)) if j.get("owner_id") == user.id]
     plan = user_plan(request, user)
     clients = request.app.state.image_clients
-    tiers = {t: {"name": TIER_NAME[t], "available": clients.get(t) is not None, "allowed": t == "standard" or plan == "premium",
+    unlimited = (repo.get_profile(user) or {}).get("role") in UNLIMITED_ROLES
+    tiers = {t: {"name": TIER_NAME[t], "available": clients.get(t) is not None, "allowed": t == "standard" or plan == "premium" or unlimited,
                  "daily_limit": daily_limit(request, user, t) or None} for t in ("standard", "premium")}
-    return {"renders_enabled": any(v["available"] for v in tiers.values()), "plan": plan, "tiers": tiers,
+    # the added options, beside the two above; listed even when not connected
+    for t, e in IMAGE_ENGINES.items():
+        tiers[t] = {"name": e["name"], "available": clients.get(t) is not None, "allowed": plan == "premium" or unlimited,
+                    "daily_limit": daily_limit(request, user, t) or None, "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon"))}
+    video_engines = {k: {"name": e["name"], "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon")),
+                         "available": (getattr(request.app.state, "video_clients", None) or {}).get(k) is not None} for k, e in VIDEO_ENGINES.items()}
+    return {"renders_enabled": any(v["available"] for v in tiers.values()), "plan": plan, "tiers": tiers, "video_engines": video_engines,
             "images": out, "jobs": [public_job(j) for j in jobs]}
 
 
@@ -296,6 +307,10 @@ def _service(e: dict) -> str:
         return "Premium prompting"
     if e.get("operation") == "animation_direct":
         return "Animation director"
+    if e.get("operation") == "video_generate":
+        return "Cinematic clip"
+    if e.get("provider") == "google":
+        return "Ollic Ultra" if "pro" in str(e.get("model")) else "Ollic Swift"
     return "Premium render" if e.get("provider") == "openai" else "Standard render"
 
 

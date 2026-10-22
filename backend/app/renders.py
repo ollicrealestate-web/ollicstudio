@@ -248,7 +248,15 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
 
 
 def record_usage(repo, user: CurrentUser, job: dict, model: str, operation: str, result) -> bool:
-    if model.startswith("@cf/"):
+    if model.startswith("fal-ai/"):
+        from .fal import IMAGE_PRICE, PRICE_SOURCE as F_SRC
+        provider, text_in, image_in, out = "fal", 0, 0, 0
+        cost, source = IMAGE_PRICE, F_SRC
+    elif model.startswith("gemini"):
+        from .gemini_images import PRICE_SOURCE as G_SRC, cost_usd as g_cost
+        provider, text_in, image_in, out = "google", 0, 0, 0
+        cost, source = g_cost(model, "2K"), G_SRC
+    elif model.startswith("@cf/"):
         provider, text_in, image_in, out = "cloudflare", 0, 0, 0
         cost = cost_usd_estimate(result.usage)
         source = (f"Cloudflare Workers AI list price ${USD_PER_1000_NEURONS}/1,000 neurons, estimated from image tiles; "

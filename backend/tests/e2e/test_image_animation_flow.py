@@ -66,6 +66,14 @@ def test_animation_from_3d_images(stack, tmp_path):  # noqa: F811
         tags = [i["options"].get("anim_line") for i in stack["repo"].images.values() if i["options"].get("anim_line")]
         assert len(tags) == 1 and tags[0]["key"].startswith("img-")
         page.wait_for_selector("#iaStage:not([hidden])")
+        # a cinematic clip (paid plans; this is an owner/test account): gold lines -> photoreal, made by the video service
+        uid = next(p["owner_id"] for p in stack["repo"].projects.values() if p["name"] == "Lekki tower")
+        stack["repo"].roles[uid] = "admin"
+        assert "$0.84" in page.inner_text("#iaClipOpts")
+        page.click("#iaPick .ia-item >> nth=0 >> button:has-text('Cinematic clip')")
+        page.wait_for_function("[...document.querySelectorAll('#iaVideos .video-card')].some(c => c.textContent.toUpperCase().includes('AI VIDEO'))", timeout=60000)
+        clip = next(v for v in stack["repo"].videos.values() if v["kind"] == "cinematic")
+        assert clip["title"] == "Lekki tower" and clip["items"][0]["kind"] == "lines"
         # the second is a finished render already: used as it is, no AI call
         page.check("#iaPick .ia-item >> nth=1 >> text=Already photoreal")
         page.check("#iaPick .ia-item >> nth=1 >> text=Animate this")

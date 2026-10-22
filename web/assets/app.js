@@ -309,7 +309,7 @@ $("#useView").onclick = async () => {
 };
 
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", video_export: "Walkthrough video", animation_export: "Construction video" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", video_export: "Walkthrough video", animation_export: "Construction video", cinematic_clip: "Cinematic clip" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
 let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
@@ -323,17 +323,17 @@ async function loadOutputs() {
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
   setupTiers(out);
-  const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export", "animation_export"];
+  const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export", "animation_export", "cinematic_clip"];
   drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type) && !VIDEO_JOBS.includes(j.type)), "#jobList");
   drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
   drawJobs(out.jobs.filter(j => j.type === "video_export"), "#walkJobs");
-  drawJobs(out.jobs.filter(j => j.type === "animation_export"), "#animJobs");
-  drawJobs(out.jobs.filter(j => j.type === "animation_export"), "#iaJobs");
+  drawJobs(out.jobs.filter(j => j.type === "animation_export" || j.type === "cinematic_clip"), "#animJobs");
+  drawJobs(out.jobs.filter(j => j.type === "animation_export" || j.type === "cinematic_clip"), "#iaJobs");
   drawGallery(out.images);
   images = out.images; drawWalk(); if (seq) refreshHeroes(); drawIA();
   const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   vids.forEach(j => seenDone.add(j.id));
-  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "animation_export") ? "Your construction video is ready." : "Your walkthrough video is ready."); }
+  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "cinematic_clip") ? "Your cinematic clip is ready." : vids.some(j => j.type === "animation_export") ? "Your construction video is ready." : "Your walkthrough video is ready."); }
   const done = out.jobs.filter(j => MODEL_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   done.forEach(j => seenDone.add(j.id));
   if (done.length && outputsLoadedOnce) { loadModels(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
@@ -395,7 +395,20 @@ function setupTiers(out) {
   $("#premNote").textContent = prem.allowed ? `Our best image quality, with expert prompting that studies your plan, sketches and references · ${prem.daily_limit ? `${prem.daily_limit} a day` : "no daily limit"}` : "Paid plans only. Upgrade to unlock.";
   if (!std.available && prem.allowed) premInput.checked = true;
   if (premInput.checked && premInput.disabled) stdInput.checked = true;
+  // the added options, beside Standard and Premium (which are unchanged)
+  let more = $("#moreTiers");
+  if (!more) { more = el("div", { id: "moreTiers", class: "more-tiers", role: "group", "aria-label": "More options" }); $("#tierPick").append(more); }
+  const was = chosenTier();
+  more.replaceChildren(...Object.entries(tierInfo).filter(([k]) => k !== "standard" && k !== "premium").map(([k, t]) => {
+    const on = t.available && t.allowed;
+    const note = t.soon ? "Coming soon" : !t.available ? "Not connected yet" : !t.allowed ? "Paid plans only" : t.price;
+    const input = el("input", { type: "radio", name: "tier", value: k, ...(on ? {} : { disabled: "" }), ...(on && was === k ? { checked: "" } : {}) });
+    input.addEventListener("change", tierChanged);
+    return el("label", { class: `tier premium-tag${on ? "" : " off"}` }, input, el("span", {}, el("b", {}, t.name), el("small", {}, `${t.blurb} · ${note}`)));
+  }));
+  if (!$("#tierPick input[name=tier]:checked")) stdInput.checked = true;
   tierChanged();
+  updateClipEngines(out.video_engines || {});
 }
 function chosenTier() { return $("#tierPick input[name=tier]:checked")?.value || "standard"; }
 function tierChanged() {
@@ -620,15 +633,15 @@ function drawVideos() {
       el("div", { class: "frame", style: `aspect-ratio:${ratio}` },
         v.url ? el("video", { src: v.url, controls: "", preload: "metadata", playsinline: "", "aria-label": `Walkthrough video: ${v.title || "untitled"}` }) : el("span", { class: "muted" }, "Video link unavailable")),
       el("div", { class: "body" },
-        el("h3", {}, v.title || (v.kind === "construction" ? "Construction sequence" : "Walkthrough")),
-        el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, v.kind === "construction" ? "Construction" : `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
+        el("h3", {}, v.title || (v.kind === "cinematic" ? "Cinematic clip" : v.kind === "construction" ? "Construction sequence" : "Walkthrough")),
+        el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, v.kind === "cinematic" ? "AI video" : v.kind === "construction" ? "Construction" : `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
         el("p", { class: "hint" }, fmtDate(v.created_at)),
         el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "",
           deleteButton("this video", async () => { await api.deleteVideo(v.id); toast("Video deleted."); loadVideos(); }, false))));
   };
   $("#videoList").replaceChildren(...videos.filter(v => v.kind !== "construction").map(card));
-  $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction").map(card));
-  $("#iaVideos").replaceChildren(...videos.filter(v => v.kind === "construction").map(card));
+  $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
+  $("#iaVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
 }
 
 /* ---------- construction animation ---------- */
@@ -827,7 +840,8 @@ function drawHeroes() {
     const img = heroImgs[k], key = seq.heroKey(k), waiting = heroPending.has(key);
     return el("div", { class: "hero-card" },
       el("div", { class: "thumb" }, img ? el("img", { src: img._url || img.src, alt: `Photoreal view ${k + 1}` }) : waiting ? "Rendering…" : "Not made yet"),
-      el("div", { class: "cap" }, el("span", {}, `View ${k + 1}`), el("span", { class: "hint" }, img ? "Ready" : waiting ? "About a minute" : "Wireframe only")));
+      el("div", { class: "cap" }, el("span", {}, `View ${k + 1}`), el("span", { class: "hint" }, img ? "Ready" : waiting ? "About a minute" : "Wireframe only"),
+        img ? el("button", { class: "btn clip", type: "button", onclick: e => heroClip(k, e.currentTarget) }, "Cinematic clip") : ""));
   }));
   const missing = Array.from({ length: n }, (_, k) => !heroImgs[k] && !heroPending.has(seq.heroKey(k))).filter(Boolean).length;
   $("#heroBtn").textContent = missing ? `Make photoreal view${missing > 1 ? "s" : ""} (${missing})` : "Remake photoreal views";
@@ -880,7 +894,7 @@ async function sourceLink(fid) {
   if (!linkCache.has(fid)) linkCache.set(fid, api.fileLink(current.id, fid).then(r => r.url).catch(() => null));
   return linkCache.get(fid);
 }
-const iaFiles = () => (current?.source_files || []).filter(f => (f.detected_type === "png" || f.detected_type === "jpeg") && !/^Photoreal view \d/.test(f.original_name));
+const iaFiles = () => (current?.source_files || []).filter(f => (f.detected_type === "png" || f.detected_type === "jpeg") && !/^(Photoreal view|Cinematic start view) \d/.test(f.original_name));
 const iaRender = fid => images.find(i => (i.options || {}).anim_hero?.key === `img-${fid}` && (i.base_url || i.url));
 const iaLine = fid => images.find(i => (i.options || {}).anim_line?.key === `img-${fid}` && (i.base_url || i.url));
 const LINE_PROMPT = "Turn this picture into a clean architectural wireframe line drawing of the building only: thin, crisp, bright white lines on a pure black background, "
@@ -924,7 +938,9 @@ function drawIA() {
       return el("div", { class: `ia-item${on ? " on" : ""}` },
         el("div", { class: "thumb" }, thumb, el("span", { class: "badge" }, on ? `${iaSel.indexOf(f.id) + 1} · ${badge}` : badge)),
         el("div", { class: "body" }, el("span", { class: "name", title: f.original_name }, f.original_name),
-          el("label", { class: "check" }, use, "Animate this"), el("label", { class: "check" }, real, "Already photoreal")));
+          el("label", { class: "check" }, use, "Animate this"), el("label", { class: "check" }, real, "Already photoreal"),
+          (r || asIs) && ln ? el("button", { class: "btn clip", type: "button", onclick: e => startClip({ kind: "lines", id: ln.id }, asIs ? { kind: "file", id: f.id } : { kind: "render", id: r.id },
+            $("#iaFormat").value, $("#iaTitle2").value.trim() || current.name, "ia", e.currentTarget) }, "Cinematic clip") : ""));
     }) : [el("span", { class: "hint" }, "Upload a 3D image of the building above and it appears here.")]));
   }
   buildIA();
@@ -1051,6 +1067,73 @@ $("#iaExport").onclick = async () => {
 };
 $("#iaCancel").onclick = () => iaExporting?.abort();
 import("./imageanim.js").then(m => { IA = m; iaBuildKey = ""; if (current) buildIA(); }).catch(() => {});
+
+/* ---------- cinematic clips (Premium): one AI video shot from the gold wireframe to the photoreal building ---------- */
+const CLIP_PRICE = { "720p": [0.084, 0.126], "1080p": [0.112, 0.168] };   // US$ a second (silent, with sound), video service price list
+const clipOpts = {};
+const clipEngineSelects = [];
+let clipEngines = {};
+// US$ a second: [silent, with sound]
+const ENGINE_PRICE = { vs: { "720p": [0.3034, 0.3034], "1080p": [0.682, 0.682] } };
+function updateClipEngines(engines) {
+  clipEngines = engines;
+  for (const sel of clipEngineSelects) {
+    const keep = sel.value;
+    sel.replaceChildren(...Object.entries(engines).map(([k, e]) => el("option", { value: k, ...(e.available ? {} : { disabled: "" }) },
+      `${e.name}${e.soon ? " (coming soon)" : !e.available ? " (not connected yet)" : ""}`)));
+    sel.value = engines[keep]?.available ? keep : (Object.keys(engines).find(k => engines[k].available) || "motion");
+    sel.dispatchEvent(new Event("change"));
+  }
+}
+function clipControls(host, prefix) {
+  const engine = el("select", { "aria-label": "Video option", class: "clip-engine" }, el("option", { value: "motion" }, "Ollic Motion"));
+  clipEngineSelects.push(engine);
+  const secs = el("select", { "aria-label": "Clip length" }, el("option", { value: "5" }, "5 s"), el("option", { value: "10", selected: "" }, "10 s"));
+  const res = el("select", { "aria-label": "Clip quality" }, el("option", { value: "720p" }, "720p"), el("option", { value: "1080p" }, "1080p"));
+  const audio = el("input", { type: "checkbox" });
+  const est = el("span", { class: "hint" });
+  const about = el("p", { class: "hint engine-note" });
+  const update = () => {
+    const table = ENGINE_PRICE[engine.value] || CLIP_PRICE;
+    const p = table[res.value][audio.checked ? 1 : 0] * Number(secs.value);
+    est.textContent = `About $${p.toFixed(2)} per clip, made in 2–6 minutes.`;
+    const e = clipEngines[engine.value];
+    about.textContent = e ? `${e.blurb} ${e.price}.` : "";
+  };
+  [engine, secs, res, audio].forEach(x => x.addEventListener("change", update)); update();
+  clipOpts[prefix] = () => ({ engine: engine.value, seconds: Number(secs.value), resolution: res.value, audio: audio.checked });
+  host.replaceChildren(
+    el("div", {}, el("b", {}, "Cinematic clip "), el("span", { class: "chip premium" }, "Paid plans"),
+      el("span", { class: "hint" }, " One continuous AI video shot: the gold wireframe turns into the real building while the camera moves. Press “Cinematic clip” on a ready view.")),
+    el("label", { class: "check engine-pick" }, "Video option ", engine), about,
+    el("div", { class: "row" }, el("label", { class: "check" }, "Length ", secs), el("label", { class: "check" }, "Quality ", res), el("label", { class: "check" }, audio, "Sound"), est));
+}
+clipControls($("#animClipOpts"), "anim"); clipControls($("#iaClipOpts"), "ia");
+
+async function startClip(start, end, format, title, prefix, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api.makeClip(current.id, { start, end, format, title: (title || "").slice(0, 80), ...clipOpts[prefix]() });
+    toast(`Cinematic clip started (about $${Number(r.estimate_usd).toFixed(2)}). It takes 2–6 minutes and appears under the videos.`);
+    loadOutputs();
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+async function heroClip(k, btn) {
+  if (!seq || !heroImgs[k]) return;
+  btn.disabled = true;
+  try {
+    const [w, h] = { "16:9": [1536, 1024], "9:16": [1024, 1536], "1:1": [1024, 1024] }[animScript.format];
+    stopAnim();
+    const canvas = seq.heroWireSnapshot(k, w, h);
+    const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+    previewSize(); showAt(animT);
+    const f = await uploadFile(current.id, new File([blob], `Cinematic start view ${k + 1}.png`, { type: "image/png" }), () => {});
+    await startClip({ kind: "file", id: f.id }, { kind: "render", id: heroImgs[k]._rid }, animScript.format, animScript.title || current.name, "anim", null);
+    current = await api.getProject(current.id).catch(() => current); renderProject();
+  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  finally { btn.disabled = false; }
+}
 
 /* ---------- start ---------- */
 (async function start() {

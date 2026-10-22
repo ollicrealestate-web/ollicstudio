@@ -468,3 +468,19 @@ input[type=number]:focus { border-color: var(--red); outline: none; box-shadow: 
 .ia-stage { display: grid; gap: 12px; }
 .btn.sm { min-height: 36px; padding: 0 12px; font-size: 0.84rem; }
 .video-card .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* cinematic clips */
+.clip-opts { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.clip-opts .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.clip-opts select { width: auto; min-height: 36px; }
+.btn.clip { border-color: rgba(255, 196, 110, 0.6); color: #ffd28a; }
+.btn.clip:hover { background: rgba(255, 178, 80, 0.12); border-color: #ffc46e; }
+.ia-item .body .btn, .hero-card .cap .btn { min-height: 34px; padding: 0 10px; font-size: 0.8rem; }
+.hero-card .cap { flex-wrap: wrap; align-items: center; }
+.more-tiers { display: contents; }
+.tier.off { opacity: 0.5; }
+.clip-engine { max-width: 100%; }
+.engine-pick { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.engine-pick select, .clip-engine { width: 100%; min-width: 0; }
+.engine-note { margin: 0; }
+.more-tiers small { overflow-wrap: anywhere; }

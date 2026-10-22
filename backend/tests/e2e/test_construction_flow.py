@@ -23,6 +23,7 @@ from app.main import create_app
 from ..conftest import SECRET, FakeImages, FakeRepo
 from ..fixtures.villa import build_villa_ifc
 from ..test_animation import FakeDirector
+from ..test_cinematic import FakeKling
 from .test_model_flow import GL_ARGS
 from .test_walkthrough_flow import MediaLinkStorage
 from .test_web_flow import WEB, _free_port, fake_supabase_auth
@@ -44,7 +45,8 @@ def stack(tmp_path_factory):
     director = FakeDirector(settings={"format": "1:1", "phases": {"roof": {"seconds": 2}}, "rooms": ["Kitchen", "Attic"]})
     repo, storage, images = FakeRepo(), MediaLinkStorage(), FakeImages()
     api = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=ThreadRunner(),
-                     image_clients={"standard": images, "premium": None}, vision=None, prompt_writer=None, directors={"standard": director})
+                     image_clients={"standard": images, "premium": None}, vision=None, prompt_writer=None, directors={"standard": director}, kling=FakeKling(), gemini=None)
+    api.state.clip_poll_seconds = 0
     auth = fake_supabase_auth()
     from fastapi.middleware.cors import CORSMiddleware
     auth.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

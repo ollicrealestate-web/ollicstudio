@@ -33,6 +33,9 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | **Construction animation**: site, foundation, each floor's structure and walls, doors and windows, roof, fly-around, furniture, rooms, then the AI room renders; preview with play, scrub and stage chapters; settings for every stage's seconds, light, direction, format, hidden groups, rooms, captions, title | Built and tested in a browser | e2e construction test, `test_animation.py` |
 | **Luxury style** (default): night, gold setting-out grid, glowing gold wireframe rising floor by floor, then a line of light sweeping each hero view into its photoreal AI render; **Make photoreal views** (one render per view) | Built and tested in a browser, including a real export; the look was approved by the owner from a test clip made with a live render | e2e construction test |
 | **Construction animation from 3D images** (no IFC needed): up to 3 images, AI photoreal per image or "already photoreal", gold lines traced from the ground up, light sweep to photoreal, export | Built and tested in a browser, including a real export | `test_image_animation_flow.py` |
+| **Cinematic clip** (Kling direct): one AI video shot from the gold wireframe to the photoreal building, 5 or 10 s, 720p/1080p, sound optional, cost shown | Built and tested with a stand-in that follows Kling's documented API; **awaiting `KLING_API_KEY` and migration 9** | `test_cinematic.py`, `test_image_animation_flow.py` |
+| **Choosable options, Ollic names only**: renders offer Standard and Premium (unchanged) plus Ollic Swift, Ultra (Gemini, direct), Studio (Flux 3, coming soon) and VS (fal.ai); clips offer Ollic Motion (Kling), Cinema and Reel (coming soon) and VS (fal.ai). Each option shows what it is good at and its cost; options not connected are listed greyed out. Image options appear only where pictures are made; video options only on clips | Built and tested with stand-ins that follow each vendor's documented API; **awaiting `GEMINI_API_KEY`, `FAL_KEY`** | `test_cinematic.py` |
+| **Nano Banana line drawings** (Google direct) | Built and tested with a stand-in; **awaiting `GEMINI_API_KEY`** | `test_cinematic.py` |
 | **Animation director**: plain words change the settings (Standard: free text model; paid plans: Claude); 40 a day | Built and tested with stand-ins; live once migration 8 is run | `test_animation.py` |
 | **Construction video export**: made in the browser (H.264, or VP9 converted by the server), checked, made phone-friendly and saved; 16:9, 9:16, 1:1 | Built and tested (VP9 path end to end; H.264 path on the server) | e2e construction test, `test_animation.py` |
 | **3D viewer**: outside, inside with roof off and room names, floor picker, element details, GLB and IFC downloads; draws only on change; fits phones | Built and tested in a browser (WebGL) | e2e model test |
@@ -72,7 +75,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 
 ## Next session should do first
 
-1. **Owner:** (migrations 6, 7 and 8 are done) add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
+1. **Owner:** run migration 9 (`20261022000009_cinematic_clips.sql`); add `KLING_API_KEY` and `GEMINI_API_KEY` in Render; add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
 2. Live check of the construction animation with a real Revit IFC: preview, a plain-language change, a 16:9 export in Chrome.
 3. Live check of the walkthrough with a real Revit IFC with rooms and furniture: several shots, render all, a 9:16 video.
 4. Live check: Read my plan on the owner's A103 sheet; a Standard and a Premium render from it with a look reference; a render from a real Revit IFC view. Record results here.

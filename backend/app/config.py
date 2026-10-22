@@ -42,6 +42,15 @@ class Settings:
     # Renders each customer may start per day (UTC). 0 means no limit.
     daily_renders_per_user: int = 3            # Standard (free, Cloudflare)
     daily_premium_renders_per_user: int = 20   # Premium render (paid plans, OpenAI)
+    # Kling (direct): video clips from a start and an end frame. Paid plans only; costs money per second.
+    kling_api_key: str | None = field(default=None, repr=False)
+    kling_base_url: str = "https://api-singapore.klingai.com"   # Kling's endpoint for servers outside China
+    kling_model: str = "kling-3.0"
+    daily_clips_per_user: int = 5              # cinematic clips a paid customer may start per day
+    # Google Gemini API (direct): Nano Banana images, used for animation line drawings
+    gemini_api_key: str | None = field(default=None, repr=False)
+    fal_key: str | None = field(default=None, repr=False)          # Ollic VS (fal.ai): images and video
+    gemini_image_model: str = "gemini-nano-banana-2.1"
 
     # Two tiers, both offered side by side:
     #   standard: Cloudflare Workers AI, free daily allowance, for everyone
@@ -62,12 +71,15 @@ class Settings:
         return self.premium_available if tier == "premium" else self.standard_available
 
     def model_for(self, tier: str, operation: str) -> str:
+        from .engines import IMAGE_ENGINES
+        if tier in IMAGE_ENGINES:
+            return IMAGE_ENGINES[tier]["model"]
         if tier == "premium":
             return self.openai_edit_model if operation == "revise" else self.openai_image_model
         return self.cloudflare_image_model
 
     def daily_limit_for(self, tier: str) -> int:
-        return self.daily_premium_renders_per_user if tier == "premium" else self.daily_renders_per_user
+        return self.daily_renders_per_user if tier == "standard" else self.daily_premium_renders_per_user
 
     @property
     def jwks_url(self) -> str:
@@ -105,4 +117,11 @@ class Settings:
             cloudflare_image_model=os.environ.get("CLOUDFLARE_IMAGE_MODEL", "").strip() or "@cf/black-forest-labs/flux-2-klein-4b",
             daily_renders_per_user=_int("DAILY_RENDERS_PER_USER", 3),
             daily_premium_renders_per_user=_int("DAILY_PREMIUM_RENDERS_PER_USER", 20),
+            kling_api_key=os.environ.get("KLING_API_KEY", "").strip() or None,
+            kling_base_url=(os.environ.get("KLING_BASE_URL", "").strip() or "https://api-singapore.klingai.com").rstrip("/"),
+            kling_model=os.environ.get("KLING_MODEL", "").strip() or "kling-3.0",
+            daily_clips_per_user=_int("DAILY_CLIPS_PER_USER", 5),
+            gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip() or None,
+            fal_key=os.environ.get("FAL_KEY", "").strip() or None,
+            gemini_image_model=os.environ.get("GEMINI_IMAGE_MODEL", "").strip() or "gemini-nano-banana-2.1",
         )

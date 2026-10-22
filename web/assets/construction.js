@@ -380,6 +380,21 @@ export function createConstruction(ctx, script, extras = {}) {
     if (lux) lux.renderSolid(); else ctx.render();
     return r.domElement;
   }
+  /** The glowing gold wireframe from hero view k (the start frame of a cinematic clip), same camera as heroSnapshot. */
+  function heroWireSnapshot(k, w, h) {
+    if (!lux) return heroSnapshot(k, w, h);
+    const r = ctx.renderer;
+    r.setPixelRatio(1); r.setSize(w, h, false);
+    frameAt(duration);
+    const frameAspect = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1 }[script.format] || 16 / 9, imgAspect = w / h;
+    const pose = heroPose(k, frameAspect);
+    let fov = pose.fov;
+    if (imgAspect < frameAspect) fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(fov) / 2) * frameAspect / imgAspect));
+    camera.aspect = imgAspect; camera.fov = fov; camera.updateProjectionMatrix();
+    camera.position.copy(pose.pos); camera.lookAt(pose.target);
+    lux.render({ setK: 1, gridOpacity: 0.3, reveal: null, black: 0 });
+    return r.domElement;
+  }
   /** Identifies a hero view: the same model, view and format give the same key, so its AI render can be reused. */
   function heroKey(k) {
     const fa = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1 }[script.format] || 16 / 9;
@@ -424,6 +439,6 @@ export function createConstruction(ctx, script, extras = {}) {
     camera.fov = saved.fov; camera.near = saved.near; camera.far = saved.far; camera.updateProjectionMatrix();
   }
 
-  return { script, duration, segments: segments.filter(s => s.end > s.start), frameAt, labelAt, tagAt, renderFrame, draw, context, dispose, heroSnapshot, heroKey, luxury,
+  return { script, duration, segments: segments.filter(s => s.end > s.start), frameAt, labelAt, tagAt, renderFrame, draw, context, dispose, heroSnapshot, heroWireSnapshot, heroKey, luxury,
     rooms: allRooms.map(r => r.name), visiting: visit.map(r => r.name), counts: Object.fromEntries(["foundation", "structure", "walls", "openings", "roof", "furnish"].map(g => [g, items.filter(i => i.group === g).length])) };
 }

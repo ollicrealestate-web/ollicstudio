@@ -48,6 +48,10 @@ Architects model in Revit; Ollic renders, animates and presents. (Plan tracing a
   - **From 3D images** (`web/assets/imageanim.js`, no model needed): up to 3 uploaded images become shots. Each gets a photoreal night version from the AI (one concept render, `role: model`, tagged `anim_hero.key = img-<file id>`), or is used as it is. The building's lines are traced from the photoreal picture (smoothed Sobel edges, thinned, thresholded over the whole picture so clean 3D views keep all edges and busy photos only the strongest), drawn in glowing gold on a night backdrop from the ground up, then a line of light (across the building's width at that height) sweeps up and reveals the photo, with a slow push-in. Pure 2D canvas, same export and server pipeline. The gold lines come from a second AI render where possible: an edit of the photoreal view into a clean white-on-black line drawing of the building only (`anim_line` tag), which stays aligned with the photo; tracing the photo is the fallback (owner feedback 22 Oct 2026: traced photos looked crude).
   - **Plain-language director:** `POST /api/projects/{id}/animation/direct` sends the request, the current settings and model facts (rooms, floors, element groups) to a text model: Cloudflare Llama 3.3 for Standard, Claude for paid plans. It returns new settings only, which are validated and merged (an invalid value keeps the current one; rooms not in the model are dropped). 40 a day per customer; recorded as "Animation director".
   - **Export:** the browser draws every frame at full size (1920×1080, 1080×1920 or 1080×1080) on a 2D canvas: title card, the animation with stage captions and "Indicative sequence — not to scale", the newest AI render of each walkthrough shot with "AI concept — not to scale", end card. It encodes with WebCodecs (H.264 where the browser has it, else VP9) and mp4-muxer (`web/vendor/mp4-muxer`, MIT). The server checks the upload with ffprobe (codec, size for the format, length), keeps it in a private temp folder, and an `animation_export` job re-packages H.264 (seconds) or converts VP9 to H.264 on one thread, adds a silent AAC track and saves it to `final_videos` (`kind = 'construction'`, with the settings). No GPU server and no per-video cost.
+- **Direct provider connections (owner's decision, 22 Oct 2026: direct, not through fal.ai or other resellers, about half the price for video):**
+  - **Kling** (`app/kling.py`, `KLING_API_KEY`): new API standard, one API key as a Bearer token, `https://api-singapore.klingai.com`. `POST /image-to-video/kling-3.0` with `contents` (prompt, first_frame, last_frame as raw Base64) and `settings` (720p/1080p, 3-15 s, audio native/off); status from `GET /tasks?task_ids=`; results deleted by Kling after 30 days, so saved at once. Errors map to neutral messages (1102 = credit used up).
+  - **Google Gemini** (`app/gemini_images.py`, `GEMINI_API_KEY`): Interactions API, `POST /v1beta/interactions`, model `gemini-nano-banana-2.1`, image found in the response wherever it is (also the older generateContent shape). Used for animation line drawings (`anim_line`) when connected.
+- **Cinematic clip** (`app/cinematic.py`, `POST /api/projects/{id}/cinematic`, migration 9): paid plans and owner/test accounts. Start frame: the glowing gold wireframe (IFC: a snapshot from the hero view; 3D images: the AI line drawing turned gold on a night sky on the server). End frame: the photoreal render. Both cropped identically to the video's shape. The prompt is one timed, unbroken take. The job polls with a heartbeat, saves the MP4 (silent track added if none, faststart), records the cost from Kling's billing (units x $0.14) and lists it as "Cinematic clip". 5 a day for paid customers.
 - Customers never see which AI provider does what: tiers are "Standard render" and "Premium render", errors are neutral, and `/api/usage` names services, not providers. Provider details go to the server logs.
 
 ## Decisions
@@ -69,3 +73,14 @@ web/              index.html (landing), app.html (dashboard), assets/
 scripts/          verify_isolation.py (live check against Supabase)
 docs/             STATUS.md, ARCHITECTURE.md, SUPABASE_SETUP.md
 ```
+
+## Choosable AI options (Ollic names only)
+
+`backend/app/engines.py` lists every option customers can choose, under Ollic names; the service behind
+each stays on the server. Image options (`IMAGE_ENGINES`) are render tiers beside the unchanged Standard
+(Cloudflare) and Premium (OpenAI): Swift and Ultra (Gemini API, `gemini_images.py`), Studio (Flux 3,
+coming soon) and VS (fal.ai Flux Kontext Pro, `fal.py`). They are used for renders, edits, photoreal hero
+views and line drawings, never on their own. Video options (`VIDEO_ENGINES`) appear only on cinematic
+clips: Motion (Kling, `kling.py`), Cinema and Reel (coming soon) and VS (fal.ai Seedance 2.0). All video
+clients share create/status/download, and `app.state.video_clients` maps option to client. An option
+without a key is listed as "Not connected yet" and refused with 503.
