@@ -28,13 +28,14 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | **IFC import**: IFC2X3, IFC4, IFC4X3; report (schema, units, storeys, GlobalIds, counts, honest MEP note, geometry, size, georeferencing); GLB with one node per element named by GlobalId; components table | **Verified live** (generated IFC, 6 s) | `test_bim.py` |
 | **Walk through**: room list from the model's rooms, eye-height camera, drag to look, keys or on-screen arrows to move; **Save shot** keeps the view and camera | Built and tested in a browser (WebGL) | e2e walkthrough test |
 | **Render all shots**: one brief, style and look references for every ticked shot; inside shots render as interiors; the whole batch is checked against the daily allowance first | Built and tested | `test_walkthrough.py`, e2e walkthrough test |
-| **Walkthrough video**: chosen renders become an MP4 (16:9, 9:16 or 1:1) with slow camera moves, dips through black, room titles, title and end cards, made by FFmpeg on our server; private, downloadable, removed with the project | Built and tested with real FFmpeg (6 shots in 38 s on 2 CPUs, 250 MB peak); first live try crashed the 512 MB server, fixed, live recheck below | `test_walkthrough.py`, e2e walkthrough test |
+| **Walkthrough video**: chosen renders become an MP4 (16:9, 9:16 or 1:1) with slow camera moves, dips through black, room titles, title and end cards, made by FFmpeg on our server; private, downloadable, removed with the project | Built and tested with real FFmpeg (6 shots in 38 s on 2 CPUs, 250 MB peak); **verified live** (see below) | `test_walkthrough.py`, e2e walkthrough test |
 | **3D viewer**: outside, inside with roof off and room names, floor picker, element details, GLB and IFC downloads; draws only on change; fits phones | Built and tested in a browser (WebGL) | e2e model test |
 
 ### Live checks, 22 Oct 2026
 - Standard render (account B, free plan): description 29 s, sketch 13 s (kept the sketch's roof, windows and door), revision 10 s. Labels and download names correct; 4th render refused by the daily limit; Premium refused for a free plan; 3 costs recorded ($0.005 at list price, $0 actual).
 - Premium: refused by OpenAI ("no credits remaining"); reported correctly, no cost recorded.
 - IFC import of a generated bungalow: 6 s, report "pass", 26 elements.
+- Walkthrough (migrations 6 and 7 run by the owner): a walk-mode shot of the Living room rendered by Standard render in about 15 s, as a furnished interior that kept the model's doors and window. First video crashed the free server (out of memory); after the fix, a 1-shot 16:9 video took 110 s on the free instance (about 30 s per clip, 10 s long, H.264 1920x1080 with AAC).
 - Vision model on a test plan: read all 5 room names, areas and the overall width.
 - The owner's A103 sheet (6-storey block, two flats per floor) exposed bugs in the now-removed plan tracer; the lesson that stays: AI labels and readings are suggestions, never measurements.
 
@@ -62,6 +63,6 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 ## Next session should do first
 
 1. **Owner:** run `supabase/migrations/20261022000006_remove_plan_modelling.sql`, then `20261022000007_shots_and_videos.sql`; add `ANTHROPIC_API_KEY` in Render; add credit to OpenAI.
-2. Live check of the walkthrough: a real Revit IFC with rooms and furniture, 3 shots, render all, a 16:9 and a 9:16 video; time it on the free instance.
+2. Live check of the walkthrough with a real Revit IFC with rooms and furniture: several shots, render all, a 9:16 video.
 3. Live check: Read my plan on the owner's A103 sheet; a Standard and a Premium render from it with a look reference; a render from a real Revit IFC view. Record results here.
 4. Then **Phase 4: construction sequence** (from the IFC model) towards the build animation.
