@@ -22,6 +22,12 @@ from . import samples
 from .conftest import SECRET, jpeg_bytes, make_token
 
 
+@pytest.fixture(autouse=True)
+def paid_plans(repo, alice, bob):
+    """Most tests here exercise Premium render (OpenAI), so both users are on the paid plan."""
+    repo.plans.update({alice["id"]: "premium", bob["id"]: "premium"})
+
+
 @pytest.fixture
 def project(rclient, alice):
     return rclient.post("/api/projects", json={"name": "Lekki duplex"}, headers=alice["headers"]).json()
@@ -34,7 +40,8 @@ def upload(client, user, project, name, data):
 
 
 def render(client, user, project, **body):
-    return client.post(f"/api/projects/{project['id']}/architectural-render", json={"prompt": "Modern two-storey house, white render and timber", **body}, headers=user["headers"])
+    body = {"prompt": "Modern two-storey house, white render and timber", "tier": "premium", **body}
+    return client.post(f"/api/projects/{project['id']}/architectural-render", json=body, headers=user["headers"])
 
 
 # ---------------------------------------------------------------- generate and edit
@@ -102,13 +109,14 @@ def test_without_an_openai_key_the_endpoints_say_so(client, alice):
     r = client.post(f"/api/projects/{p['id']}/architectural-render", json={"prompt": "a house"}, headers=alice["headers"])
     assert r.status_code == 503 and r.json()["detail"]["code"] == "not_configured"
     out = client.get(f"/api/projects/{p['id']}/outputs", headers=alice["headers"]).json()
-    assert out["renders_enabled"] is False and out["provider"] is None and out["images"] == [] and out["jobs"] == []
+    assert out["renders_enabled"] is False and out["images"] == [] and out["jobs"] == []
+    assert not out["tiers"]["standard"]["available"] and not out["tiers"]["premium"]["available"]
 
 
 def test_the_openai_key_never_reaches_the_browser(rclient):
     body = rclient.get("/assets/config.js").text + rclient.get("/health").text
-    assert "sk-test-not-a-real-key" not in body
-    assert "sk-test" not in repr(rclient.app.state.settings)
+    assert "not-a-real" not in body
+    assert "not-a-real" not in repr(rclient.app.state.settings)
 
 
 def test_pdf_and_ifc_cannot_be_used_as_a_reference(rclient, alice, project, fake_images):
@@ -124,13 +132,13 @@ def test_pdf_and_ifc_cannot_be_used_as_a_reference(rclient, alice, project, fake
     {"prompt": "a house", "quality": "max"}, {"prompt": "a house", "aspect": "panorama"}, {"prompt": "a house", "materials": "m" * 401},
 ])
 def test_render_options_are_validated(rclient, alice, project, fake_images, body):
-    r = rclient.post(f"/api/projects/{project['id']}/architectural-render", json=body, headers=alice["headers"])
+    r = rclient.post(f"/api/projects/{project['id']}/architectural-render", json={"tier": "premium", **body}, headers=alice["headers"])
     assert r.status_code == 422 and fake_images.calls == []
 
 
 def test_a_token_about_to_expire_is_refused_before_the_model_is_called(rclient, alice, project, fake_images):
     short = {"Authorization": f"Bearer {make_token(alice['id'], exp_in=120)}"}
-    r = rclient.post(f"/api/projects/{project['id']}/architectural-render", json={"prompt": "a house"}, headers=short)
+    r = rclient.post(f"/api/projects/{project['id']}/architectural-render", json={"prompt": "a house", "tier": "premium"}, headers=short)
     assert r.status_code == 401 and fake_images.calls == []
 
 
@@ -199,7 +207,7 @@ def test_a_job_cut_off_by_a_restart_is_reported_as_failed_not_left_running(rende
 
 def test_the_same_idempotency_key_never_starts_a_second_render(rclient, alice, project, fake_images):
     h = {**alice["headers"], "Idempotency-Key": "render-0001-abcdef"}
-    body = {"prompt": "a bungalow"}
+    body = {"prompt": "a bungalow", "tier": "premium"}
     first = rclient.post(f"/api/projects/{project['id']}/architectural-render", json=body, headers=h)
     again = rclient.post(f"/api/projects/{project['id']}/architectural-render", json=body, headers=h)
     assert first.status_code == 202 and again.status_code == 200 and again.json()["id"] == first.json()["id"]

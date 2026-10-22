@@ -33,6 +33,7 @@ class FakeRepo:
         self.jobs: dict[str, dict] = {}
         self.images: dict[str, dict] = {}
         self.usage: list[dict] = []
+        self.plans: dict[str, str] = {}  # user id -> "premium"; everyone else is on "free"
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
@@ -120,8 +121,11 @@ class FakeRepo:
         rows = [j for j in self.jobs.values() if j["project_id"] == project_id and j["owner_id"] == user.id]
         return [copy.deepcopy(j) for j in sorted(rows, key=lambda j: j["created_at"], reverse=True)][:limit]
 
-    def count_jobs_since(self, user, since_iso, statuses):
-        return sum(1 for j in self.jobs.values() if j["owner_id"] == user.id and j["created_at"] >= since_iso and j["status"] in statuses)
+    def count_jobs_since(self, user, since_iso, statuses, tier):
+        return sum(1 for j in self.jobs.values() if j["owner_id"] == user.id and j["created_at"] >= since_iso and j["status"] in statuses and j["input"].get("tier") == tier)
+
+    def get_profile(self, user):
+        return {"id": user.id, "plan": self.plans.get(user.id, "free"), "role": "customer"}
 
     def create_rendered_image(self, user, record):
         self._owned_project(user, record["project_id"])
@@ -247,7 +251,8 @@ def fake_images():
 @pytest.fixture
 def render_settings():
     return Settings(supabase_url="https://example.supabase.co", supabase_anon_key="anon-public-key", supabase_jwt_secret=SECRET,
-                    max_upload_bytes=2 * 1024 * 1024, openai_api_key="sk-test-not-a-real-key")
+                    max_upload_bytes=2 * 1024 * 1024, openai_api_key="sk-test-not-a-real-key",
+                    cloudflare_account_id="acct-test", cloudflare_api_token="cf-test-not-a-real-token")
 
 
 @pytest.fixture

@@ -79,14 +79,15 @@ def test_cloudflare_errors_become_plain_messages(status, body, code, words):
     assert e.value.code == code and words in e.value.message and "cf-token" not in e.value.message
 
 
-def test_provider_choice():
+def test_both_tiers_are_offered_side_by_side():
     base = dict(supabase_url="https://x.supabase.co", supabase_anon_key="a")
     both = Settings(**base, openai_api_key="sk", cloudflare_account_id="a", cloudflare_api_token="t")
-    assert both.image_provider == "cloudflare" and both.generate_model == MODEL == both.edit_model
-    assert Settings(**base, openai_api_key="sk").image_provider == "openai"
-    assert Settings(**base, openai_api_key="sk", cloudflare_account_id="a", cloudflare_api_token="t", image_provider_choice="openai").generate_model == "gpt-image-2.5-flare"
-    assert Settings(**base, openai_api_key="sk", image_provider_choice="cloudflare").image_provider is None  # asked for, but not set up
+    assert both.standard_available and both.premium_available
+    assert both.model_for("standard", "create") == MODEL == both.model_for("standard", "revise")
+    assert both.model_for("premium", "create") == "gpt-image-2.5-flare" and both.model_for("premium", "revise") == "gpt-image-2.5-sunburst"
+    assert Settings(**base, openai_api_key="sk").standard_available is False
     assert Settings(**base).renders_enabled is False
+    assert Settings(**base).daily_limit_for("standard") == 3 and Settings(**base).daily_limit_for("premium") == 20
     secret = Settings(**base, openai_api_key="sk-SECRET1", cloudflare_account_id="a", cloudflare_api_token="cf-SECRET2")
     assert "SECRET1" not in repr(secret) and "SECRET2" not in repr(secret)
 
@@ -115,8 +116,10 @@ def test_cloudflare_renders_record_an_estimated_cost_and_the_daily_limit_applies
     pb = c.post("/api/projects", json={"name": "y"}, headers=bob["headers"]).json()
     assert go(bob, pb).status_code == 202
     out = c.get(f"/api/projects/{p['id']}/outputs", headers=alice["headers"]).json()
-    assert out["provider"] == "cloudflare" and out["daily_limit"] == 2
-    assert c.get("/health").json() == {"status": "ok", "renders": "cloudflare"}
+    assert out["tiers"]["standard"] == {"name": "Standard render", "available": True, "allowed": True, "daily_limit": 2}
+    assert out["tiers"]["premium"]["available"] is False and out["plan"] == "free"
+    assert out["images"][0]["tier"] == "standard" and out["images"][0]["tier_name"] == "Standard render"
+    assert c.get("/health").json() == {"status": "ok", "renders": {"standard": True, "premium": False}}
     assert "cf-secret" not in c.get("/assets/config.js").text
 
 
@@ -127,3 +130,53 @@ def test_failed_renders_do_not_use_up_the_daily_limit(cf_app, alice, repo):
     for _ in range(3):
         assert c.post(f"/api/projects/{p['id']}/architectural-render", json={"prompt": "a house"}, headers=alice["headers"]).status_code == 202
     assert all(j["status"] == "failed" for j in repo.jobs.values())
+
+
+# ---------------------------------------------------------------- Premium render: paid plans only
+@pytest.fixture
+def both_app(repo, storage):
+    settings = Settings(supabase_url="https://example.supabase.co", supabase_anon_key="anon", supabase_jwt_secret=SECRET,
+                        cloudflare_account_id="acct", cloudflare_api_token="cf", openai_api_key="sk", daily_premium_renders_per_user=2)
+    std, prem = FakeImages(), FakeImages()
+    app = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings),
+                     image_clients={"standard": std, "premium": prem}, runner=InlineRunner())
+    return TestClient(app), std, prem
+
+
+def go(c, user, pid, **body):
+    return c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": "a house", **body}, headers=user["headers"])
+
+
+def test_free_customers_get_standard_and_are_refused_premium(both_app, alice, repo):
+    c, std, prem = both_app
+    pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
+    r = go(c, alice, pid, tier="premium")
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "premium_only" and prem.calls == []
+    assert go(c, alice, pid).status_code == 202 and len(std.calls) == 1   # standard is the default
+    out = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()
+    assert out["plan"] == "free" and out["tiers"]["premium"] == {"name": "Premium render", "available": True, "allowed": False, "daily_limit": 2}
+    # a free customer cannot revise a render as premium either
+    rid = out["images"][0]["id"]
+    assert c.post(f"/api/renders/{rid}/edit", json={"instruction": "make it blue", "tier": "premium"}, headers=alice["headers"]).status_code == 403
+
+
+def test_paid_customers_choose_premium_and_revisions_stay_premium(both_app, alice, repo):
+    c, std, prem = both_app
+    repo.plans[alice["id"]] = "premium"
+    pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
+    assert go(c, alice, pid, tier="premium", quality="high").status_code == 202
+    assert prem.calls[0]["model"] == "gpt-image-2.5-flare" and std.calls == []
+    img = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"][0]
+    assert img["tier"] == "premium" and img["tier_name"] == "Premium render" and img["label"] == "AI concept — not to scale"
+    assert c.post(f"/api/renders/{img['id']}/edit", json={"instruction": "add palms"}, headers=alice["headers"]).status_code == 202
+    assert prem.calls[-1]["model"] == "gpt-image-2.5-sunburst" and std.calls == []
+    # premium has its own daily limit (2 here), separate from the free one
+    assert go(c, alice, pid, tier="premium").json()["detail"]["code"] == "daily_limit"
+    assert go(c, alice, pid).status_code == 202
+
+
+def test_customers_cannot_upgrade_themselves(both_app, alice):
+    """The plan lives in profiles, where users may only update full_name and organisation (migration 1)."""
+    sql = open("../supabase/migrations/20261022000001_foundation.sql").read()
+    assert "grant update (full_name, organisation) on public.profiles to authenticated" in sql
+    assert "revoke insert, update, delete on public.profiles from anon, authenticated" in sql

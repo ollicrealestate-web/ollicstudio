@@ -49,9 +49,11 @@ def stack(tmp_path_factory):
             dest = web / p.relative_to(WEB); dest.parent.mkdir(parents=True, exist_ok=True); dest.write_bytes(p.read_bytes())
     auth_port, api_port = _free_port(), _free_port()
     (web / "assets" / "config.js").write_text(f'window.OLLIC_CONFIG = {{ supabaseUrl: "http://127.0.0.1:{auth_port}", supabaseAnonKey: "anon", apiUrl: "" }};')
-    settings = Settings(supabase_url=f"http://127.0.0.1:{auth_port}", supabase_anon_key="anon", supabase_jwt_secret=SECRET, web_dir=str(web), openai_api_key="sk-test")
-    repo, storage, images = FakeRepo(), InlineLinkStorage(), SlowImages()
-    api = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), image_client=images, runner=ThreadRunner())
+    settings = Settings(supabase_url=f"http://127.0.0.1:{auth_port}", supabase_anon_key="anon", supabase_jwt_secret=SECRET, web_dir=str(web), openai_api_key="sk-test",
+                        cloudflare_account_id="acct", cloudflare_api_token="cf-test")
+    repo, storage, images, premium = FakeRepo(), InlineLinkStorage(), SlowImages(), SlowImages()
+    api = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings),
+                     image_clients={"standard": images, "premium": premium}, runner=ThreadRunner())
     auth = fake_supabase_auth()
     from fastapi.middleware.cors import CORSMiddleware
     auth.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -61,7 +63,7 @@ def stack(tmp_path_factory):
     for s in servers:
         while not s.started:
             time.sleep(0.05)
-    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "storage": storage, "images": images, "dir": web}
+    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "storage": storage, "images": images, "premium": premium, "dir": web}
     for s in servers:
         s.should_exit = True
 
@@ -104,8 +106,22 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.fill(".shot .revise input", "Make the roof dark grey"); page.click(".shot .revise button")
         page.wait_for_function("document.querySelectorAll('.shot').length === 2", timeout=20000)
         assert "Revision: Make the roof dark grey" in page.inner_text(".shot >> nth=0")
-        assert stack["images"].calls[-1]["model"] == "gpt-image-2.5-sunburst"
+        assert stack["images"].calls[-1]["model"] == "@cf/black-forest-labs/flux-2-klein-4b"   # a Standard revision stays Standard
         assert len(stack["repo"].usage) == 2
+
+        # Premium render is visible but locked for a free customer
+        assert page.is_disabled("#tierPick input[value=premium]") and "Paid plans only" in page.inner_text("#premiumTier")
+        assert not page.is_visible("#qualityField")
+        # once the customer is on the paid plan, they can choose it
+        uid = next(iter(stack["repo"].projects.values()))["owner_id"]
+        stack["repo"].plans[uid] = "premium"
+        page.reload(); page.wait_for_selector("#renderForm:not([hidden])")
+        page.check("#tierPick input[value=premium]", force=True)
+        assert page.is_visible("#qualityField")
+        page.fill("#rPrompt", "Same villa, evening"); page.click("#renderBtn")
+        page.wait_for_function("document.querySelectorAll('.shot').length === 3", timeout=20000)
+        assert "PREMIUM RENDER" in page.inner_text(".shot >> nth=0").upper()
+        assert stack["premium"].calls[0]["model"] == "gpt-image-2.5-flare"
 
         # phone width: no sideways scrolling
         page.set_viewport_size({"width": 390, "height": 844})

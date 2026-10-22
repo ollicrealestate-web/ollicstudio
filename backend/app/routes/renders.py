@@ -36,7 +36,8 @@ class ConceptRenderIn(BaseModel):
     materials: str = Field(default="", max_length=400)
     landscaping: str = Field(default="", max_length=400)
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
-    quality: Literal["medium", "high"] = "medium"
+    quality: Literal["medium", "high"] = "medium"   # Premium render only; Standard has one level
+    tier: Literal["standard", "premium"] = "standard"
 
     @field_validator("prompt")
     @classmethod
@@ -54,6 +55,7 @@ class ConceptRenderIn(BaseModel):
 
 class EditIn(BaseModel):
     instruction: str = Field(min_length=3, max_length=1000)
+    tier: Literal["standard", "premium"] | None = None  # default: the same tier as the render being revised
 
     @field_validator("instruction")
     @classmethod
@@ -68,9 +70,19 @@ def public_job(job: dict) -> dict:
     return {k: job.get(k) for k in JOB_FIELDS}
 
 
-def _require_renders(request: Request) -> None:
-    if not request.app.state.settings.renders_enabled or request.app.state.image_client is None:
-        raise HTTPException(503, {"code": "not_configured", "reason": "Concept renders are not switched on yet: the server has no image provider. The owner needs to add the Cloudflare or OpenAI settings."})
+TIER_NAME = {"standard": "Standard render", "premium": "Premium render"}
+
+
+def user_plan(request: Request, user: CurrentUser) -> str:
+    profile = _repo(request).get_profile(user)
+    return (profile or {}).get("plan") or "free"
+
+
+def _require_tier(request: Request, user: CurrentUser, tier: str) -> None:
+    if request.app.state.image_clients.get(tier) is None:
+        raise HTTPException(503, {"code": "not_configured", "reason": f"{TIER_NAME[tier]} is not switched on for this site yet."})
+    if tier == "premium" and user_plan(request, user) != "premium":
+        raise HTTPException(403, {"code": "premium_only", "reason": "Premium render is for paid plans. Standard renders are free."})
 
 
 def _require_token_life(user: CurrentUser) -> None:
@@ -96,6 +108,10 @@ def _settle_stale(request: Request, user: CurrentUser, job: dict) -> dict:
     return job
 
 
+def _utc_midnight() -> str:
+    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
 def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: str, job_input: dict, key: str | None, response: Response) -> dict:
     repo = _repo(request)
     if key is not None:
@@ -107,12 +123,13 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
                 raise HTTPException(409, {"code": "idempotency_conflict", "reason": "That Idempotency-Key was already used for a different request."})
             response.status_code = status.HTTP_200_OK
             return public_job(_settle_stale(request, user, existing))
-    limit = request.app.state.settings.daily_renders_per_user
+    tier = job_input["tier"]
+    limit = request.app.state.settings.daily_limit_for(tier)
     if limit > 0:
-        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        used = repo.count_jobs_since(user, midnight.isoformat(), ("queued", "running", "succeeded"))
+        used = repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), tier)
         if used >= limit:
-            raise HTTPException(429, {"code": "daily_limit", "reason": f"You have used today's {limit} free renders. They reset at 01:00 Lagos time (midnight UTC)."})
+            kind = "premium renders" if tier == "premium" else "free renders"
+            raise HTTPException(429, {"code": "daily_limit", "reason": f"You have used today's {limit} {kind}. They reset at 01:00 Lagos time (midnight UTC)."})
     active = [j for j in repo.list_jobs(user, project_id) if j.get("status") in ACTIVE and not is_stale(j)]
     if len(active) >= MAX_ACTIVE_PER_PROJECT:
         raise HTTPException(429, {"code": "too_many_active", "reason": f"This project already has {len(active)} renders in progress. Wait for one to finish."})
@@ -126,7 +143,7 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
 def start_concept_render(project_id: uuid.UUID, body: ConceptRenderIn, request: Request, response: Response,
                          user: CurrentUser = Depends(get_current_user), idempotency_key: str | None = Header(default=None)):
     _owned_project(request, user, project_id)
-    _require_renders(request)
+    _require_tier(request, user, body.tier)
     _require_token_life(user)
     if body.reference_file_id:
         src = _repo(request).get_source_file(user, str(body.reference_file_id))
@@ -145,11 +162,12 @@ def edit_render(render_id: uuid.UUID, body: EditIn, request: Request, response: 
     if not image or image.get("owner_id") != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Render not found.")
     _owned_project(request, user, uuid.UUID(image["project_id"]))
-    _require_renders(request)
+    tier = body.tier or (image.get("options") or {}).get("tier") or "standard"
+    _require_tier(request, user, tier)
     _require_token_life(user)
     if image.get("kind") != "concept":
         raise HTTPException(422, {"code": "not_a_concept", "reason": "Only concept renders can be revised this way."})
-    return _start_job(request, user, image["project_id"], "concept_edit", {"parent_image_id": str(render_id), "instruction": body.instruction}, idempotency_key, response)
+    return _start_job(request, user, image["project_id"], "concept_edit", {"parent_image_id": str(render_id), "instruction": body.instruction, "tier": tier}, idempotency_key, response)
 
 
 @router.get("/jobs/{job_id}")
@@ -177,11 +195,16 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
     for i in images:
         url = links.get(i["storage_path"])
         name = f"ollic-{i['kind']}-{i['id'][:8]}{'-AI-concept-not-to-scale' if i['kind'] == 'concept' else ''}.jpg"
-        out.append({k: i.get(k) for k in ("id", "kind", "label", "prompt", "parent_image_id", "source_file_id", "options", "model", "width", "height", "created_at", "job_id")}
-                   | {"url": url, "download_url": f"{url}&download={name}" if url else None})
+        tier = (i.get("options") or {}).get("tier") or ("premium" if str(i.get("model", "")).startswith("gpt-") else "standard")
+        out.append({k: i.get(k) for k in ("id", "kind", "label", "prompt", "parent_image_id", "source_file_id", "options", "width", "height", "created_at", "job_id")}
+                   | {"tier": tier, "tier_name": TIER_NAME[tier], "url": url, "download_url": f"{url}&download={name}" if url else None})
     jobs = [_settle_stale(request, user, j) for j in repo.list_jobs(user, str(project_id)) if j.get("owner_id") == user.id]
-    return {"renders_enabled": settings.renders_enabled, "provider": settings.image_provider,
-            "daily_limit": settings.daily_renders_per_user or None, "images": out, "jobs": [public_job(j) for j in jobs]}
+    plan = user_plan(request, user)
+    clients = request.app.state.image_clients
+    tiers = {t: {"name": TIER_NAME[t], "available": clients.get(t) is not None, "allowed": t == "standard" or plan == "premium",
+                 "daily_limit": settings.daily_limit_for(t) or None} for t in ("standard", "premium")}
+    return {"renders_enabled": any(v["available"] for v in tiers.values()), "plan": plan, "tiers": tiers,
+            "images": out, "jobs": [public_job(j) for j in jobs]}
 
 
 @router.get("/usage")

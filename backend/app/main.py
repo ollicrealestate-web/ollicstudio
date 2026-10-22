@@ -22,18 +22,20 @@ from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 log = logging.getLogger("ollic")
 
 
-def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, runner=None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None, runner=None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
     app.state.verifier = verifier or TokenVerifier(settings)
     app.state.repo = repo or SupabaseRepository(settings)
     app.state.storage = storage or SupabaseStorage(settings)
-    if image_client is None and settings.image_provider == "cloudflare":
-        image_client = CloudflareImages(settings.cloudflare_account_id, settings.cloudflare_api_token)
-    elif image_client is None and settings.image_provider == "openai":
-        image_client = OpenAIImages(settings.openai_api_key, settings.openai_base_url)
-    app.state.image_client = image_client  # None until OPENAI_API_KEY is set; the render endpoints then say so
+    # One client per tier. Tests may pass a single stand-in for both (image_client).
+    if image_clients is None:
+        image_clients = {
+            "standard": image_client or (CloudflareImages(settings.cloudflare_account_id, settings.cloudflare_api_token) if settings.standard_available else None),
+            "premium": image_client or (OpenAIImages(settings.openai_api_key, settings.openai_base_url) if settings.premium_available else None),
+        }
+    app.state.image_clients = {t: (c if settings.tier_available(t) else None) for t, c in image_clients.items()}
     app.state.runner = runner or ThreadRunner()
 
     if settings.web_origins:
@@ -51,7 +53,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "renders": settings.image_provider or "off"}
+        return {"status": "ok", "renders": {"standard": settings.standard_available, "premium": settings.premium_available}}
 
     app.include_router(projects.router, prefix="/api")
     app.include_router(renders.router, prefix="/api")

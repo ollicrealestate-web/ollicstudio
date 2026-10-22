@@ -34,33 +34,35 @@ class Settings:
     cloudflare_account_id: str | None = None
     cloudflare_api_token: str | None = field(default=None, repr=False)  # server only
     cloudflare_image_model: str = "@cf/black-forest-labs/flux-2-klein-4b"
-    # "cloudflare" or "openai". Empty: Cloudflare when it is set up, otherwise OpenAI.
-    image_provider_choice: str = ""
     # Renders each customer may start per day (UTC). 0 means no limit.
-    daily_renders_per_user: int = 5
+    daily_renders_per_user: int = 3            # Standard (free, Cloudflare)
+    daily_premium_renders_per_user: int = 20   # Premium render (paid plans, OpenAI)
+
+    # Two tiers, both offered side by side:
+    #   standard: Cloudflare Workers AI, free daily allowance, for everyone
+    #   premium:  OpenAI, "Premium render", paid plans only
+    @property
+    def standard_available(self) -> bool:
+        return bool(self.cloudflare_account_id and self.cloudflare_api_token)
 
     @property
-    def image_provider(self) -> str | None:
-        has_cf = bool(self.cloudflare_account_id and self.cloudflare_api_token)
-        has_oa = bool(self.openai_api_key)
-        choice = self.image_provider_choice.strip().lower()
-        if choice == "cloudflare":
-            return "cloudflare" if has_cf else None
-        if choice == "openai":
-            return "openai" if has_oa else None
-        return "cloudflare" if has_cf else "openai" if has_oa else None
+    def premium_available(self) -> bool:
+        return bool(self.openai_api_key)
 
     @property
     def renders_enabled(self) -> bool:
-        return self.image_provider is not None
+        return self.standard_available or self.premium_available
 
-    @property
-    def generate_model(self) -> str:
-        return self.cloudflare_image_model if self.image_provider == "cloudflare" else self.openai_image_model
+    def tier_available(self, tier: str) -> bool:
+        return self.premium_available if tier == "premium" else self.standard_available
 
-    @property
-    def edit_model(self) -> str:
-        return self.cloudflare_image_model if self.image_provider == "cloudflare" else self.openai_edit_model
+    def model_for(self, tier: str, operation: str) -> str:
+        if tier == "premium":
+            return self.openai_edit_model if operation == "revise" else self.openai_image_model
+        return self.cloudflare_image_model
+
+    def daily_limit_for(self, tier: str) -> int:
+        return self.daily_premium_renders_per_user if tier == "premium" else self.daily_renders_per_user
 
     @property
     def jwks_url(self) -> str:
@@ -92,6 +94,6 @@ class Settings:
             cloudflare_account_id=os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip() or None,
             cloudflare_api_token=os.environ.get("CLOUDFLARE_API_TOKEN", "").strip() or None,
             cloudflare_image_model=os.environ.get("CLOUDFLARE_IMAGE_MODEL", "").strip() or "@cf/black-forest-labs/flux-2-klein-4b",
-            image_provider_choice=os.environ.get("IMAGE_PROVIDER", "").strip(),
-            daily_renders_per_user=_int("DAILY_RENDERS_PER_USER", 5),
+            daily_renders_per_user=_int("DAILY_RENDERS_PER_USER", 3),
+            daily_premium_renders_per_user=_int("DAILY_PREMIUM_RENDERS_PER_USER", 20),
         )

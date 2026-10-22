@@ -108,6 +108,11 @@
       </div>
       <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add an OpenAI key to the server.</div>
       <form id="renderForm" class="render-form card" hidden>
+        <fieldset class="tiers span2" id="tierPick">
+          <legend>Render type</legend>
+          <label class="tier"><input type="radio" name="tier" value="standard" checked><span><b>Standard render</b><small id="stdNote">Free</small></span></label>
+          <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
+        </fieldset>
         <label class="field span2">Describe it
           <textarea id="rPrompt" rows="3" maxlength="2000" required placeholder="e.g. Modern two-storey 4-bed duplex, flat roof with parapet, large windows, gated compound in Lekki"></textarea></label>
         <label class="field">Start from
@@ -123,7 +128,7 @@
           <input type="text" id="rMaterials" maxlength="400" placeholder="e.g. white render, dark grey roof, timber cladding"></label>
         <label class="field">Landscaping <span class="hint">Optional</span>
           <input type="text" id="rLand" maxlength="400" placeholder="e.g. palm trees, interlocking paving, low hedge"></label>
-        <label class="field">Detail
+        <label class="field" id="qualityField" hidden>Detail
           <select id="rQuality"><option value="medium">Standard</option><option value="high">High (slower, costs more)</option></select></label>
         <div class="render-go span2">
           <button class="btn primary big" type="submit" id="renderBtn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 10 4h4l6 16M7 13h10"/></svg>Create concept</button>

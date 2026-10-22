@@ -84,7 +84,10 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             log.exception("could not record failure of job %s", job_id)
 
     inp = job["input"]
-    client = state.image_client
+    tier = inp.get("tier", "standard")
+    client = state.image_clients.get(tier)
+    if client is None:
+        return fail("Premium render is not available right now." if tier == "premium" else "Standard renders are not available right now.")
     try:
         if job["type"] == "concept_render":
             size, quality = SIZES[inp["aspect"]], inp["quality"]
@@ -95,7 +98,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                     return fail("The reference image is no longer available. Choose another one.")
                 ref = (storage.download(user, src["storage_path"]), REF_MIME[src["detected_type"]])
             prompt = build_prompt(inp, with_reference=ref is not None)
-            model = settings.generate_model
+            model = settings.model_for(tier, "create")
             if ref:
                 operation = "image_edit"
                 result = client.edit(model=model, prompt=prompt, images=[ref], size=size, quality=quality, user_id=user.id)
@@ -110,7 +113,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             base = storage.download(user, parent.get("base_path") or parent["storage_path"], bucket=settings.renders_bucket)
             size, quality = parent["options"].get("size", "auto"), parent["options"].get("quality", "medium")
             prompt = build_edit_prompt(inp["instruction"])
-            model, operation = settings.edit_model, "image_edit"
+            model, operation = settings.model_for(tier, "revise"), "image_edit"
             result = client.edit(model=model, prompt=prompt, images=[(base, "image/jpeg")], size=size, quality=quality, user_id=user.id)
             source_file_id = parent.get("source_file_id")
     except ProviderError as exc:
@@ -138,7 +141,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         shown_path, base_path = f"{folder}/{render_id}.jpg", f"{folder}/{render_id}-base.jpg"
         storage.upload(user, base_path, base_jpg, "image/jpeg", bucket=settings.renders_bucket)
         storage.upload(user, shown_path, shown_jpg, "image/jpeg", bucket=settings.renders_bucket)
-        options = {"size": size, "quality": quality, "operation": operation}
+        options = {"size": size, "quality": quality, "operation": operation, "tier": tier}
         if job["type"] == "concept_render":
             options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping")})
         try:

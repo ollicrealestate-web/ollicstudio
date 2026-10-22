@@ -116,8 +116,7 @@ async function loadOutputs() {
   catch (err) { if (err.status === 401) return handle(err); pollTimer = setTimeout(loadOutputs, 8000); return; }
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
-  $("#rQuality").closest("label").hidden = out.provider !== "openai";  // the free model has one detail level
-  $("#renderLimit").textContent = out.daily_limit ? `Up to ${out.daily_limit} free concepts a day. Failed ones do not count.` : "";
+  setupTiers(out);
   drawJobs(out.jobs); drawGallery(out.images);
   stopPolling();
   if (out.jobs.some(j => j.status === "queued" || j.status === "running")) pollTimer = setTimeout(loadOutputs, 3000);
@@ -145,7 +144,7 @@ function drawGallery(images) {
   $("#gallery").replaceChildren(...images.map(i => {
     const o = i.options || {};
     const [w, h] = [i.width || 3, i.height || 2];
-    const tags = [o.view, LIGHT_NAME[o.time_of_day], o.quality === "high" ? "High detail" : null].filter(Boolean);
+    const tags = [o.view, LIGHT_NAME[o.time_of_day], i.tier === "premium" && o.quality === "high" ? "High detail" : null].filter(Boolean);
     const input = el("input", { type: "text", maxlength: "1000", placeholder: "What should change? e.g. make the roof dark grey", "aria-label": "Describe a change" });
     const go = el("button", { class: "btn primary", type: "submit" }, "Revise");
     const parent = i.parent_image_id ? byId[i.parent_image_id] : null;
@@ -155,17 +154,40 @@ function drawGallery(images) {
         el("span", { class: "badge" }, i.label)),
       el("div", { class: "body" },
         el("p", { class: "prompt" }, i.parent_image_id ? `Revision: ${i.prompt}` : i.prompt),
-        el("div", { class: "tags" }, ...tags.map(t => el("span", { class: "chip" }, t)), parent ? el("span", { class: "chip" }, "Revised") : ""),
-        el("p", { class: "hint" }, `${fmtDate(i.created_at)} · ${i.model}`),
+        el("div", { class: "tags" }, el("span", { class: `chip ${i.tier === "premium" ? "premium" : ""}` }, i.tier_name || "Render"), ...tags.map(t => el("span", { class: "chip" }, t)), parent ? el("span", { class: "chip" }, "Revised") : ""),
+        el("p", { class: "hint" }, fmtDate(i.created_at)),
         el("div", { class: "actions" }, i.download_url ? el("a", { class: "btn", href: i.download_url, download: "" }, "Download") : ""),
         el("form", { class: "revise", onsubmit: e => { e.preventDefault(); revise(i.id, input, go); } }, input, go)));
   }));
 }
 
+let tierInfo = null;
+function setupTiers(out) {
+  tierInfo = out.tiers || {};
+  const std = tierInfo.standard || {}, prem = tierInfo.premium || {};
+  const stdInput = $("#tierPick input[value=standard]"), premInput = $("#tierPick input[value=premium]");
+  stdInput.disabled = !std.available;
+  $("#stdNote").textContent = std.available ? `Free · ${std.daily_limit ? `${std.daily_limit} a day` : "no daily limit"}` : "Not available right now";
+  $("#premiumTier").hidden = !prem.available;
+  $("#premiumTier").classList.add("premium-tag");
+  premInput.disabled = !prem.allowed;
+  $("#premNote").textContent = prem.allowed ? `Sharper detail, follows your brief more closely · ${prem.daily_limit ? `${prem.daily_limit} a day` : "no daily limit"}` : "Paid plans only. Upgrade to unlock.";
+  if (!std.available && prem.allowed) premInput.checked = true;
+  if (premInput.checked && premInput.disabled) stdInput.checked = true;
+  tierChanged();
+}
+function chosenTier() { return $("#tierPick input[name=tier]:checked")?.value || "standard"; }
+function tierChanged() {
+  const t = chosenTier(), info = tierInfo?.[t] || {};
+  $("#qualityField").hidden = t !== "premium";  // the free model has one detail level
+  $("#renderLimit").textContent = info.daily_limit ? `${info.name}: up to ${info.daily_limit} a day, reset at 01:00 Lagos time. Failed ones do not count.` : "";
+}
+document.querySelectorAll("#tierPick input").forEach(i => i.addEventListener("change", tierChanged));
+
 $("#renderForm").onsubmit = e => {
   e.preventDefault();
   const body = { prompt: $("#rPrompt").value.trim(), view: $("#rView").value, time_of_day: $("#rLight").value, aspect: $("#rAspect").value,
-    quality: $("#rQuality").value, materials: $("#rMaterials").value.trim(), landscaping: $("#rLand").value.trim() };
+    quality: $("#rQuality").value, materials: $("#rMaterials").value.trim(), landscaping: $("#rLand").value.trim(), tier: chosenTier() };
   if ($("#rRef").value) body.reference_file_id = $("#rRef").value;
   if (body.prompt.length < 3) { message($("#renderMsg"), "Describe what you want to see."); return; }
   const key = newKey();
