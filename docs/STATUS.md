@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 22 October 2026, end of session 1 (Phase 1: Foundation).
+Last updated: 22 October 2026. **Phase 1: Foundation is complete** and live at https://ollicstudio.onrender.com (Render, Frankfurt; Supabase project zusfpymdqfmwgfaejaer).
 
 ## Features
 
@@ -10,7 +10,7 @@ Last updated: 22 October 2026, end of session 1 (Phase 1: Foundation).
 | Token verification on every request (HS256 legacy secret; RS256/ES256 via JWKS) | Operational in tests | `test_auth.py`, 10 tests |
 | Projects: create, list, open, delete | Operational in tests; awaiting Supabase configuration | `test_projects.py` |
 | Ownership checked in code on every request | Operational in tests | `test_projects.py::test_another_user_cannot_list_open_upload_to_or_delete_it` |
-| Row-level security, storage policies, private bucket (`supabase/migrations`) | **Awaiting configuration**: written, not yet run on a real database | Run `scripts/verify_isolation.py` once Supabase is set up |
+| Row-level security, storage policies, private bucket (`supabase/migrations`) | **Verified live**: migration applied on real Supabase; `scripts/verify_isolation.py` passed 14/14 against the deployed site on 22 Oct 2026 | — |
 | Uploads: type from contents, size limit, checksum, private storage, originals never modified | Operational in tests; storage awaiting configuration | `test_uploads.py`, 22 tests |
 | Clear errors for unsupported, renamed, corrupt, encrypted and oversize files | Operational in tests | `test_uploads.py` |
 | Project deletion removes stored files | Operational in tests; awaiting real storage | `test_projects.py::test_deleting_a_project_removes_its_files_from_storage` |
@@ -19,7 +19,7 @@ Last updated: 22 October 2026, end of session 1 (Phase 1: Foundation).
 | Website settings served from the environment (`/assets/config.js`) | Operational in tests | `test_projects.py::test_website_config_is_served_from_settings_with_public_values_only` |
 | Railway deployment (`Dockerfile`, `railway.json`, `docs/DEPLOY_RAILWAY.md`) | **Awaiting configuration**: the container's start command was tested here; the image itself has not been built, because Docker is not available in this environment | First Railway deploy, then the health check |
 
-**Phase 1 deliverable** ("a signed-in user creates a project and uploads a drawing; another user cannot see it"): passes end to end in a browser against the real API and a stand-in for Supabase. **Not yet proven on real Supabase**, so Phase 1 is not complete until `scripts/verify_isolation.py` passes.
+**Phase 1 deliverable** ("a signed-in user creates a project and uploads a drawing; another user cannot see it"): passes end to end in a browser against the real API and a stand-in for Supabase. Proven on real Supabase on 22 Oct 2026: `scripts/verify_isolation.py` passed 14/14 against the live deployment (API, row-level security and storage isolation, and file clean-up on delete). Hosting moved from Railway to Render because Railway deploys were paused by an outage; the Dockerfile runs unchanged on either.
 
 ## Test run (session 1)
 

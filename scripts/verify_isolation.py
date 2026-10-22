@@ -84,8 +84,13 @@ def main() -> int:
     d = api.delete(f"/projects/{pid}", headers=A)
     check("user A can delete the project", d.status_code == 204, d.text[:200])
     if path:
-        r = httpx.get(f"{SB}/storage/v1/object/source-files/{path}", headers={"apikey": ANON, "Authorization": f"Bearer {a}"}, timeout=20)
-        check("Deleting the project removed its file from storage", r.status_code in (400, 404), str(r.status_code))
+        # Ask storage for the folder listing rather than downloading: Supabase's CDN can keep
+        # serving a just-deleted object for up to a minute, but the listing is authoritative.
+        folder, _, name = path.rpartition("/")
+        r = httpx.post(f"{SB}/storage/v1/object/list/source-files", json={"prefix": f"{folder}/", "limit": 100},
+                       headers={"apikey": ANON, "Authorization": f"Bearer {a}"}, timeout=20)
+        left = [o.get("name") for o in r.json()] if r.status_code == 200 else None
+        check("Deleting the project removed its file from storage", left is not None and name not in left, f"{r.status_code} {left}")
     failed = [n for n, ok, _ in results if not ok]
     print(f"\n{len(results) - len(failed)} of {len(results)} checks passed.")
     return 1 if failed else 0
