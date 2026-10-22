@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Projects · Ollic Design Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<meta name="theme-color" content="#070707">
+<link rel="stylesheet" href="assets/styles.css">
+<script src="assets/config.js"></script>
+</head>
+<body>
+<div class="blueprint" aria-hidden="true"></div>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="Ollic Design Studio home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Design Studio</b></a>
+    <nav class="nav" id="userNav" hidden>
+      <span class="muted" id="userEmail"></span>
+      <button class="btn" id="signOutBtn" type="button">Sign out</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap app-main">
+  <!-- shown when config.js has not been filled in -->
+  <section id="setupView" class="setup card" hidden>
+    <h2>Connect this site to Supabase</h2>
+    <p>Open <code>web/assets/config.js</code> and fill in <code>supabaseUrl</code>, <code>supabaseAnonKey</code> and <code>apiUrl</code>. The steps are in <code>docs/SUPABASE_SETUP.md</code>.</p>
+  </section>
+
+  <section id="authView" hidden>
+    <div class="auth-card">
+      <div class="auth-title"><span class="eyebrow">Your projects</span><h2 style="font-size:1.9rem">Welcome to Ollic</h2></div>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabIn" aria-selected="true" type="button">Sign in</button>
+        <button role="tab" id="tabUp" aria-selected="false" type="button">Create account</button>
+      </div>
+      <div id="authMsg" class="notice" role="status" hidden></div>
+
+      <form id="signInForm" class="stack">
+        <label class="field">Email <input type="email" id="inEmail" autocomplete="email" required></label>
+        <label class="field">Password <input type="password" id="inPassword" autocomplete="current-password" required></label>
+        <button class="btn primary" type="submit">Sign in</button>
+        <button class="btn link" type="button" id="forgotBtn">Forgot your password?</button>
+      </form>
+
+      <form id="signUpForm" class="stack" hidden>
+        <label class="field">Your name <input type="text" id="upName" autocomplete="name" maxlength="120" required></label>
+        <label class="field">Email <input type="email" id="upEmail" autocomplete="email" required></label>
+        <label class="field">Password <span class="hint">At least 8 characters.</span><input type="password" id="upPassword" autocomplete="new-password" minlength="8" required></label>
+        <button class="btn primary" type="submit">Create account</button>
+        <p class="hint">Your plans and models are private to your account.</p>
+      </form>
+
+      <form id="resetForm" class="stack" hidden>
+        <p>Enter your email and we will send you a link to choose a new password.</p>
+        <label class="field">Email <input type="email" id="resetEmail" autocomplete="email" required></label>
+        <button class="btn primary" type="submit">Send reset link</button>
+        <button class="btn link" type="button" id="backToSignIn">Back to sign in</button>
+      </form>
+
+      <form id="newPasswordForm" class="stack" hidden>
+        <p>Choose a new password for your account.</p>
+        <label class="field">New password <span class="hint">At least 8 characters.</span><input type="password" id="newPassword" autocomplete="new-password" minlength="8" required></label>
+        <button class="btn primary" type="submit">Save new password</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="projectsView" hidden>
+    <div class="page-head">
+      <div><span class="eyebrow">Dashboard</span><h1 style="margin-top:10px">Projects</h1><p class="muted">Each project holds the drawings or model for one building.</p></div>
+      <form class="new-project" id="newProjectForm">
+        <input type="text" id="newProjectName" placeholder="Project name, e.g. Lekki 4-bed duplex" maxlength="120" aria-label="New project name" required>
+        <button class="btn primary" type="submit"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New project</button>
+      </form>
+    </div>
+    <div id="projectsMsg" class="notice error" hidden></div>
+    <div class="projects" id="projectList"></div>
+    <div class="empty" id="projectsEmpty" hidden>No projects yet. Name your first one above to get started.</div>
+  </section>
+
+  <section id="projectView" hidden>
+    <button class="btn link" type="button" id="backBtn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>All projects</button>
+    <div class="page-head" style="margin-top:8px">
+      <div><span class="eyebrow">Project</span><h1 style="margin-top:10px" id="projectName"></h1><p class="meta muted" id="projectMeta"></p></div>
+    </div>
+    <div class="drop" id="dropZone">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
+      <h3>Add drawings or a model</h3>
+      <p class="muted">PNG or JPEG sketches, PDF drawings, or an IFC model (IFC2X3 or IFC4). Revit users: File &gt; Export &gt; IFC.</p>
+      <label class="btn primary" style="cursor:pointer">Choose files<input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.pdf,.ifc" multiple hidden></label>
+      <p class="hint">or drop them here</p>
+    </div>
+    <div class="uploads" id="uploads" aria-live="polite"></div>
+    <div class="table-wrap" id="filesWrap" hidden>
+      <table>
+        <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Details</th><th>Uploaded</th><th>Checksum</th></tr></thead>
+        <tbody id="fileRows"></tbody>
+      </table>
+    </div>
+    <div class="danger-zone">
+      <div><h3>Delete this project</h3><p class="muted">Removes the project and every file in it. This cannot be undone.</p></div>
+      <div class="confirm" id="deleteArea"><button class="btn danger" type="button" id="deleteBtn">Delete project</button></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" hidden></div>
+<script type="module" src="assets/app.js"></script>
+</body>
+</html>

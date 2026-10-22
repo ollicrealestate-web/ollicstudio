@@ -1,0 +1,11 @@
+# Versions verified together in the Phase 1 test run (see docs/STATUS.md).
+# Confirm each is published on PyPI before the first deployment: the build
+# environment could not reach PyPI, so FastAPI and pytest were installed from source.
+fastapi==0.159.1
+starlette==1.7.0
+pydantic==2.13.5
+uvicorn==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1
+PyJWT[crypto]==2.15.0
+cryptography==50.0.1

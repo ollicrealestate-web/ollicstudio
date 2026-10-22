@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ollic Design Studio</title>
+<meta name="description" content="Turn a floor plan or IFC model into renders, a staged construction animation, MEP views and a walkthrough.">
+<meta name="theme-color" content="#070707">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+<script>try { if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) document.documentElement.classList.add('js-motion'); } catch (e) {}</script>
+</head>
+<body>
+<div class="blueprint" aria-hidden="true"></div>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="Ollic Design Studio home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Design Studio</b></a>
+    <nav class="nav" aria-label="Account">
+      <a class="btn" href="app.html#sign-in">Sign in</a>
+      <a class="btn primary" href="app.html#sign-up">Start free</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="wrap hero">
+    <div>
+      <span class="eyebrow">Plan to film · in one upload</span>
+      <h1 style="margin-top:18px">Watch your house get built <span class="red">before the first block.</span></h1>
+      <p class="lead">Upload a sketch, a PDF drawing or an IFC model. Ollic turns it into model-accurate renders, a construction film from setting out to lights on, MEP views and a walkthrough your client can open on a phone.</p>
+      <div class="ctas">
+        <a class="btn primary big" href="app.html#sign-up">Start a project
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn big" href="#how">How it works</a>
+      </div>
+      <div class="formats" aria-label="Accepted files">
+        <span class="chip">PNG</span><span class="chip">JPEG</span><span class="chip">PDF</span><span class="chip ifc">IFC2X3 · IFC4</span>
+      </div>
+    </div>
+
+    <figure class="build" style="margin:0" aria-label="Illustration: a bungalow drawn stage by stage">
+      <div class="build-top"><span class="live">Virtual build</span><span>Stage 12 / 23</span></div>
+      <svg class="house" viewBox="0 0 420 250" role="img" aria-label="Line drawing of a bungalow rising from its foundation">
+        <!-- ground and setting-out lines -->
+        <path class="ln dim" d="M20 196 L210 246 L400 196" />
+        <path class="ln dim" d="M40 170 L210 125 L380 170" stroke-dasharray="3 5"/>
+        <!-- foundation slab -->
+        <path class="ln draw fill" style="--len:560;--d:.1s" d="M70 182 L210 220 L350 182 L210 144 Z"/>
+        <!-- walls -->
+        <path class="ln draw fill" style="--len:420;--d:.5s" d="M70 182 L70 124 L210 162 L210 220 Z"/>
+        <path class="ln draw fill" style="--len:420;--d:.7s" d="M210 220 L210 162 L350 124 L350 182 Z"/>
+        <!-- columns -->
+        <path class="ln draw" style="--len:60;--d:.4s" d="M140 201 L140 143 M280 201 L280 143"/>
+        <!-- windows and door -->
+        <path class="ln draw" style="--len:120;--d:1.1s" d="M95 166 L95 146 L125 154 L125 174 Z M155 182 L155 162 L185 170 L185 190 Z"/>
+        <path class="ln draw" style="--len:140;--d:1.2s" d="M240 209 L240 178 L262 172 L262 203 M300 175 L300 155 L330 147 L330 167 Z"/>
+        <!-- hip roof -->
+        <path class="ln draw" style="--len:700;--d:1.4s" d="M56 128 L210 170 L364 128 L262 96 L158 96 Z M158 96 L210 170 M262 96 L210 170"/>
+        <path class="ln draw" style="--len:120;--d:1.8s" d="M158 96 L262 96"/>
+        <!-- dimensions -->
+        <path class="ln dim" d="M66 200 L206 238 M214 238 L354 200"/>
+        <text class="lbl" x="104" y="232">14.0 M</text>
+        <text class="lbl" x="292" y="232">10.0 M</text>
+        <text class="lbl" x="372" y="122">ROOF</text>
+        <text class="lbl" x="356" y="160">BLOCKWORK</text>
+        <text class="lbl" x="18" y="186">DPC</text>
+      </svg>
+      <div class="stages-mini">
+        <div class="row"><span class="n">A03</span><span>Excavation and earthworks<div class="bar"><i style="width:100%;--d:.2s"></i></div></span><span class="hp">Hold</span></div>
+        <div class="row"><span class="n">A09</span><span>Hardcore and damp-proof membrane<div class="bar"><i style="width:100%;--d:.5s"></i></div></span><span></span></div>
+        <div class="row"><span class="n">A12</span><span>Blockwork, lintels and frames<div class="bar"><i style="width:68%;--d:.8s"></i></div></span><span></span></div>
+        <div class="row"><span class="n">A14</span><span>MEP first fix<div class="bar"><i style="width:0%"></i></div></span><span class="hp">Hold</span></div>
+      </div>
+    </figure>
+  </section>
+
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span>Setting out</span><span>Excavation</span><span>Foundation</span><span>DPC</span><span>Hardcore and DPM</span><span>Oversite slab</span><span>Columns and beams</span><span>Blockwork</span><span>Roof</span><span>MEP first fix</span><span>Plaster</span><span>Tiling</span><span>Finishes</span><span>External works</span><span>Furnishing</span><span>Lights on</span>
+      <span>Setting out</span><span>Excavation</span><span>Foundation</span><span>DPC</span><span>Hardcore and DPM</span><span>Oversite slab</span><span>Columns and beams</span><span>Blockwork</span><span>Roof</span><span>MEP first fix</span><span>Plaster</span><span>Tiling</span><span>Finishes</span><span>External works</span><span>Furnishing</span><span>Lights on</span>
+    </div>
+  </div>
+
+  <section class="band" id="how">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">How it works</span>
+        <h2>Three steps from drawing to film.</h2>
+        <p>Nothing is guessed. Ollic reads your file, shows you what it found, and builds only from what you confirm.</p>
+      </div>
+      <div class="chapters">
+        <article class="chapter reveal">
+          <span class="num">01</span>
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
+          <h3>Upload</h3>
+          <p>A PNG or JPEG sketch, a PDF drawing, or an IFC exported from Revit or ArchiCAD. Each file is checked from its contents and stored privately.</p>
+        </article>
+        <article class="chapter reveal">
+          <span class="num">02</span>
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 9h16M9 4v16"/></svg>
+          <h3>Confirm</h3>
+          <p>Check the walls, openings and dimensions. Missing values are flagged for you to fill in, never invented.</p>
+        </article>
+        <article class="chapter reveal">
+          <span class="num">03</span>
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l14 8-14 8z"/></svg>
+          <h3>Watch it build</h3>
+          <p>Renders, the construction film and the walkthrough are produced in the background and saved to your project.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">What you get</span>
+        <h2>One model. Every output <span class="red">matches it.</span></h2>
+      </div>
+      <div class="bento">
+        <article class="tile feature w2 h2 reveal">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/></svg>
+          <h3>The construction film</h3>
+          <p>Every stage of a Nigerian residential build, from setting out and excavation through sandcrete blockwork, long-span roofing, MEP first fix and finishes, to furnished rooms with the lights on. Inspection hold points are marked along the way.</p>
+          <div class="art" aria-hidden="true"><div class="seq"><i class="on"></i><i class="on hp"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="hp"></i><i></i><i></i><i></i><i></i><i class="hp"></i></div></div>
+        </article>
+        <article class="tile reveal">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3zM3 15l5-4 4 3 3-2 6 4"/></svg>
+          <h3>Model renders</h3>
+          <p>Exterior and interior views from your model, so walls and windows sit where the plan has them.</p>
+        </article>
+        <article class="tile reveal">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h5l2-6 2 12 2-6h5"/></svg>
+          <h3>MEP view</h3>
+          <p>Water, drainage, electrical and AC runs, one system at a time, with the walls ghosted.</p>
+        </article>
+        <article class="tile reveal">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v18H3zM3 12h9V3M12 12v9"/><circle cx="16.5" cy="7.5" r="1.5"/></svg>
+          <h3>Plan tour</h3>
+          <p>A person walks your floor plan through its real doors, and each room is revealed with its name and area.</p>
+        </article>
+        <article class="tile reveal">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM12 4v16"/><path d="M15 9l2 3-2 3"/></svg>
+          <h3>Top-down reveal</h3>
+          <p>Your line plan wipes into a rendered, furnished overhead view, aligned wall for wall.</p>
+        </article>
+        <article class="tile wide reveal">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+          <div><h3>Ready for WhatsApp, Instagram and TikTok</h3>
+          <p>MP4 videos with captions and your branding, in the shape each platform wants.</p></div>
+          <div class="art ratio-row" aria-hidden="true"><b style="width:96px;height:54px">16:9</b><b style="width:54px;height:96px">9:16</b><b style="width:70px;height:70px">1:1</b></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Built for how we build</span>
+        <h2>The sequence follows Nigerian site practice.</h2>
+      </div>
+      <div class="practice reveal">
+        <div><b>9-inch and 6-inch</b><span>Sandcrete blockwork, course by course, with lintels and frames fixed as walls rise.</span></div>
+        <div><b>DPC, hardcore, DPM</b><span>Damp-proofing and underground drainage before the slab.</span></div>
+        <div><b>Hold points</b><span>Excavation, reinforcement, MEP first fix and final inspection.</span></div>
+        <div><b>Laterite to lawn</b><span>Real site context: fence, gate, interlocking paving and planting.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" style="padding-top:0">
+    <div class="wrap">
+      <div class="cta-final reveal">
+        <span class="eyebrow" style="color:#ffc2c4">Your first project</span>
+        <h2>Show your client the house <span class="red">before it exists.</span></h2>
+        <p>Create an account, start a project and upload your plan. Your drawings stay private to your account.</p>
+        <a class="btn primary big" href="app.html#sign-up">Create an account
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <div class="row"><span class="brand" style="font-size:1rem"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Design Studio</b></span><span>In development · available now: accounts, projects and uploads</span></div>
+  <p>All outputs are visualisations, not construction documents. Structural, MEP and sequencing information must be reviewed by qualified professionals before use on site.</p>
+</footer>
+<script src="assets/landing.js" defer></script>
+</body>
+</html>
