@@ -740,8 +740,17 @@ function animStills() {
   return shots.map(s => ({ s, r: shotRenders(s.id)[0] })).filter(x => x.r && x.r.url).map(x => ({ url: x.r.url, caption: x.s.name, render_id: x.r.id }));
 }
 
+let exportWarned = false;
 $("#animExport").onclick = async () => {
   if (!seq || exporting) return;
+  const missing = seq.luxury ? Array.from({ length: animScript.heroes }, (_, k) => !heroImgs[k]).filter(Boolean).length : 0;
+  if (missing && !exportWarned) {
+    exportWarned = true;
+    message($("#animMsg"), `${missing} photoreal view${missing > 1 ? "s are" : " is"} not made yet, so the video will end on the gold wireframe instead of the photoreal building. Press “Make photoreal views” first, or press Export MP4 again to export anyway.`);
+    $("#animHeroes").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
+    return;
+  }
+  exportWarned = false;
   const { canExport, exportVideo } = await import("./export.js");
   if (!canExport()) { message($("#animMsg"), "This browser cannot make videos. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
   stopAnim(); message($("#animMsg"), "");
@@ -824,7 +833,7 @@ $("#heroBtn").onclick = async () => {
     for (const { k, blob } of shots) {
       const f = await uploadFile(current.id, new File([blob], `Photoreal view ${k + 1}.png`, { type: "image/png" }), () => {});
       const looks = tickedLooks().filter(id => id !== f.id).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
-      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", materials: look.slice(0, 400),
+      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary",
         tier: chosenTier(), quality: $("#rQuality").value, references: [{ file_id: f.id, role: "model" }, ...looks], anim_hero: { index: k, key: keys[k] } }, newKey());
       heroPending.add(keys[k]); drawHeroes();
     }
@@ -954,7 +963,7 @@ $("#iaMake").onclick = async () => {
   try {
     for (const fid of redo) {
       const looks = tickedLooks().filter(id => id !== fid).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
-      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", materials: look.slice(0, 400), tier: chosenTier(),
+      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", tier: chosenTier(),
         quality: $("#rQuality").value, references: [{ file_id: fid, role: "model" }, ...looks], anim_hero: { index: Math.max(0, iaSel.indexOf(fid)), key: `img-${fid}` } }, newKey());
       iaPending.add(`img-${fid}`);
     }

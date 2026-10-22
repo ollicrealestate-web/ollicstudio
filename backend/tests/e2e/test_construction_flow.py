@@ -128,7 +128,9 @@ def test_construction_animation_in_the_browser(stack, tmp_path):
         assert "0:10" in page.inner_text("#animTime")
         page.wait_for_function("document.querySelector('#heroList')?.textContent.includes('Ready') || document.querySelector('#heroList')?.textContent.includes('Wireframe')")
         page.screenshot(path=str(shots / "e2e-construction.png"), full_page=True)
-        page.click("#animExport")
+        page.click("#animExport")                 # no photoreal view for the square format yet: a warning first
+        page.wait_for_function("document.querySelector('#animMsg').textContent.includes('not made yet')")
+        page.click("#animExport")                 # export anyway: it ends on the gold wireframe
         page.wait_for_selector("#animProgress:not([hidden])")
         page.wait_for_selector("#animVideos .video-card video", timeout=900000)
         (vid,) = stack["repo"].videos.values()

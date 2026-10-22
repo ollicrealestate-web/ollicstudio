@@ -180,3 +180,15 @@ def test_customers_cannot_upgrade_themselves(both_app, alice):
     sql = open("../supabase/migrations/20261022000001_foundation.sql").read()
     assert "grant update (full_name, organisation) on public.profiles to authenticated" in sql
     assert "revoke insert, update, delete on public.profiles from anon, authenticated" in sql
+
+
+def test_owner_and_test_accounts_have_no_daily_limit(cf_app, alice, bob, repo):
+    c, _ = cf_app
+    repo.roles[alice["id"]] = "admin"       # owner / test account
+    repo.roles[bob["id"]] = "reviewer"
+    for who in (alice, bob):
+        p = c.post("/api/projects", json={"name": "x"}, headers=who["headers"]).json()
+        go = lambda: c.post(f"/api/projects/{p['id']}/architectural-render", json={"prompt": "a house"}, headers=who["headers"]).status_code  # noqa: E731
+        assert [go() for _ in range(4)] == [202] * 4          # the customers' limit is 2
+        out = c.get(f"/api/projects/{p['id']}/outputs", headers=who["headers"]).json()
+        assert out["tiers"]["standard"]["daily_limit"] is None

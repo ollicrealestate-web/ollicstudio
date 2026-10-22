@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..auth import CurrentUser, get_current_user
 from ..video_jobs import run_video_job
 from .projects import _owned_project, _repo, _storage
-from .renders import ConceptRenderIn, _require_tier, _require_token_life, _start_job, _utc_midnight
+from .renders import ConceptRenderIn, _require_tier, _require_token_life, _start_job, _utc_midnight, daily_limit
 
 router = APIRouter()
 MAX_BATCH = 12
@@ -142,7 +142,7 @@ def render_shots(project_id: uuid.UUID, body: BatchIn, request: Request, respons
         if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Look reference not found in this project.")
         looks.append(str(fid))
-    limit = settings.daily_limit_for(brief.tier)
+    limit = daily_limit(request, user, brief.tier)
     if limit:
         used = repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), brief.tier)
         left = max(0, limit - used)

@@ -17,7 +17,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | --- | --- | --- |
 | Sign-up, sign-in, password reset, token verification (ES256 via JWKS) | Operational live | `test_auth.py`; live use |
 | Projects, uploads, ownership in code plus RLS and storage policies; deletion removes files | **Verified live**: `scripts/verify_isolation.py` 14/14 | `test_projects.py`, `test_uploads.py` |
-| **Standard render** (free daily allowance), 3 a day per customer | **Verified live** | live check below |
+| **Standard render** (free daily allowance), 3 a day per customer; owner and test accounts (`profiles.role` admin or reviewer) have no daily limits (`supabase/owner_test_accounts.sql`) | **Verified live** | live check below |
 | **Premium render**: the most precise image model, High or Maximum detail, paid plans only (`profiles.plan = 'premium'`, set by the owner until Phase 7), 20 a day | Built and tested; **awaiting OpenAI credit** | `test_cloudflare.py`, `test_openai_client.py` |
 | **Premium prompting**: Claude (`claude-opus-5-5`, configurable) studies the plan, model view, sketches and look references with the brief and writes the image prompt; turns plain-words revisions into precise edits; falls back to the standard prompt on any failure; its cost is recorded | Built and tested with a mocked API; **awaiting `ANTHROPIC_API_KEY`** | `test_prompting.py` |
 | **Render studio**: start from a floor plan (PNG, JPEG or PDF), a 3D model view or a sketch, plus up to 3 look references, each sent with its role; view (street, aerial, cutaway, interior), style, floors, ground floor, light, materials, landscaping | Built and tested in a browser | `test_studio.py`, e2e model test |

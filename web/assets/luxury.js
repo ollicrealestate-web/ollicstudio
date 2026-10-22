@@ -149,7 +149,7 @@ export function createLuxury(ctx, items, { centre, radius, groundY, footprint })
     const img = r && r.image ? texture(r.image) : null;
     // with an AI image the wireframe stays everywhere and the image comes in through the mask;
     // without one, the model's own surfaces fill in below the line
-    solidClip.constant = r && !img ? r.h : -1e6;
+    solidClip.constant = -1e6;            // without an AI image the wireframe stays (the plain model is never shown)
     ring.visible = !!r && r.h > groundY + 0.02 && r.h < footprint.max.y + 0.3;
     if (r) ring.position.y = r.h;
 

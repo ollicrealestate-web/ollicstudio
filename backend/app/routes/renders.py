@@ -111,6 +111,18 @@ def user_plan(request: Request, user: CurrentUser) -> str:
     return (profile or {}).get("plan") or "free"
 
 
+UNLIMITED_ROLES = ("admin", "reviewer")
+
+
+def daily_limit(request: Request, user: CurrentUser, tier: str) -> int:
+    """Renders a day for this account and tier; 0 means no limit. Owner and test accounts
+    (profiles.role 'admin' or 'reviewer') have none; customers have the configured allowance."""
+    profile = _repo(request).get_profile(user) or {}
+    if profile.get("role") in UNLIMITED_ROLES:
+        return 0
+    return request.app.state.settings.daily_limit_for(tier)
+
+
 def _require_tier(request: Request, user: CurrentUser, tier: str) -> None:
     if request.app.state.image_clients.get(tier) is None:
         raise HTTPException(503, {"code": "not_configured", "reason": f"{TIER_NAME[tier]} is not switched on for this site yet."})
@@ -158,7 +170,7 @@ def _start_job(request: Request, user: CurrentUser, project_id: str, job_type: s
             response.status_code = status.HTTP_200_OK
             return public_job(_settle_stale(request, user, existing))
     tier = job_input.get("tier")
-    limit = request.app.state.settings.daily_limit_for(tier) if tier else 0
+    limit = daily_limit(request, user, tier) if tier else 0
     if limit > 0:
         used = repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), tier)
         if used >= limit:
@@ -243,7 +255,7 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
     plan = user_plan(request, user)
     clients = request.app.state.image_clients
     tiers = {t: {"name": TIER_NAME[t], "available": clients.get(t) is not None, "allowed": t == "standard" or plan == "premium",
-                 "daily_limit": settings.daily_limit_for(t) or None} for t in ("standard", "premium")}
+                 "daily_limit": daily_limit(request, user, t) or None} for t in ("standard", "premium")}
     return {"renders_enabled": any(v["available"] for v in tiers.values()), "plan": plan, "tiers": tiers,
             "images": out, "jobs": [public_job(j) for j in jobs]}
 
