@@ -102,13 +102,14 @@ def summary_text(r: dict) -> str:
     """One editable paragraph for the render brief."""
     parts = []
     if r.get("building_type"):
-        parts.append(r["building_type"].rstrip(".") + ".")
+        bt = r["building_type"].rstrip(".")
+        parts.append(bt[:1].upper() + bt[1:] + ".")
     if r.get("layout"):
         parts.append(r["layout"].rstrip(".") + ".")
     if r.get("features"):
         parts.append("Show: " + "; ".join(r["features"][:8]) + ".")
-    if r.get("overall_width_m") and r.get("overall_depth_m"):
-        parts.append(f"Footprint about {r['overall_width_m']:.0f} m by {r['overall_depth_m']:.0f} m.")
+    # Sizes the model reads off a drawing are often wrong (a live A103 sheet read 48 m for about 31 m),
+    # so they are not put into the brief, where they would mislead the render.
     return " ".join(parts)[:2000]
 
 

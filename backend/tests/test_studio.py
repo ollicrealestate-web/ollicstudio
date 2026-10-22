@@ -84,7 +84,7 @@ def test_plan_readings_are_parsed_defensively():
                       '"rooms":["Kitchen",""],"features":"not a list","overall_width_m":"30,695"}\n```')
     assert r["storeys"] == 6 and r["units_per_floor"] is None and r["layout"] is None and r["rooms"] == ["Kitchen"] and r["features"] == []
     assert r["overall_width_m"] == 30695.0
-    assert summary_text({"building_type": "House", "features": ["a porch"]}) == "House. Show: a porch."
+    assert summary_text({"building_type": "house", "features": ["a porch"], "overall_width_m": 48, "overall_depth_m": 21}) == "House. Show: a porch."   # no guessed sizes
     with pytest.raises(VisionUnavailable):
         parse_reading("I cannot read this image.")
 
