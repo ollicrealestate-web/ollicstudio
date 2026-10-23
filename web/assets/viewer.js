@@ -45,6 +45,7 @@ export function createViewer(host, { onSelect } = {}) {
 
   let model = null, elements = [], storeys = [], mode = "exterior", storey = null, selected = null, frame = 0, dirty = true;
   let owner = null;       // the construction animation, while it drives the camera and the scene
+  let frameBox = new THREE.Box3();   // the building, without a large plot around it
   let groundY = 0;        // finished ground level: the bottom of the lowest storey's walls, not of its footings
   // walkthrough: eye height, look direction and movement
   const EYE = 1.6, SPEED = 1.4, TURN = 1.6;
@@ -93,14 +94,41 @@ export function createViewer(host, { onSelect } = {}) {
       && (!storeys.length || e.userData.storey === storeys[0]));
     groundY = first.length ? Math.min(...first.map(e => new THREE.Box3().setFromObject(e).min.y)) : new THREE.Box3().setFromObject(model).min.y;
     ground.position.y = groundY - 0.02;
+    frameBox = buildingBox(elements);
     frameAll();
     apply();
     dirty = true;
     return { storeys, count: elements.length };
   }
 
+  /** The building itself, for placing the camera: models often include the whole plot (paving,
+   * ground slabs, boundary walls), many times larger than the building. Parts much bigger than the
+   * building's core are left out of the frame (they are still shown). */
+  function buildingBox(list) {
+    let boxes = list.filter(e => e.userData.ifcType !== "IfcSpace").map(e => new THREE.Box3().setFromObject(e)).filter(b => !b.isEmpty());
+    const all = new THREE.Box3(); boxes.forEach(b => all.union(b));
+    if (boxes.length < 12) return all;
+    // the plot: low parts at ground level (paving, kerbs, boundary walls, landscaping) are not the building
+    const low = all.min.y, tall = all.max.y - all.min.y;
+    const raised = boxes.filter(b => b.max.y > low + Math.min(3.2, tall * 0.25));
+    if (raised.length >= 8) boxes = raised;
+    const pct = (arr, q) => { const s = arr.slice().sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(q * s.length))]; };
+    const cx = boxes.map(b => (b.min.x + b.max.x) / 2), cz = boxes.map(b => (b.min.z + b.max.z) / 2);
+    const x0 = pct(cx, 0.1), x1 = pct(cx, 0.9), z0 = pct(cz, 0.1), z1 = pct(cz, 0.9);
+    const core = Math.max(4, x1 - x0, z1 - z0), limit = core * 1.5 + 2;
+    const keep = new THREE.Box3();
+    for (const b of boxes) {
+      const w = Math.max(b.max.x - b.min.x, b.max.z - b.min.z), mx = (b.min.x + b.max.x) / 2, mz = (b.min.z + b.max.z) / 2;
+      const m = core * 0.5;
+      if (w <= limit && mx >= x0 - m && mx <= x1 + m && mz >= z0 - m && mz <= z1 + m) keep.union(b);
+    }
+    if (keep.isEmpty()) return all;
+    keep.min.y = Math.min(keep.min.y, all.min.y);   // the frame still stands on the ground
+    return keep;
+  }
+
   function frameAll() {
-    const box = new THREE.Box3().setFromObject(model);
+    const box = frameBox.clone();
     const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
     const radius = size.length() / 2;
     // fit the whole building in whichever field of view is narrower (portrait phones: the horizontal one)
@@ -302,6 +330,6 @@ export function createViewer(host, { onSelect } = {}) {
         camera.fov = 45; resize(); frameAll(); apply();
       }
     },
-    engine() { return { THREE, scene, camera, renderer, elements, storeys, sun, hemi, ground, groundY, host, render: () => renderer.render(scene, camera), resize }; },
+    engine() { return { THREE, scene, camera, renderer, elements, storeys, sun, hemi, ground, groundY, frame: frameBox.clone(), host, render: () => renderer.render(scene, camera), resize }; },
   };
 }

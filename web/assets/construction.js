@@ -113,7 +113,8 @@ export function createConstruction(ctx, script, extras = {}) {
 
   // model size, for the camera
   const all = new THREE.Box3();
-  items.forEach(it => all.union(it.box));
+  if (ctx.frame && !ctx.frame.isEmpty()) all.copy(ctx.frame);   // the building, not the whole plot around it
+  else items.forEach(it => all.union(it.box));
   if (all.isEmpty()) all.set(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 5, 5));
   const centre = all.getCenter(new THREE.Vector3()), size = all.getSize(new THREE.Vector3());
   const radius = Math.max(4, size.length() / 2);
@@ -244,7 +245,7 @@ export function createConstruction(ctx, script, extras = {}) {
   sun.target.position.copy(centre);
   ground.material.transparent = true;
   // setting-out lines on the plot during "site"
-  const footprint = new THREE.Box3(); items.filter(it => it.group !== "site").forEach(it => footprint.union(it.box));
+  const footprint = all.clone();
   const pad = 0.6, fy = groundY + 0.03;
   const corners = [[footprint.min.x - pad, footprint.min.z - pad], [footprint.max.x + pad, footprint.min.z - pad], [footprint.max.x + pad, footprint.max.z + pad], [footprint.min.x - pad, footprint.max.z + pad]];
   const linePts = corners.concat([corners[0]]).map(([x, z]) => new THREE.Vector3(x, fy, z));

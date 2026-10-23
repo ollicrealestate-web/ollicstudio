@@ -31,6 +31,8 @@ function rand(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013
  * ctx: viewer.engine(); items: the construction animation's elements ({mesh, t, group, ...});
  * frame: { centre, radius, groundY, footprint (Box3) }.
  */
+const DENSE = 10;   // lines per m2 of footprint up to which the full gold look is kept (set from real models)
+
 export function createLuxury(ctx, items, { centre, radius, groundY, footprint }) {
   const { renderer, scene, camera, ground } = ctx;
   const saved = { bg: scene.background, fog: scene.fog, clip: renderer.localClippingEnabled, groundMat: ground.material, groundLayers: ground.layers.mask,
@@ -84,6 +86,15 @@ export function createLuxury(ctx, items, { centre, radius, groundY, footprint })
     m.add(edges, ghost);
     parts.push({ m, orig, mat, edges, ghost });
   }
+  // dense models (thousands of facade members) would glow white: the more lines per square metre of
+  // building, the fainter each line, its fill and the glow (a house keeps the full look)
+  const lineCount = parts.reduce((n, p) => n + p.edges.geometry.attributes.position.count / 2, 0);
+  const area = Math.max(25, (footprint.max.x - footprint.min.x) * (footprint.max.z - footprint.min.z));
+  const density = lineCount / area;
+  const dim = Math.min(1, Math.sqrt(DENSE / Math.max(1e-6, density)));
+  lineMat.opacity = 0.95 * Math.max(0.2, dim);
+  ghostMat.opacity = 0.05 * Math.max(0.15, dim);
+  console.info(`[ollic] gold lines: ${Math.round(lineCount)} over ${Math.round(area)} m2, density ${density.toFixed(1)}, dim ${dim.toFixed(2)}`);
 
   // render targets and passes
   const size = new THREE.Vector2();
@@ -91,7 +102,7 @@ export function createLuxury(ctx, items, { centre, radius, groundY, footprint })
   const wire = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, rtOpts));
   wire.renderToScreen = false;
   wire.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.35, 1.0);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7 * (0.45 + 0.55 * dim), 0.35, 1.0);
   wire.addPass(bloom); wire.addPass(new OutputPass());
   const glow = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, rtOpts));
   glow.renderToScreen = false;
