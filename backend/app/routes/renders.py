@@ -308,7 +308,9 @@ def _service(e: dict) -> str:
     if e.get("operation") == "animation_direct":
         return "Animation director"
     if e.get("operation") == "video_generate":
-        return "Cinematic clip"
+        return "Cinematic clip · " + ("Ollic VS" if e.get("provider") == "fal" else "Ollic Motion")
+    if e.get("provider") == "fal":
+        return "Ollic VS"
     if e.get("provider") == "google":
         return "Ollic Ultra" if "pro" in str(e.get("model")) else "Ollic Swift"
     return "Premium render" if e.get("provider") == "openai" else "Standard render"

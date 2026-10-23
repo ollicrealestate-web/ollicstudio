@@ -278,6 +278,8 @@ def test_ollic_vs_is_an_image_option_and_a_video_option(clip_app, alice, repo):
                headers={**alice["headers"], "Idempotency-Key": "vs-img-01"})
     assert r.status_code == 202 and imgs.calls[-1]["model"] == "fal-ai/flux-pro/kontext"
     assert any(e["provider"] == "fal" and e["cost_usd"] == "0.04" for e in repo.usage)
+    shown = [e["service"] for e in c.get("/api/usage", headers=alice["headers"]).json()["events"]]
+    assert shown.count("Ollic VS") == 1          # the two Standard renders made earlier keep their name
     clip = {"engine": "vs", "start": {"kind": "lines", "id": line["id"]}, "end": {"kind": "render", "id": photo["id"]}, "seconds": 5, "format": "9:16"}
     r = c.post(f"/api/projects/{pid}/cinematic", json=clip, headers=alice["headers"])
     assert r.status_code == 202, r.text
@@ -286,6 +288,7 @@ def test_ollic_vs_is_an_image_option_and_a_video_option(clip_app, alice, repo):
     assert vid.created[-1]["aspect"] == "9:16" and kling.created == []      # Ollic Motion was not used
     e = repo.usage[-1]
     assert e["provider"] == "fal" and e["model"].startswith("bytedance/") and e["cost_usd"] == "1.517"
+    assert "Cinematic clip · Ollic VS" in [x["service"] for x in c.get("/api/usage", headers=alice["headers"]).json()["events"]]
     assert c.post(f"/api/projects/{pid}/cinematic", json={**clip, "seconds": 3}, headers=alice["headers"]).status_code == 422
 
 
