@@ -169,7 +169,7 @@ async function startImport(f, btn) {
 }
 
 /* ---------- 3D models (Phase 3) ---------- */
-let viewer = null, viewerModelId = null, walkRoom = 0;
+let viewer = null, viewerModelId = null, walkRoom = 0, modelLoading = null;   // modelLoading: the model being downloaded into the viewer
 function resetModel() {
   leaveBuild();
   $("#walkPanel").hidden = true; walkRoom = 0;
@@ -204,7 +204,8 @@ async function loadModels() {
       viewer = createViewer($("#viewer"), { onSelect: showElement });
       setViewMode("exterior");
     }
-    const info = await viewer.load(m.glb_url);
+    modelLoading = viewer.load(m.glb_url);
+    const info = await modelLoading.finally(() => { modelLoading = null; });
     const pick = $("#storeySelect");
     pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
     $("#storeyPick").hidden = info.storeys.length < 2;
@@ -218,6 +219,7 @@ function setViewMode(mode) {
   if (!viewer) return;
   if (mode !== "build") leaveBuild();
   if (mode === "build") {
+    if (modelLoading) { toast("The 3D model is still loading. Try again in a moment."); modelLoading.then(() => {}, () => {}); return; }
     if (!enterBuild()) return;
   } else if (mode === "walk") {
     if (!viewer.rooms().length) { toast("This model has no rooms to walk into. In Revit's IFC export settings, include rooms (spaces) and export again."); return; }
@@ -752,6 +754,7 @@ function drawProgramme() {
 $("#progFile").onchange = async e => {
   const f = e.target.files[0]; e.target.value = "";
   if (!f || !current) return;
+  if (modelLoading) { $("#progNote").textContent = "Waiting for the 3D model to finish loading…"; await modelLoading.catch(() => {}); }
   if (!enterBuild()) return;
   $("#progNote").textContent = `Reading ${f.name}…`;
   try {

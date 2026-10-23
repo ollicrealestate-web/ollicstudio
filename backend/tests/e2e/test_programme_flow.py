@@ -26,6 +26,10 @@ def test_animation_follows_the_programme(stack, tmp_path):  # noqa: F811
         page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
         page.route("**/fonts.googleapis.com/**", lambda r: r.abort()); page.route("**/fonts.gstatic.com/**", lambda r: r.abort())
         errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
+        # a slow connection: the 3D model takes 4 s to download after its report is shown
+        # (stored files arrive as data: links in this test; a 3D model's starts with "glTF", base64 "Z2xURg")
+        page.add_init_script("""{ const f = window.fetch; window.fetch = (u, o) => { const x = String(u?.url || u); return x.startsWith('data:') && x.includes(';base64,Z2xURg')
+          ? new Promise(r => setTimeout(r, 4000)).then(() => f(u, o)) : f(u, o); }; }""")
         page.goto(stack["url"] + "/app.html#sign-up")
         page.fill("#upName", "Bo"); page.fill("#upEmail", "bo@build.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
@@ -34,6 +38,10 @@ def test_animation_follows_the_programme(stack, tmp_path):  # noqa: F811
         page.set_input_files("#fileInput", str(ifc))
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
+        page.click("#viewBuild")                      # too early: the model is still downloading
+        page.wait_for_function("document.body.textContent.includes('still loading')")
+        assert page.is_hidden("#animPanel")
+        page.wait_for_timeout(5000)
         page.click("#viewBuild"); page.wait_for_selector("#animPanel:not([hidden])")
         assert "usual order" in page.inner_text("#progNote")
 
