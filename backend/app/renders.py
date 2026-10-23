@@ -167,7 +167,9 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"]))
                 roles.append(r["role"])
             prompt = build_prompt(inp, roles=roles)
-            writer_note = _premium_prompt(state, user, job, tier, lambda w: w.write(
+            if inp.get("prompt_ready"):      # the prompt the AI wrote from the pictures and the architect checked: used as written
+                prompt = inp["prompt"].strip() + "\n" + SAFE_TAIL
+            writer_note = None if inp.get("prompt_ready") else _premium_prompt(state, user, job, tier, lambda w: w.write(
                 brief=inp["prompt"], images=images, roles=roles,
                 choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect", "shot_name")}))
             if writer_note:
@@ -222,7 +224,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         options = {"size": size, "quality": quality, "operation": operation, "tier": tier, "final_prompt": prompt[:8000],
                    "prompt_notes": (writer_note or {}).get("notes"), "premium_prompting": bool(writer_note)}
         if job["type"] == "concept_render":
-            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line")})
+            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line", "prompt_ready")})
         elif inp.get("anim_line"):
             options["anim_line"] = inp["anim_line"]
         try:

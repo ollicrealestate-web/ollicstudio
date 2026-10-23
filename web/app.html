@@ -140,7 +140,7 @@
           </div>
           <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
           <button type="button" class="btn" id="viewReset">Reset view</button>
-          <button type="button" class="btn primary" id="useView">Render this view</button>
+          <button type="button" class="btn primary" id="useView">Capture view</button>
           <button type="button" class="btn" id="saveShot">Save shot</button>
           <span class="spacer"></span>
           <button type="button" class="btn model-badge" id="modelBadge" aria-expanded="false" aria-controls="modelDetails" hidden></button>
@@ -282,7 +282,7 @@
     <section class="studio" id="studio" aria-labelledby="studioTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>
-          <p class="muted">Describe the building, choose the AI version and the view. About a minute per picture.</p></div>
+          <p class="muted">Choose the picture, let the AI write the prompt, and render. About a minute per picture.</p></div>
       </div>
       <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
       <form id="renderForm" class="render-form card" hidden>
@@ -291,38 +291,28 @@
           <label class="tier"><input type="radio" name="tier" value="standard" checked><span><b>Standard render</b><small id="stdNote">Free</small></span></label>
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
         </fieldset></div>
-        <div class="span2 start-from">
-          <div class="field">Floor plan <span class="hint">Optional. The render follows its layout.</span>
-            <div class="row"><select id="rPlan"><option value="">No plan</option></select>
-              <button type="button" class="btn" id="readPlanBtn" disabled>Read my plan</button></div></div>
-          <label class="field">Keep the shape from <span class="hint">Optional. A 3D model view or a sketch whose shape and camera are kept.</span>
-            <select id="rBase"><option value="">Nothing</option></select></label>
-          <fieldset class="field looks"><legend>Look and materials from <span class="hint">Up to 3 photos or images</span></legend>
-            <div id="rLooks" class="look-list"><span class="hint">Upload photos of facades you like and they appear here.</span></div></fieldset>
+        <div class="span2 rbox">
+          <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Capture a view of the 3D model, or upload a sketch, 3D image or plan.</span>
+            <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg,.pdf" hidden></label></div>
+          <div class="rpics" id="rPics" role="radiogroup" aria-label="Picture to render"></div>
         </div>
-        <label class="field span2">Describe it
-          <textarea id="rPrompt" rows="4" maxlength="2500" required placeholder="e.g. Six-storey luxury apartment block, glass balconies on every floor, cantilevered penthouse, dark stone base, central glazed stair core"></textarea>
-          <span class="hint" id="planNote"></span></label>
-        <label class="field">View
-          <select id="rView"><option value="exterior">Exterior, street level</option><option value="aerial">Aerial</option><option value="cutaway">Cutaway (inside visible)</option><option value="interior">Interior room</option></select></label>
-        <label class="field">Style
-          <select id="rStyle"><option value="">As described</option><option value="luxury contemporary">Luxury contemporary</option><option value="minimalist modern">Minimalist modern</option><option value="classic luxury">Classic luxury</option><option value="tropical modern">Tropical modern</option></select></label>
-        <label class="field">Floors
-          <input type="number" id="rStoreys" min="1" max="60" inputmode="numeric" placeholder="e.g. 6"></label>
-        <label class="field">Ground floor
-          <select id="rGround"><option value="">As described</option><option value="car park">Car park</option><option value="shops">Shops</option><option value="lobby">Entrance lobby</option><option value="flats">Flats</option></select></label>
-        <label class="field">Light
-          <select id="rLight"><option value="morning">Morning</option><option value="midday" selected>Midday</option><option value="golden hour">Golden hour</option><option value="dusk">Dusk, lights on</option><option value="night">Night</option></select></label>
-        <label class="field">Shape
-          <select id="rAspect"><option value="landscape">Landscape 3:2</option><option value="portrait">Portrait 2:3</option><option value="square">Square</option></select></label>
-        <label class="field">Materials and colours <span class="hint">Optional</span>
-          <input type="text" id="rMaterials" maxlength="400" placeholder="e.g. white render, dark grey roof, timber cladding"></label>
-        <label class="field">Landscaping <span class="hint">Optional</span>
-          <input type="text" id="rLand" maxlength="400" placeholder="e.g. palm trees, interlocking paving, low hedge"></label>
+        <div class="span2 rbox">
+          <div class="rbox-head"><b>Reference images</b> <span class="hint">Optional, up to 3. The scene, materials and mood are copied from them, never their building.</span>
+            <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rRefUpload" accept=".png,.jpg,.jpeg" multiple hidden></label></div>
+          <div class="rpics refs" id="rRefs" role="group" aria-label="Reference images"></div>
+        </div>
+        <label class="field span2">Describe the building <span class="hint">Optional, in your own words: what it is, materials, setting, mood.</span>
+          <textarea id="rDesc" rows="2" maxlength="1500" placeholder="e.g. Luxury office complex in a well landscaped environment, bronze glass, white stone, evening light"></textarea></label>
+        <div class="span2 rwrite">
+          <button type="button" class="btn" id="writePromptBtn">Read image and write prompt</button>
+          <span class="hint" id="planNote">The AI studies the picture, your model and the references, and writes the rendering prompt.</span>
+        </div>
+        <label class="field span2">Rendering prompt <span class="hint">Written by the AI. Edit it if you like.</span>
+          <textarea id="rPrompt" rows="7" maxlength="6000" required placeholder="Press “Read image and write prompt”, or write your own."></textarea></label>
         <label class="field" id="qualityField" hidden>Detail
           <select id="rQuality"><option value="high" selected>High</option><option value="max">Maximum (slower)</option></select></label>
         <div class="render-go span2">
-          <button class="btn primary big" type="submit" id="renderBtn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 10 4h4l6 16M7 13h10"/></svg>Create concept</button>
+          <button class="btn primary big" type="submit" id="renderBtn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20 10 4h4l6 16M7 13h10"/></svg>Render</button>
           <span class="hint" id="renderLimit"></span>
           <div id="renderMsg" class="notice error" role="status" hidden></div>
         </div>

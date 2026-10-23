@@ -63,6 +63,10 @@ def list_projects(request: Request, user: CurrentUser = Depends(get_current_user
 def get_project(project_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
     project = _owned_project(request, user, project_id)
     files = [f for f in _repo(request).list_source_files(user, str(project_id)) if f.get("owner_id") == user.id]
+    pics = [f["storage_path"] for f in files if f.get("detected_type") in ("png", "jpeg")]
+    links = _storage(request).signed_urls(user, pics) if pics else {}
+    for f in files:   # small previews for the render box (private links, valid for an hour)
+        f["preview_url"] = links.get(f["storage_path"])
     return {**project, "source_files": files}
 
 

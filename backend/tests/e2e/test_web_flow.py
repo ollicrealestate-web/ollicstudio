@@ -127,7 +127,7 @@ def test_customer_journey_and_isolation(stack, tmp_path):
         assert "Photoreal render" in page.inner_text("#svcTitle") and "Nothing suitable" in page.inner_text("#svcLibHint")
         page.set_input_files("#fileInput", str(png))
         page.wait_for_selector("#studio:not([hidden])")                # uploaded: straight to the render screen, with the file in place
-        assert page.input_value("#rBase") != "" and not page.is_visible("#svcStart")
+        assert page.locator("#rPics .rpic.on").count() == 1 and not page.is_visible("#svcStart")   # the upload is the picture to render
         assert "service=render" in page.url and "step=work" in page.url
         page.click("#svcTabs button:has-text('Library')"); page.wait_for_selector("#libSection:not([hidden])")
         row = page.inner_text("#fileRows tr")

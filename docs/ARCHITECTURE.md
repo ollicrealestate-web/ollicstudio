@@ -115,3 +115,14 @@ without normals). `app.js` `readModel()` reads an uploaded file straight from th
 downloads one chosen from the Library, then sends the GLB and metadata to
 `/api/projects/{id}/models/from-browser`, which validates them and streams the GLB into storage. If
 the browser cannot (no WebAssembly or workers), the server's own reading is the fallback.
+
+## Rendering prompt written by AI
+
+`POST /api/projects/{id}/render-prompt` (`app/render_prompt.py`): the picture to render (role `model`
+for a captured 3D view, `base` for a sketch or 3D image, `plan` for a drawing), up to 3 `style`
+references, the description and optionally the model id (its report gives floors and element counts).
+Pictures are ordered by `renders.ROLE_ORDER`, the order the render sends them, so "Image 1" means the
+same to the prompt writer and the image model. Claude (`ClaudePromptWriter._call`) writes it; without
+Claude, or if it fails, the Cloudflare vision model writes it from the main picture. 60 a day per
+customer (free features are unlimited for testers and owners). A render with `prompt_ready: true` uses
+the prompt as written plus the no-text tail, and is not rewritten again by Premium prompting.

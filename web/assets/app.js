@@ -104,44 +104,68 @@ function renderProject() {
   $("#filesWrap").hidden = current.source_files.length === 0;
   $("#libFilesEmpty").hidden = current.source_files.length > 0;
   if (step === "start") drawStart();
-  fillPickers(); drawIA();
+  drawRenderBox(); drawIA();
 }
 
-/* reference pickers: floor plan, shape to keep, look references */
-function fillPickers() {
-  const imgs = current.source_files.filter(f => f.detected_type === "png" || f.detected_type === "jpeg");
-  const plans = current.source_files.filter(f => ["png", "jpeg", "pdf"].includes(f.detected_type));
-  const keepSel = (sel, first, files) => {
-    const keep = sel.value;
-    sel.replaceChildren(el("option", { value: "" }, first), ...files.map(f => el("option", { value: f.id }, f.original_name)));
-    sel.value = [...sel.options].some(o => o.value === keep) ? keep : "";
-  };
-  keepSel($("#rPlan"), "No plan", plans);
-  keepSel($("#rBase"), "Nothing", imgs);
-  const box = $("#rLooks"), ticked = new Set([...box.querySelectorAll("input:checked")].map(i => i.value));
-  box.replaceChildren(...(imgs.length ? imgs.map(f => el("label", { class: "look" },
-    el("input", { type: "checkbox", value: f.id, ...(ticked.has(f.id) ? { checked: "" } : {}), onchange: limitLooks }), el("span", {}, f.original_name)))
-    : [el("span", { class: "hint" }, "Upload photos of facades you like and they appear here.")]));
-  $("#readPlanBtn").disabled = !$("#rPlan").value;
+/* the render box: the picture to render, reference images, the description, and the prompt the AI writes */
+let rPick = null, rRefSel = [], promptByAI = false;
+const renderPics = () => (current?.source_files || []).filter(f => ["png", "jpeg", "pdf"].includes(f.detected_type) && !/^(Photoreal view|Cinematic start view) \d/.test(f.original_name))
+  .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+const picRole = f => (service === "plan" || f.detected_type === "pdf") ? "plan" : /^3D view/i.test(f.original_name) ? "model" : "base";
+function picTile(f, on, onclick, kind) {
+  const img = f.preview_url ? el("img", { src: f.preview_url, alt: "", loading: "lazy" }) : el("span", { class: "rpic-doc" }, f.detected_type.toUpperCase());
+  const tag = /^3D view/i.test(f.original_name) ? "Captured view" : f.detected_type === "pdf" ? "Drawing" : "Picture";
+  return el("button", { type: "button", class: `rpic${on ? " on" : ""}`, role: kind === "radio" ? "radio" : "checkbox", "aria-checked": String(on), title: f.original_name, onclick },
+    img, el("span", { class: "rpic-name" }, kind === "radio" ? tag : f.original_name));
 }
-function limitLooks(e) {
-  const on = [...$("#rLooks").querySelectorAll("input:checked")];
-  if (on.length > 3) { e.target.checked = false; toast("Use up to three look references."); }
+function drawRenderBox() {
+  const pics = renderPics();
+  if (rPick && !pics.some(f => f.id === rPick)) rPick = null;
+  rRefSel = rRefSel.filter(id => pics.some(f => f.id === id) && id !== rPick);
+  $("#rPics").replaceChildren(...(pics.length ? pics.slice(0, 16).map(f => picTile(f, f.id === rPick, () => { rPick = rPick === f.id ? null : f.id; drawRenderBox(); }, "radio"))
+    : [el("span", { class: "hint" }, service === "model" || service === "walk" ? "Pan the 3D model to the view you want, then press Capture view." : "Upload a sketch, 3D image or plan.")]));
+  const refs = pics.filter(f => f.id !== rPick && f.detected_type !== "pdf");
+  $("#rRefs").replaceChildren(...(refs.length ? refs.slice(0, 16).map(f => picTile(f, rRefSel.includes(f.id), () => {
+    if (rRefSel.includes(f.id)) rRefSel = rRefSel.filter(x => x !== f.id);
+    else if (rRefSel.length >= 3) { toast("Use up to three reference images."); return; }
+    else rRefSel = [...rRefSel, f.id];
+    drawRenderBox();
+  }, "check")) : [el("span", { class: "hint" }, "Upload photos of buildings or scenes you like.")]));
+  $("#rPicHint").textContent = rPick ? `Rendering: ${pics.find(f => f.id === rPick)?.original_name}` : service === "model" || service === "walk"
+    ? "Pan the 3D model to the view you want, then press Capture view." : "Choose the picture to render.";
 }
-$("#rPlan").onchange = () => { $("#readPlanBtn").disabled = !$("#rPlan").value; $("#planNote").textContent = ""; };
-$("#readPlanBtn").onclick = async () => {
-  const btn = $("#readPlanBtn"), id = $("#rPlan").value;
-  if (!id) return;
-  btn.disabled = true; btn.textContent = "Reading…";
-  try {
-    const r = await api.readPlan(current.id, id);
-    const box = $("#rPrompt");
-    box.value = box.value.trim() ? `${box.value.trim()}\n\n${r.summary}` : r.summary;
-    if (r.reading.storeys && !$("#rStoreys").value) $("#rStoreys").value = r.reading.storeys;
-    $("#planNote").textContent = `Read by AI from “${r.reading.drawing_title || "your plan"}”. Check and edit it before you render.`;
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; btn.textContent = "Read my plan"; }
+function renderRefs() {
+  const refs = [];
+  const f = (current?.source_files || []).find(x => x.id === rPick);
+  if (f) refs.push({ file_id: f.id, role: picRole(f) });
+  rRefSel.forEach(id => refs.push({ file_id: id, role: "style" }));
+  return refs;
+}
+$("#rPicUpload").onchange = async e => {
+  const files = [...e.target.files]; e.target.value = "";
+  const saved = await uploadAll(files);
+  if (saved[0]) { rPick = saved[0].id; drawRenderBox(); }
 };
+$("#rRefUpload").onchange = async e => {
+  const files = [...e.target.files].slice(0, 3); e.target.value = "";
+  const saved = await uploadAll(files);
+  saved.forEach(f => { if (rRefSel.length < 3 && f.id !== rPick) rRefSel.push(f.id); });
+  drawRenderBox();
+};
+$("#writePromptBtn").onclick = async () => {
+  const btn = $("#writePromptBtn");
+  if (!rPick && !$("#rDesc").value.trim()) { toast("Capture a view or choose a picture first."); return; }
+  btn.disabled = true; btn.textContent = "Studying the picture…";
+  $("#planNote").textContent = "The AI is studying the picture, your model and the references. This takes about 10–30 seconds.";
+  try {
+    const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim(),
+      ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}) });
+    $("#rPrompt").value = r.prompt; promptByAI = true;
+    $("#planNote").textContent = r.notes ? `AI: ${r.notes} Check the prompt below, then render.` : "Prompt written. Check it below, then render.";
+  } catch (err) { if (err.status === 401) return handle(err); $("#planNote").textContent = err.message; }
+  finally { btn.disabled = false; btn.textContent = "Read image and write prompt"; }
+};
+$("#rPrompt").addEventListener("input", () => { if (!$("#rPrompt").value.trim()) promptByAI = false; });
 $("#backBtn").onclick = () => { stopPolling(); listProjects(); };
 
 /* ---------- services: pick one, give it a file, then only its screen is shown ---------- */
@@ -270,19 +294,11 @@ function useFiles(ids) {
     goTo(service, "work"); loadModels(); return;
   }
   if (service === "imageanim") { iaSel = files.map(f => f.id).slice(0, 3); goTo(service, "work"); drawIA(); return; }
-  // renders: a PDF is the floor plan; the first picture keeps its shape (or is the plan); the rest give the look
-  fillPickers();
-  const pdf = files.find(f => f.detected_type === "pdf"), pics = files.filter(f => f.detected_type !== "pdf");
-  $("#rLooks").querySelectorAll("input").forEach(i => { i.checked = false; });
-  if (service === "plan") { $("#rPlan").value = (pdf || pics[0])?.id || ""; $("#rBase").value = ""; }
-  else {
-    $("#rPlan").value = pdf?.id || "";
-    $("#rBase").value = pics[0]?.id || "";
-    pics.slice(1, 4).forEach(f => { const i = $(`#rLooks input[value="${f.id}"]`); if (i) i.checked = true; });
-  }
-  $("#readPlanBtn").disabled = !$("#rPlan").value; $("#planNote").textContent = service === "plan" && $("#rPlan").value ? "Press “Read my plan” so the AI writes the rooms into the description, then check it." : "";
+  // renders: the first chosen file is the picture to render; the others are references
+  rPick = files[0]?.id || null; rRefSel = files.slice(1, 4).filter(f => f.detected_type !== "pdf").map(f => f.id); promptByAI = false;
+  drawRenderBox();
   goTo(service, "work");
-  $("#rPrompt").focus({ preventScroll: true });
+  $("#rDesc").focus({ preventScroll: true });
 }
 
 /** A delete button that asks once ("Delete?" then "Yes, delete") before acting. */
@@ -517,19 +533,18 @@ function drawReport(m) {
 }
 $("#modelBadge").onclick = () => { const d = $("#modelDetails"); d.hidden = !d.hidden; $("#modelBadge").setAttribute("aria-expanded", String(!d.hidden)); };
 
-/* "Render this view": a picture of the 3D model becomes the shape the render keeps */
+/* "Capture view": the current 3D view is saved and becomes the picture to render */
 $("#useView").onclick = async () => {
   if (!viewer) return;
-  const btn = $("#useView"); btn.disabled = true;
+  const btn = $("#useView"); btn.disabled = true; btn.textContent = "Capturing…";
   try {
     const stamp = new Date().toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(/[/:]/g, "-");
     const saved = await snapshotFile(`3D view ${stamp}.png`);
-    current = await api.getProject(current.id); renderProject();
-    $("#rBase").value = saved.id;
-    toast("View saved. Describe the materials and press Create concept.");
-    $("#studio").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    current = await api.getProject(current.id); rPick = saved.id; promptByAI = false; renderProject();
+    toast("View captured. Press “Read image and write prompt”.");
+    $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; btn.textContent = "Capture view"; }
 };
 
 /* ---------- concept renders (Phase 2) ---------- */
@@ -588,7 +603,7 @@ function drawGallery(images) {
   $("#gallery").replaceChildren(...images.map(i => {
     const o = i.options || {};
     const [w, h] = [i.width || 3, i.height || 2];
-    const tags = [o.shot_name ? `Shot: ${o.shot_name}` : null, o.view, LIGHT_NAME[o.time_of_day], i.tier === "premium" && o.quality === "high" ? "High detail" : null].filter(Boolean);
+    const tags = [o.shot_name ? `Shot: ${o.shot_name}` : null, o.prompt_ready ? "AI prompt" : null, i.tier === "premium" && o.quality === "high" ? "High detail" : null].filter(Boolean);
     const input = el("input", { type: "text", maxlength: "1000", placeholder: "What should change? e.g. make the roof dark grey", "aria-label": "Describe a change" });
     const go = el("button", { class: "btn primary", type: "submit" }, "Revise");
     const parent = i.parent_image_id ? byId[i.parent_image_id] : null;
@@ -666,29 +681,22 @@ function tierChanged() {
 document.querySelectorAll("#tierPick input").forEach(i => i.addEventListener("change", tierChanged));
 
 function briefFromForm() {
-  const body = { prompt: $("#rPrompt").value.trim(), view: $("#rView").value, time_of_day: $("#rLight").value, aspect: $("#rAspect").value,
-    quality: $("#rQuality").value, materials: $("#rMaterials").value.trim(), landscaping: $("#rLand").value.trim(), tier: chosenTier() };
-  const refs = [];
-  if ($("#rPlan").value) refs.push({ file_id: $("#rPlan").value, role: "plan" });
-  const base = $("#rBase").value;
-  if (base) { const f = current.source_files.find(x => x.id === base); refs.push({ file_id: base, role: /^3D view/i.test(f?.original_name || "") ? "model" : "base" }); }
-  $("#rLooks").querySelectorAll("input:checked").forEach(i => { if (i.value !== base && i.value !== $("#rPlan").value) refs.push({ file_id: i.value, role: "style" }); });
-  body.references = refs;
-  body.view = $("#rView").value; body.style = $("#rStyle").value; body.ground_floor = $("#rGround").value;
-  const floors = parseInt($("#rStoreys").value, 10);
-  if (floors >= 1 && floors <= 60) body.storeys = floors;
-  return body;
+  const f = (current?.source_files || []).find(x => x.id === rPick), d = f?.details || {};
+  const ratio = d.width && d.height ? d.width / d.height : 1.5;
+  const prompt = $("#rPrompt").value.trim() || $("#rDesc").value.trim();
+  return { prompt, prompt_ready: promptByAI && !!$("#rPrompt").value.trim(), references: renderRefs(), tier: chosenTier(), quality: $("#rQuality").value,
+    aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
-function tickedLooks() { return [...$("#rLooks").querySelectorAll("input:checked")].map(i => i.value); }
+function tickedLooks() { return rRefSel.slice(); }
 
 $("#renderForm").onsubmit = e => {
   e.preventDefault();
   const body = briefFromForm();
-  if (body.prompt.length < 3) { message($("#renderMsg"), "Describe what you want to see."); return; }
+  if (body.prompt.length < 3) { message($("#renderMsg"), "Press “Read image and write prompt” first, or write the prompt yourself."); return; }
   const key = newKey();
   busy(e.target, async () => {
     message($("#renderMsg"), "");
-    try { await api.startRender(current.id, body, key); toast("Concept started. It takes about a minute."); loadOutputs(); }
+    try { await api.startRender(current.id, body, key); toast("Render started. It takes about a minute."); loadOutputs(); }
     catch (err) { if (err.status === 401) return handle(err); message($("#renderMsg"), err.message); }
   });
 };
@@ -844,9 +852,9 @@ $("#renderAllBtn").onclick = async () => {
   if (!ids.length) { toast("Tick at least one shot to render."); return; }
   if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
   const brief = briefFromForm();
-  delete brief.references;
+  delete brief.references; brief.prompt_ready = false;    // each shot gets its own prompt around the same look
   if (brief.prompt.length < 3) {
-    message($("#renderMsg"), "Describe the look you want here first (materials, finishes, furniture style), then press Render all shots again.");
+    message($("#renderMsg"), "Describe the look you want first (materials, finishes, furniture style) in “Describe the building”, then press Render all shots again.");
     $("#rPrompt").focus(); $("#studio").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" }); return;
   }
   const btn = $("#renderAllBtn"); btn.disabled = true;

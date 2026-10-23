@@ -128,7 +128,7 @@ def test_pdf_and_ifc_cannot_be_used_as_a_reference(rclient, alice, project, fake
 
 
 @pytest.mark.parametrize("body", [
-    {"prompt": "  "}, {"prompt": "x" * 2501}, {"prompt": "a house", "view": "underwater"},
+    {"prompt": "  "}, {"prompt": "x" * 6001}, {"prompt": "a house", "view": "underwater"},
     {"prompt": "a house", "quality": "ultra"}, {"prompt": "a house", "aspect": "panorama"}, {"prompt": "a house", "materials": "m" * 401},
 ])
 def test_render_options_are_validated(rclient, alice, project, fake_images, body):

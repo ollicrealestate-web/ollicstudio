@@ -40,8 +40,10 @@ def stack(tmp_path_factory):
     settings = Settings(supabase_url=f"http://127.0.0.1:{auth_port}", supabase_anon_key="anon", supabase_jwt_secret=SECRET, web_dir=str(web),
                         cloudflare_account_id="acct", cloudflare_api_token="cf")
     repo, storage, images = FakeRepo(), InlineLinkStorage(), FakeImages()
+    from ..test_prompting import FakeRenderPrompter
+    writer = FakeRenderPrompter()
     api = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=ThreadRunner(),
-                     image_clients={"standard": images, "premium": None}, vision=FakeReader(), prompt_writer=None)
+                     image_clients={"standard": images, "premium": None}, vision=FakeReader(), prompt_writer=writer)
     auth = fake_supabase_auth()
     from fastapi.middleware.cors import CORSMiddleware
     auth.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -51,7 +53,7 @@ def stack(tmp_path_factory):
     for s in servers:
         while not s.started:
             time.sleep(0.05)
-    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "storage": storage, "images": images, "dir": web}
+    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "storage": storage, "images": images, "dir": web, "writer": writer}
     for s in servers:
         s.should_exit = True
 
@@ -93,33 +95,34 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#viewOutside"); page.wait_for_timeout(500)
         page.locator("#viewer").screenshot(path=str(shots / "e2e-3d-outside.png"))
 
-        # 2. "Render this view": the view is saved and chosen as the shape to keep
+        # 2. "Capture view": the view goes into the render box; the AI reads it (and the model) and writes the prompt
         page.click("#useView")
-        page.wait_for_function("document.querySelector('#rBase').selectedOptions[0]?.textContent.startsWith('3D view')", timeout=30000)
-        page.fill("#rPrompt", "White render, bronze glazing, timber soffits"); page.click("#renderBtn")
+        page.wait_for_selector("#rPics .rpic.on", timeout=30000)
+        assert "Captured view" in page.inner_text("#rPics .rpic.on") and "3D view" in page.inner_text("#rPicHint")
+        page.fill("#rDesc", "luxury bungalow, white render, bronze glazing, timber soffits")
+        page.click("#writePromptBtn")
+        page.wait_for_function("document.querySelector('#rPrompt').value.includes('eight-storey')", timeout=20000)
+        assert "AI:" in page.inner_text("#planNote")
+        system, content = stack["writer"].calls[-1]
+        texts = " ".join(b["text"] for b in content if b["type"] == "text")
+        assert "VIEW TO RENDER: a plain, untextured view captured from the architect's BIM model" in texts and "Storeys in the model" in texts and "luxury bungalow" in texts
+        page.click("#renderBtn")
         page.wait_for_selector(".shot img", timeout=30000)
         call = stack["images"].calls[-1]
-        assert "plain 3D view of the architect's model" in call["prompt"] and len(call["images"]) == 1
+        assert call["prompt"].startswith("Photorealistic render of the eight-storey block") and len(call["images"]) == 1
 
-        # 3. Floor plan: read by AI, look reference added, rendered from the plan
-        page.set_input_files("#fileInput", str(plan)); page.wait_for_function("document.querySelectorAll('#rPlan option').length === 3")
-        page.set_input_files("#fileInput", str(look)); page.wait_for_selector("#rLooks input[type=checkbox] >> nth=2")
-        page.select_option("#rPlan", label="A103.png"); page.select_option("#rBase", value="")
-        page.fill("#rPrompt", "")
-        page.click("#readPlanBtn")
-        page.wait_for_function("document.querySelector('#rPrompt').value.includes('6-storey residential apartment block')", timeout=20000)
-        assert page.input_value("#rStoreys") == "6" and "Read by AI" in page.inner_text("#planNote")
-        page.check("#rLooks label:has-text('glass-facade.jpg') input")
-        page.select_option("#rStyle", "luxury contemporary"); page.select_option("#rGround", "car park")
-        page.fill("#rPrompt", page.input_value("#rPrompt") + " Cantilevered penthouse.")
+        # 3. a reference image: uploaded in the render box, ticked, and sent second
+        page.set_input_files("#rRefUpload", str(look))
+        page.wait_for_selector("#rRefs .rpic.on")
+        page.click("#writePromptBtn")
+        page.wait_for_function("document.querySelector('#planNote').textContent.includes('AI:')", timeout=20000)
+        system, content = stack["writer"].calls[-1]
+        assert sum(1 for b in content if b["type"] == "image") == 2 and any("Image 2 is a REFERENCE" in b.get("text", "") for b in content)
         page.screenshot(path=str(shots / "e2e-studio.png"), full_page=True)
         page.click("#renderBtn")
         page.wait_for_function("document.querySelectorAll('.shot').length === 2", timeout=30000)
         call = stack["images"].calls[-1]
         assert len(call["images"]) == 2
-        p_ = call["prompt"]
-        assert "Image 1 is the architect's floor plan" in p_ and "Image 2 is a reference for the look" in p_
-        assert "6 floors above a ground-floor car park" in p_ and "Cantilevered penthouse" in p_
         card = page.inner_text(".shot >> nth=0").upper()
         assert "STANDARD RENDER" in card and "AI CONCEPT" in card
 

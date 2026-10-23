@@ -73,7 +73,7 @@ def test_premium_renders_use_the_written_prompt_and_record_its_cost(render_setti
     assert len(ev) == 1 and ev[0]["provider"] == "anthropic" and ev[0]["cost_usd"] == "0.034000"
     img = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"][0]
     assert img["options"]["premium_prompting"] is True and img["options"]["prompt_notes"].startswith("Read two")
-    assert {e["service"] for e in c.get("/api/usage", headers=alice["headers"]).json()["events"]} == {"Premium render", "Premium prompting"}
+    assert {e["service"] for e in c.get("/api/usage", headers=alice["headers"]).json()["events"]} == {"Premium render", "AI prompt writing"}
 
     # a plain-words revision is turned into a precise edit too
     c.post(f"/api/renders/{img['id']}/edit", json={"instruction": "make the balconies bronze"}, headers=alice["headers"])
@@ -123,3 +123,51 @@ def test_claude_failures_are_clean():
             ClaudePromptWriter("k", client=http).write_edit(instruction="x", current=jpeg_bytes(10, 10))
     assert cost_usd("claude-fable-5-1", {"input_tokens": 1_000_000, "output_tokens": 0}) == Decimal("10.000000")
     assert cost_usd("some-other-model", {"input_tokens": 10}) is None
+
+
+# ---------------------------------------------------------------- the AI writes the rendering prompt from the pictures
+class FakeRenderPrompter:
+    model = "claude-opus-5-5"
+
+    def __init__(self):
+        self.calls = []
+
+    def _call(self, system, content):
+        self.calls.append((system, content))
+        return {"prompt": "Photorealistic render of the eight-storey block in Image 1, keep every opening and the camera exactly; bronze glass, white stone, "
+                          "landscaped forecourt as in Image 2, warm evening light.", "notes": "An eight-storey block with a glazed corner.", "model": self.model,
+                "usage": {"input_tokens": 3000, "output_tokens": 300}, "cost_usd": Decimal("0.018")}
+
+
+def test_the_ai_writes_the_prompt_from_the_captured_view_and_references(render_settings, repo, storage, alice, bob):
+    from app.main import create_app
+    from app.jobs import InlineRunner
+    from app.auth import TokenVerifier
+    from fastapi.testclient import TestClient
+    from .test_studio import new_project, upload
+    writer, images = FakeRenderPrompter(), FakeImages()
+    c = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
+                              vision=None, prompt_writer=writer))
+    pid = new_project(c, alice)
+    view = upload(c, alice, pid, "3D view Oct 23, 12-52 PM.png", samples.png(400, 300))
+    ref = upload(c, alice, pid, "forecourt.jpg", jpeg_bytes(300, 200, (90, 120, 80)))
+    body = {"references": [{"file_id": ref["id"], "role": "style"}, {"file_id": view["id"], "role": "model"}], "description": "luxury office complex, landscaped"}
+    r = c.post(f"/api/projects/{pid}/render-prompt", json=body, headers=alice["headers"])
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert "eight-storey" in out["prompt"] and out["order"] == [view["id"], ref["id"]]          # the view first, as the render sends them
+    system, content = writer.calls[-1]
+    texts = [b["text"] for b in content if b["type"] == "text"]
+    assert texts[0].startswith("Image 1 is the VIEW TO RENDER") and texts[1].startswith("Image 2 is a REFERENCE") and "luxury office complex" in texts[-1]
+    assert sum(1 for b in content if b["type"] == "image") == 2 and "keep the view to render exactly" in system
+    assert repo.usage[-1]["operation"] == "prompt_write" and repo.usage[-1]["provider"] == "anthropic"
+    # the render uses the prompt as written, with the same pictures in the same order
+    rb = {"prompt": out["prompt"], "prompt_ready": True, "references": body["references"], "tier": "standard"}
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=rb, headers={**alice["headers"], "Idempotency-Key": "ready-0001"}).status_code == 202
+    call = images.calls[-1]
+    assert call["prompt"].startswith(out["prompt"]) and "Architect's brief" not in call["prompt"] and len(call["images"]) == 2
+    # checked: another customer's pictures, nothing to read
+    assert c.post(f"/api/projects/{pid}/render-prompt", json=body, headers=bob["headers"]).status_code == 404
+    assert c.post(f"/api/projects/{pid}/render-prompt", json={}, headers=alice["headers"]).status_code == 422
+    proj = c.get(f"/api/projects/{pid}", headers=alice["headers"]).json()
+    assert all(f["preview_url"] for f in proj["source_files"])     # thumbnails for the render box

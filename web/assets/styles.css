@@ -549,3 +549,17 @@ input[type=number]:focus { border-color: var(--red); outline: none; box-shadow: 
   padding: 10px 12px; border-radius: 10px; background: rgba(7, 7, 7, 0.86); border-left: 3px solid var(--red); color: #fff; font-size: 0.88rem; z-index: 3; }
 .el-tip b { grid-column: 1; } .el-tip span { grid-column: 1; color: #c9c9d1; overflow-wrap: anywhere; }
 .el-close { grid-column: 2; grid-row: 1 / span 2; align-self: center; background: none; border: 0; color: #fff; font-size: 1.3rem; cursor: pointer; padding: 0 4px; }
+
+/* the render box */
+.rbox { display: grid; gap: 10px; padding: 14px; border: 1px dashed var(--line-strong); border-radius: 12px; }
+.rbox-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.rbox-head .btn { margin-left: auto; }
+.rpics { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.rpic { flex: none; width: 132px; display: grid; gap: 6px; padding: 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer; }
+.rpic img, .rpic-doc { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: #1b1b1f; display: grid; place-items: center; font: 700 0.8rem var(--f-mono); color: var(--muted); }
+.rpic-name { font-size: 0.76rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rpic:hover { border-color: #4a4a52; }
+.rpic.on { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); background: var(--red-tint); }
+.rpic.on .rpic-name { color: var(--ink); }
+.rwrite { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }

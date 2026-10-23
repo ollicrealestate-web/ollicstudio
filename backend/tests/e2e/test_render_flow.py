@@ -87,9 +87,9 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.set_input_files("#fileInput", str(sketch))
         page.wait_for_selector("#renderForm:not([hidden])")
         assert page.is_visible("#galleryEmpty") and not page.is_visible("#studioOff")
-        assert page.evaluate("document.querySelector('#rBase').selectedOptions[0].textContent") == "front-elevation.png"
-        page.fill("#rPrompt", "Two-storey villa, white render, bronze window frames")
-        page.select_option("#rLight", "golden hour"); page.fill("#rMaterials", "white render, bronze frames")
+        assert "front-elevation.png" in page.inner_text("#rPicHint") and page.locator("#rPics .rpic.on").count() == 1
+        # no AI prompt writer on this site: the architect writes the prompt
+        page.fill("#rPrompt", "Two-storey villa, white render, bronze window frames, golden hour")
         page.click("#renderBtn")
 
         page.wait_for_selector(".job .spinner")            # a real in-progress state from the job record
@@ -97,9 +97,9 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.wait_for_selector(".shot img", timeout=20000)
         page.wait_for_function("document.querySelectorAll('#jobList .job').length === 0")
         card = page.inner_text(".shot")
-        assert "AI CONCEPT — NOT TO SCALE" in card.upper() and "Two-storey villa" in card and "GOLDEN HOUR" in card.upper()
+        assert "AI CONCEPT — NOT TO SCALE" in card.upper() and "Two-storey villa" in card
         (call,) = stack["images"].calls
-        assert call["kind"] == "edit" and "golden-hour" in call["prompt"] and "Image 1 is the design to render" in call["prompt"]   # the sketch was sent as the base
+        assert call["kind"] == "edit" and "golden hour" in call["prompt"] and "Image 1 is the design to render" in call["prompt"]   # the sketch was sent as the base
         page.screenshot(path=str(shots / "e2e-render.png"), full_page=True)
 
         # revise it: a second image appears and the original stays

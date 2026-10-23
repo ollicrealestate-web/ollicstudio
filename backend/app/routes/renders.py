@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 import uuid
@@ -21,6 +22,7 @@ from ..vision import VisionUnavailable, load_image, summary_text
 from .projects import NOT_FOUND, _owned_project, _repo, _storage
 
 router = APIRouter()
+log = logging.getLogger("ollic.routes.renders")
 MAX_ACTIVE_PER_PROJECT = 3
 MIN_TOKEN_LIFE = 300  # seconds a token must still be valid for, since the job acts with it
 KEY_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,200}$")
@@ -43,7 +45,8 @@ class AnimHero(BaseModel):
 
 
 class ConceptRenderIn(BaseModel):
-    prompt: str = Field(min_length=3, max_length=2500)
+    prompt: str = Field(min_length=3, max_length=6000)
+    prompt_ready: bool = False     # true: a finished prompt (written by the AI from the pictures), used as written
     reference_file_id: uuid.UUID | None = None          # older clients: one base image
     references: list[Reference] = Field(default_factory=list, max_length=4)
     view: Literal["exterior", "aerial", "cutaway", "interior"] = "exterior"
@@ -330,7 +333,7 @@ def _service(e: dict) -> str:
     if e.get("operation") == "vision_read":
         return "Plan reading"
     if e.get("operation") == "prompt_write":
-        return "Premium prompting"
+        return "AI prompt writing"
     if e.get("operation") == "animation_direct":
         return "Animation director"
     if e.get("operation") == "video_generate":
@@ -340,6 +343,77 @@ def _service(e: dict) -> str:
     if e.get("provider") == "google":
         return "Ollic Ultra" if "pro" in str(e.get("model")) else "Ollic Swift"
     return "Premium render" if e.get("provider") == "openai" else "Standard render"
+
+
+# ---------------------------------------------------------------- the AI writes the rendering prompt
+DAILY_PROMPTS = 60
+
+
+class RenderPromptIn(BaseModel):
+    references: list[Reference] = Field(default_factory=list, max_length=4)
+    description: str = Field(default="", max_length=1500)
+    model_id: uuid.UUID | None = None
+
+    @field_validator("references")
+    @classmethod
+    def one_of_each(cls, refs):
+        roles = [r.role for r in refs]
+        if sum(roles.count(r) for r in ("base", "model")) > 1 or roles.count("plan") > 1 or roles.count("style") > 3:
+            raise ValueError("Use one picture to render, one plan and up to three references.")
+        return refs
+
+
+@router.post("/projects/{project_id}/render-prompt")
+def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """Studies the pictures (and the model's facts) and writes the rendering prompt; nothing is rendered or charged to the customer."""
+    from ..render_prompt import PromptUnavailable, facts_text, write_with_claude, write_with_cloudflare
+    from ..renders import ROLE_ORDER, _as_image
+    _owned_project(request, user, project_id)
+    if not body.references and len(body.description.strip()) < 3:
+        raise HTTPException(422, {"code": "nothing_to_read", "reason": "Capture a view or choose a picture first, or describe the building."})
+    repo, storage = _repo(request), _storage(request)
+    profile = repo.get_profile(user) or {}
+    if profile.get("role") not in FREE_UNLIMITED_ROLES:
+        used = sum(1 for e in repo.list_usage_events(user, limit=300) if e.get("operation") == "prompt_write" and str(e.get("created_at") or "") >= _utc_midnight())
+        if used >= DAILY_PROMPTS:
+            raise HTTPException(429, {"code": "daily_limit", "reason": f"You have written today's {DAILY_PROMPTS} prompts. Edit the last one, or try again after 01:00 Lagos time."})
+    refs = sorted(body.references, key=lambda r: ROLE_ORDER[r.role])
+    images, roles = [], []
+    for r in refs:
+        src = repo.get_source_file(user, str(r.file_id))
+        if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id) or src.get("detected_type") not in ("png", "jpeg", "pdf"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Picture not found in this project.")
+        images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"])); roles.append(r.role)
+    model = None
+    if body.model_id:
+        model = repo.get_model(user, str(body.model_id))
+        if not model or model.get("project_id") != str(project_id):
+            model = None
+    facts = facts_text(model)
+    claude, vision = getattr(request.app.state, "prompt_writer", None), getattr(request.app.state, "vision", None)
+    if claude is None and (vision is None or not images):
+        raise HTTPException(503, {"code": "not_configured", "reason": "AI prompt writing is not switched on for this site yet. Write the prompt yourself."})
+    try:
+        out = write_with_claude(claude, images, roles, body.description, facts) if claude is not None else write_with_cloudflare(vision, images, roles, body.description, facts)
+    except PromptUnavailable as exc:
+        log.warning("OWNER: render prompt failed: %s", exc)
+        if claude is not None and vision is not None and images:
+            try:
+                out = write_with_cloudflare(vision, images, roles, body.description, facts)
+            except PromptUnavailable:
+                raise HTTPException(502, {"code": "prompt_failed", "reason": "The AI could not write the prompt this time. Try again, or write it yourself."}) from exc
+        else:
+            raise HTTPException(502, {"code": "prompt_failed", "reason": "The AI could not write the prompt this time. Try again, or write it yourself."}) from exc
+    try:
+        u = out.get("usage") or {}
+        repo.create_usage_event(user, {"project_id": str(project_id), "provider": out["provider"], "model": out.get("model") or "prompt", "operation": "prompt_write",
+                                       "input_text_tokens": int(u.get("input_tokens") or u.get("prompt_tokens") or 0), "output_tokens": int(u.get("output_tokens") or u.get("completion_tokens") or 0),
+                                       "cost_usd": str(out["cost_usd"]) if out.get("cost_usd") is not None else None,
+                                       "price_source": "platform.claude.com price list" if out["provider"] == "anthropic" else "inside Cloudflare's free daily allowance; no per-token price on file",
+                                       "raw_usage": u})
+    except BackendUnavailable:
+        pass
+    return {"prompt": out["prompt"], "notes": out.get("notes") or "", "order": [str(r.file_id) for r in refs]}
 
 
 # ---------------------------------------------------------------- "Read my plan"
