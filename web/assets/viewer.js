@@ -384,9 +384,16 @@ export function createViewer(host, { onSelect } = {}) {
   // scored by how far one can see around it at eye height; faces its longest view
   const DIRS = Array.from({ length: 12 }, (_, i) => { const a = i / 12 * Math.PI * 2; return { yaw: a, v: new THREE.Vector3(-Math.sin(a), 0, -Math.cos(a)) }; });
   function openSpot(y, near0 = null, inBox = null) {
-    const band = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && o.geometry.boundingBox
-      && (() => { const b = new THREE.Box3().setFromObject(o); return b.max.y > y + 0.2 && b.min.y < y + 2.6; })());
-    const floors = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && (() => { const b = new THREE.Box3().setFromObject(o); return b.max.y > y - 0.6 && b.min.y < y + 0.9; })());
+    // only the parts at this floor's height and (in a room, or near a spot) within reach of the rays
+    const reach = inBox ? inBox.clone().expandByVector(new THREE.Vector3(15, 0, 15)) : near0 ? new THREE.Box3().setFromCenterAndSize(near0, new THREE.Vector3(40, 1e4, 40)) : null;
+    const band = [], floors = [], wb = new THREE.Box3();
+    for (const o of elements) {
+      if (!o.visible || o.userData.ifcType === "IfcSpace") continue;
+      wb.setFromObject(o);
+      if (reach && (wb.max.x < reach.min.x || wb.min.x > reach.max.x || wb.max.z < reach.min.z || wb.min.z > reach.max.z)) continue;
+      if (wb.max.y > y + 0.2 && wb.min.y < y + 2.6) band.push(o);
+      if (wb.max.y > y - 0.6 && wb.min.y < y + 0.9) floors.push(o);
+    }
     const b = inBox || frameBox, N = inBox ? 7 : 11, best = { score: -1 };
     const r = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0);
     for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
