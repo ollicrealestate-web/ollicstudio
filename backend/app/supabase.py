@@ -66,6 +66,7 @@ class Repository(Protocol):
 
 class FileStorage(Protocol):
     def upload(self, user: CurrentUser, path: str, data: bytes, content_type: str, bucket: str | None = None) -> None: ...
+    def upload_file(self, user: CurrentUser, path: str, file_path: str, content_type: str, bucket: str | None = None) -> None: ...
     def remove(self, user: CurrentUser, paths: list[str], bucket: str | None = None) -> None: ...
     def download(self, user: CurrentUser, path: str, bucket: str | None = None) -> bytes: ...
     def signed_urls(self, user: CurrentUser, paths: list[str], bucket: str | None = None, expires_in: int = 3600) -> dict[str, str]: ...
@@ -251,6 +252,22 @@ class SupabaseStorage:
         headers = {**_user_headers(self._s, user), "Content-Type": content_type, "x-upsert": "false"}
         try:
             res = self._http.post(f"/object/{self._bucket(bucket)}/{path}", content=data, headers=headers)
+        except httpx.HTTPError as exc:
+            raise BackendUnavailable("File storage could not be reached.") from exc
+        if res.status_code >= 400:
+            raise BackendUnavailable(f"File storage returned {res.status_code} for the upload.")
+
+    def upload_file(self, user, path, file_path, content_type, bucket=None):
+        """Streams a file from disk in 1 MB pieces, so a large 3D model is never held in memory."""
+        import os
+
+        def pieces():
+            with open(file_path, "rb") as fh:
+                while chunk := fh.read(1024 * 1024):
+                    yield chunk
+        headers = {**_user_headers(self._s, user), "Content-Type": content_type, "x-upsert": "false", "Content-Length": str(os.path.getsize(file_path))}
+        try:
+            res = self._http.post(f"/object/{self._bucket(bucket)}/{path}", content=pieces(), headers=headers, timeout=httpx.Timeout(600, connect=20))
         except httpx.HTTPError as exc:
             raise BackendUnavailable("File storage could not be reached.") from exc
         if res.status_code >= 400:

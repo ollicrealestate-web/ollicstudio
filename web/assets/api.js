@@ -97,6 +97,29 @@ export async function readSchedule(projectId, file, storeys) {
   return data;
 }
 
+/** Saves a model this browser read from an IFC: the 3D file plus its report and parts. */
+export async function saveBrowserModel(projectId, glb, meta, onProgress) {
+  const token = await accessToken();
+  if (!token) throw new ApiError(401, "Sign in to continue.");
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${base()}/projects/${projectId}/models/from-browser`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onerror = () => reject(new ApiError(0, "The 3D model could not be saved: the connection was interrupted. Try again."));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new ApiError(xhr.status, data.detail || "The 3D model could not be saved."));
+    };
+    const form = new FormData();
+    form.append("file", new Blob([glb], { type: "model/gltf-binary" }), "model.glb");
+    form.append("meta", JSON.stringify(meta));
+    xhr.send(form);
+  });
+}
+
 /** Sends a finished animation video with its settings. Resolves with the export job. */
 export async function uploadAnimation(projectId, blob, meta, onProgress) {
   const token = await accessToken();

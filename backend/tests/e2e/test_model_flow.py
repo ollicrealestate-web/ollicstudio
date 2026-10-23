@@ -80,6 +80,9 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
         assert "26 elements" in page.inner_text("#reportCard")
+        (model,) = stack["repo"].models.values()
+        assert model["report"]["read_on"] == "browser" and model["job_id"] is None      # read on this computer, not by the server
+        assert not any(j["type"] == "ifc_import" for j in stack["repo"].jobs.values())
         # only this service's views: outside and inside, no walk or construction
         assert page.is_visible("#viewInside") and not page.is_visible("#viewWalk") and not page.is_visible("#viewBuild") and page.is_visible("#studio")
         page.click("#viewInside"); page.wait_for_timeout(500)

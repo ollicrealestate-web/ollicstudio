@@ -269,6 +269,9 @@ class FakeStorage:
         assert path not in b, "objects are never overwritten"
         b[path] = (bytes(data), content_type)
 
+    def upload_file(self, user, path, file_path, content_type, bucket=None):
+        self.upload(user, path, open(file_path, "rb").read(), content_type, bucket)
+
     def remove(self, user, paths, bucket=None):
         for p in paths:
             assert p.split("/")[0] == user.id

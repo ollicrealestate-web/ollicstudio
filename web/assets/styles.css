@@ -526,3 +526,7 @@ input[type=number]:focus { border-color: var(--red); outline: none; box-shadow: 
   .svc-start-grid { grid-template-columns: minmax(0, 1fr); }
   .svc-tab.lib { margin-left: 0; }
 }
+.model-local:empty { display: none; }
+.model-local { display: grid; gap: 8px; margin-bottom: 8px; }
+.model-local .job-body { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.model-local .job { display: flex; gap: 12px; align-items: center; }

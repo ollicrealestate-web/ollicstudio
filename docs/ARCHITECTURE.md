@@ -103,3 +103,15 @@ shows, and which 3D view modes it uses. `goTo(service, step)` switches between t
 or choose from the Library: `drawStart`, `useFiles`) and step 2 (the service's sections only); the
 address carries `service`, `step` and the chosen IFC (`model`). The AI version picker (`#tierPick`) is
 moved into the screen of the active service, and the renders gallery into the Library when it is open.
+
+## IFC reading in the browser
+
+`web/assets/ifcread.js` runs in a module Web Worker with web-ifc (`web/vendor/web-ifc`, MPL-2.0; the
+browser build of 0.0.78 had a mismatched engine, so 0.0.77 is used). It mirrors
+`backend/app/bim/importer.py`: the same element selection (`web/assets/ifctypes.js`, generated from the
+IFC schemas), storeys (containment, then the parent of aggregated parts), families, checks and GLB layout
+(one node per element named by GlobalId, extras for the viewer, y-up, centred, unwelded triangles
+without normals). `app.js` `readModel()` reads an uploaded file straight from the architect's disk, or
+downloads one chosen from the Library, then sends the GLB and metadata to
+`/api/projects/{id}/models/from-browser`, which validates them and streams the GLB into storage. If
+the browser cannot (no WebAssembly or workers), the server's own reading is the fallback.

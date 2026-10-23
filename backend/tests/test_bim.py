@@ -167,3 +167,34 @@ def test_the_same_ifc_is_not_read_twice_and_big_ones_are_refused(bim, alice, sam
     repo.files[f["id"]]["size_bytes"] = 49_000_000
     r = c.post(f"/api/projects/{pid}/import-ifc", json={"source_file_id": f["id"]}, headers=alice["headers"])
     assert r.status_code == 413 and "49 MB" in r.json()["detail"]["reason"] and "up to 1 MB" in r.json()["detail"]["reason"]
+
+
+def _browser_meta(imported, file_id, **over):
+    rep = {k: imported.report[k] for k in ("status", "schema", "units", "checks", "counts", "families", "storeys", "size_m", "elements", "with_geometry")}
+    rep["checks"] = [{k: c[k] for k in ("key", "status", "message")} for c in rep["checks"]]
+    return json.dumps({"source_file_id": file_id, "report": rep, "components": imported.components, **over})
+
+
+def test_a_model_read_in_the_browser_is_saved(bim, alice, bob, sample_ifc, imported, repo, storage):
+    """The architect's browser reads the IFC (web-ifc) and sends the 3D file with its report and parts."""
+    c = bim[0]
+    pid = c.post("/api/projects", json={"name": "Revit house"}, headers=alice["headers"]).json()["id"]
+    f = upload(c, alice, pid, "house.ifc", sample_ifc)
+    files = {"file": ("model.glb", imported.glb, "model/gltf-binary")}
+    r = c.post(f"/api/projects/{pid}/models/from-browser", files=files, data={"meta": _browser_meta(imported, f["id"])}, headers=alice["headers"])
+    assert r.status_code == 201, r.text
+    m = r.json()
+    assert m["report"]["read_on"] == "browser" and m["stats"]["glb_bytes"] == len(imported.glb) and m["glb_url"]
+    (listed,) = c.get(f"/api/projects/{pid}/models", headers=alice["headers"]).json()
+    assert listed["id"] == m["id"] and listed["source_file_id"] == f["id"]
+    assert len(c.get(f"/api/models/{m['id']}/components", headers=alice["headers"]).json()) == 26
+    assert storage.buckets["models"][repo.models[m["id"]]["glb_path"]][0] == imported.glb
+    # checked: not a 3D file, someone else's project or file, not an IFC, bad details
+    bad = c.post(f"/api/projects/{pid}/models/from-browser", files={"file": ("x.glb", b"not a model", "model/gltf-binary")}, data={"meta": _browser_meta(imported, f["id"])}, headers=alice["headers"])
+    assert bad.status_code == 422 and bad.json()["detail"]["code"] == "bad_model"
+    assert c.post(f"/api/projects/{pid}/models/from-browser", files=files, data={"meta": _browser_meta(imported, f["id"])}, headers=bob["headers"]).status_code == 404
+    png = upload(c, alice, pid, "plan.png", samples.png())
+    assert c.post(f"/api/projects/{pid}/models/from-browser", files=files, data={"meta": _browser_meta(imported, png["id"])}, headers=alice["headers"]).json()["detail"]["code"] == "not_ifc"
+    meta = json.loads(_browser_meta(imported, f["id"])); meta["components"][0]["family"] = "anything"
+    assert c.post(f"/api/projects/{pid}/models/from-browser", files=files, data={"meta": json.dumps(meta)}, headers=alice["headers"]).status_code == 422
+    assert len(repo.models) == 1

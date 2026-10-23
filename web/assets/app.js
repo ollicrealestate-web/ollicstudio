@@ -1,4 +1,4 @@
-import { api, uploadFile, uploadAnimation, readSchedule, ApiError, newKey } from "./api.js";
+import { api, uploadFile, uploadAnimation, readSchedule, saveBrowserModel, ApiError, newKey } from "./api.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -266,7 +266,7 @@ function useFiles(ids) {
     viewerModelId = viewerModelId && modelsNow.find(m => m.id === viewerModelId)?.source_file_id === chosenIfc ? viewerModelId : null;
     if (!viewerModelId && viewer) resetModel();
     const busy = lastJobs.some(j => j.type === "ifc_import" && ["queued", "running"].includes(j.status) && (j.input || {}).source_file_id === chosenIfc);
-    if (f && !modelsNow.some(m => m.source_file_id === f.id) && !busy) startImport(f);
+    if (f && !modelsNow.some(m => m.source_file_id === f.id) && !busy) readModel(f);
     goTo(service, "work"); loadModels(); return;
   }
   if (service === "imageanim") { iaSel = files.map(f => f.id).slice(0, 3); goTo(service, "work"); drawIA(); return; }
@@ -305,8 +305,64 @@ function fileActions(f) {
     current = await api.getProject(current.id); renderProject(); loadModels(); loadShots(); loadOutputs();
   });
   if (f.detected_type === "ifc" && f.origin !== "generated")
-    return [el("button", { class: "btn", type: "button", onclick: e => startImport(f, e.currentTarget) }, "Import 3D"), del];
+    return [el("button", { class: "btn", type: "button", onclick: () => readModel(f) }, "Import 3D"), del];
   return [del];
+}
+/* IFC models are read on the architect's own computer (web-ifc, in a background worker): fast,
+   and no load on the server. The server reads small files itself if this computer cannot. */
+const reading = new Map();   // file id -> state, while this browser reads it
+function drawReading() {
+  $("#modelLocal").replaceChildren(...[...reading.values()].filter(r => r.project === current?.id).map(r => el("div", { class: `job${r.error ? " failed" : ""}` },
+    r.error ? "" : el("span", { class: "spinner", "aria-hidden": "true" }),
+    el("div", { class: "job-body" }, el("b", {}, `Reading ${r.name} on this computer`), el("span", { class: "hint" }, r.error || r.stage),
+      r.error ? "" : el("div", { class: "progress" }, el("i", { style: `width:${Math.round((r.k || 0) * 100)}%` }))))));
+}
+async function readModel(f, localFile) {
+  if (!current || reading.has(f.id) && !reading.get(f.id).error) return;
+  const pid = current.id, r = { project: pid, name: f.original_name, stage: "Starting…", k: 0.01 };
+  reading.set(f.id, r); drawReading();
+  $("#modelEmpty").textContent = "Your IFC model is being read on this computer. Large models take a minute or two.";
+  const say = (stage, k) => { r.stage = stage; r.k = k; drawReading(); };
+  const fallback = async why => {
+    console.warn("reading the IFC in the browser failed:", why);
+    reading.delete(f.id); drawReading();
+    if (current?.id === pid) startImport(f);
+  };
+  if (typeof WebAssembly === "undefined" || typeof Worker === "undefined") return fallback("no WebAssembly or workers");
+  let bytes;
+  try {
+    say("Opening the file…", 0.02);
+    if (localFile) bytes = await localFile.arrayBuffer();
+    else { const l = await api.fileLink(pid, f.id); const res = await fetch(l.url || l.download_url); if (!res.ok) throw new Error(`download ${res.status}`); bytes = await res.arrayBuffer(); }
+  } catch (err) { if (err.status === 401) return handle(err); return fallback(err); }
+  let out;
+  try {
+    out = await new Promise((resolve, reject) => {
+      const w = new Worker(new URL("./ifcread.js", import.meta.url), { type: "module" });
+      w.onmessage = e => {
+        if (e.data.progress) say(e.data.progress.stage, 0.05 + 0.75 * e.data.progress.k);
+        else { w.terminate(); e.data.done ? resolve(e.data.done) : reject(Object.assign(new Error(e.data.error), { told: e.data.error, detail: e.data.detail })); }
+      };
+      w.onerror = e => { w.terminate(); reject(new Error(e.message || "worker failed")); };
+      w.postMessage({ bytes }, [bytes]);
+    });
+  } catch (err) {
+    if (err.told && !/could not be read on this computer/.test(err.told)) {   // a real problem with the file: say what it is
+      r.error = err.told; drawReading(); $("#modelEmpty").textContent = err.told; return;
+    }
+    return fallback(err.detail || err);
+  }
+  try {
+    say("Saving the 3D model to your project… 0%", 0.82);
+    await saveBrowserModel(pid, out.glb, { source_file_id: f.id, report: out.report, components: out.components },
+      p => say(`Saving the 3D model to your project… ${Math.round(p * 100)}%`, 0.82 + 0.17 * p));
+    reading.delete(f.id); drawReading();
+    toast(`${f.original_name}: ${out.stats.with_geometry.toLocaleString()} elements read. Your 3D model is ready.`);
+    if (current?.id === pid) loadModels();
+  } catch (err) {
+    if (err.status === 401) return handle(err);
+    r.error = err.message; drawReading(); $("#modelEmpty").textContent = err.message;
+  }
 }
 async function startImport(f, btn) {
   if (btn) btn.disabled = true;
@@ -629,7 +685,7 @@ async function uploadAll(files) {
       const uploaded = uploadFile(current.id, file, f => { bar.style.width = `${Math.round(f * 100)}%`; status.textContent = `${Math.round(f * 100)}%`; });
       const saved = await uploaded;
       bar.style.width = "100%"; status.textContent = "Checked and saved";
-      if (saved?.detected_type === "ifc") startImport(saved);
+      if (saved?.detected_type === "ifc") readModel(saved, file);
       if (saved) done.push(saved);
       current = await api.getProject(current.id); renderProject();
       setTimeout(() => row.remove(), 2500);
