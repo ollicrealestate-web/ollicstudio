@@ -393,10 +393,10 @@ async function startImport(f, btn) {
 }
 
 /* ---------- 3D models (Phase 3) ---------- */
-let viewer = null, viewerModelId = null, walkRoom = 0, modelLoading = null;   // modelLoading: the model being downloaded into the viewer
+let viewer = null, viewerModelId = null, walkRoom = null, modelLoading = null;   // modelLoading: the model being downloaded into the viewer
 function resetModel() {
   leaveBuild();
-  $("#walkPanel").hidden = true; walkRoom = 0;
+  $("#walkPanel").hidden = true; walkRoom = null;
   $("#viewerWrap").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
   $("#modelBadge").hidden = true; $("#modelDetails").hidden = true;
   if (viewer) { viewer.dispose(); viewer = null; }
@@ -451,7 +451,7 @@ function setViewMode(mode) {
     if (modelLoading) { toast("The 3D model is still loading. Try again in a moment."); modelLoading.then(() => {}, () => {}); return; }
     if (!enterBuild()) return;
   } else if (mode === "walk") {
-    if (viewer.mode !== "walk") viewer.walkTo(walkRoom);
+    if (viewer.mode !== "walk") walkRoom = viewer.walkTo(walkRoom) ?? walkRoom;
     if (!viewer.rooms().length) toast("This model has no rooms (spaces), so you start in the middle of the ground floor. Walk, or use Floor up.");
     drawRooms();
     $("#viewer canvas")?.focus({ preventScroll: true });

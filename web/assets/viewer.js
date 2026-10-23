@@ -344,7 +344,13 @@ export function createViewer(host, { onSelect } = {}) {
   }
   function walkTo(which) {
     const all = rooms();
-    const r = (typeof which === "number" ? all[which] : all.find(x => x.name === which)) || all[0];
+    // no room chosen: the main room of a typical floor (a living room if named so, else the largest)
+    const main = () => {
+      const s = planStorey(), on = all.filter(x => x.storey === s), list = on.length ? on : all;
+      const area = x => (x.box.max.x - x.box.min.x) * (x.box.max.z - x.box.min.z) * (/living|lounge|sitting|family|salon|parlou?r/i.test(x.name) ? 3 : 1);
+      return list.reduce((a, b) => (area(b) > area(a) ? b : a), list[0]);
+    };
+    const r = (typeof which === "number" ? all[which] : which ? all.find(x => x.name === which) : null) || main();
     enterWalk();
     if (!r) {      // no rooms in the file: start in the most open spot of a typical floor
       room = null;
@@ -355,9 +361,14 @@ export function createViewer(host, { onSelect } = {}) {
         const c = frameBox.getCenter(new THREE.Vector3());
         feet = floorBelow(new THREE.Vector3(c.x, y + 2.5, c.z), 4) ?? y; camera.position.set(c.x, feet + EYE, c.z); yaw = 0;
       }
-      pitch = -0.05; apply(); aim(); return true;
+      pitch = -0.05; apply(); aim(); return null;
     }
     room = r.name;
+    const spot = openSpot(r.box.min.y, null, r.box);
+    if (spot) {
+      feet = spot.feet; camera.position.set(spot.x, feet + EYE, spot.z); yaw = spot.yaw; pitch = -0.06;
+      apply(); aim(); return all.indexOf(r);
+    }
     const c = r.box.getCenter(new THREE.Vector3()), size = r.box.getSize(new THREE.Vector3());
     // stand near one end of the room's longer side and look along it, so most of the room is in view
     const alongX = size.x >= size.z;
@@ -367,20 +378,20 @@ export function createViewer(host, { onSelect } = {}) {
     camera.position.set(c.x, feet + EYE, c.z).addScaledVector(back, (alongX ? size.x : size.z) * 0.32);
     pitch = -0.06;
     apply(); aim();
-    return true;
+    return all.indexOf(r);
   }
   // the most open place to stand on a floor at height y: a grid of spots inside the building, each
   // scored by how far one can see around it at eye height; faces its longest view
   const DIRS = Array.from({ length: 12 }, (_, i) => { const a = i / 12 * Math.PI * 2; return { yaw: a, v: new THREE.Vector3(-Math.sin(a), 0, -Math.cos(a)) }; });
-  function openSpot(y, near0 = null) {
+  function openSpot(y, near0 = null, inBox = null) {
     const band = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && o.geometry.boundingBox
       && (() => { const b = new THREE.Box3().setFromObject(o); return b.max.y > y + 0.2 && b.min.y < y + 2.6; })());
     const floors = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && (() => { const b = new THREE.Box3().setFromObject(o); return b.max.y > y - 0.6 && b.min.y < y + 0.9; })());
-    const b = frameBox, N = 11, best = { score: -1 };
+    const b = inBox || frameBox, N = inBox ? 7 : 11, best = { score: -1 };
     const r = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0);
     for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
-      const x = near0 ? near0.x + (i - (N - 1) / 2) * 0.8 : b.min.x + (b.max.x - b.min.x) * (i + 0.5) / N;
-      const z = near0 ? near0.z + (j - (N - 1) / 2) * 0.8 : b.min.z + (b.max.z - b.min.z) * (j + 0.5) / N;
+      const x = near0 ? near0.x + (i - (N - 1) / 2) * 0.8 : b.min.x + (b.max.x - b.min.x) * (0.1 + 0.8 * i / (N - 1));
+      const z = near0 ? near0.z + (j - (N - 1) / 2) * 0.8 : b.min.z + (b.max.z - b.min.z) * (0.1 + 0.8 * j / (N - 1));
       r.set(new THREE.Vector3(x, y + 1.2, z), down); r.far = 2;
       const f = r.intersectObjects(floors, false).find(h => h.face && Math.abs(h.face.normal.y) > 0.7);
       if (!f) continue;                     // no floor here (outside, or a void)
