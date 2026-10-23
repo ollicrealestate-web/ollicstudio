@@ -126,7 +126,7 @@
     <section class="model" id="modelSection" aria-labelledby="modelTitle">
       <div class="studio-head">
         <div><span class="eyebrow">3D model</span><h2 id="modelTitle" class="studio-title">Your Revit model in 3D</h2>
-          <p class="muted">Upload your model exported from Revit as IFC (File &gt; Export &gt; IFC). Ollic shows it in 3D inside and out, and you can use any view of it as the base of a render, so the picture keeps your exact building.</p></div>
+          <p class="muted">Explore it inside and out, then render any view as a photoreal picture of your exact building.</p></div>
       </div>
       <div class="model-local" id="modelLocal" aria-live="polite"></div>
       <div class="jobs" id="modelJobs" aria-live="polite"></div>
@@ -143,8 +143,7 @@
           <button type="button" class="btn primary" id="useView">Render this view</button>
           <button type="button" class="btn" id="saveShot">Save shot</button>
           <span class="spacer"></span>
-          <a class="btn" id="dlGlb" download>Download 3D (GLB)</a>
-          <a class="btn" id="dlIfc" hidden>Download IFC</a>
+          <button type="button" class="btn model-badge" id="modelBadge" aria-expanded="false" aria-controls="modelDetails" hidden></button>
         </div>
         <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
         <div class="walk-panel" id="walkPanel" hidden>
@@ -228,9 +227,9 @@
           <div class="jobs" id="animJobs" aria-live="polite"></div>
           <div class="video-list" id="animVideos"></div>
         </div>
-        <div class="model-info">
-          <div class="card" id="elementCard"><h3>Element</h3><p class="muted">Tap any part of the building to see what it is.</p></div>
-          <div class="card" id="reportCard"></div>
+        <div class="card model-details" id="modelDetails" hidden>
+          <div id="reportCard"></div>
+          <div class="row"><a class="btn" id="dlGlb" download>Download 3D (GLB)</a><a class="btn" id="dlIfc" hidden>Download IFC</a></div>
         </div>
       </div>
       <div class="empty" id="modelEmpty" hidden>Your IFC model is being read into 3D. Small models take under a minute; large ones several minutes.</div>
@@ -283,7 +282,7 @@
     <section class="studio" id="studio" aria-labelledby="studioTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>
-          <p class="muted">Start from your floor plan, a view of your 3D model, or just a description. Add photos of the look you want, describe the front (glass, cantilevers, cladding) and choose the view. Each image takes about a minute and is labelled <b>AI concept — not to scale</b>.</p></div>
+          <p class="muted">Describe the building, choose the AI version and the view. About a minute per picture.</p></div>
       </div>
       <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
       <form id="renderForm" class="render-form card" hidden>

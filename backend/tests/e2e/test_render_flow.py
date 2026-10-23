@@ -116,7 +116,11 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         uid = next(iter(stack["repo"].projects.values()))["owner_id"]
         stack["repo"].plans[uid] = "premium"
         page.reload(); page.wait_for_selector("#renderForm:not([hidden])")
-        page.check("#tierPick input[value=premium]", force=True)
+        # the AI version is a dropdown: only the chosen one shows until it is opened
+        assert "Standard render" in page.inner_text("#tierToggle") and not page.is_visible("#premiumTier")
+        page.click("#tierToggle"); assert page.is_visible("#premiumTier") and page.is_visible("#moreTiers label >> nth=0")
+        page.click("#premiumTier")
+        assert "Premium render" in page.inner_text("#tierToggle") and not page.is_visible("#premiumTier")   # picked: the list closes
         assert page.is_visible("#qualityField")
         page.fill("#rPrompt", "Same villa, evening"); page.click("#renderBtn")
         page.wait_for_function("document.querySelectorAll('.shot').length === 3", timeout=20000)

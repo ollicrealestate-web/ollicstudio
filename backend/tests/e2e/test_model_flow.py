@@ -79,7 +79,10 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.set_input_files("#fileInput", str(ifc))
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
-        assert "26 elements" in page.inner_text("#reportCard")
+        # the model check is one small badge; the details open only when asked for
+        assert not page.is_visible("#modelDetails") and "Ready" in page.inner_text("#modelBadge") and "parts" in page.inner_text("#modelBadge")
+        page.click("#modelBadge"); assert "26 elements" in page.inner_text("#reportCard") and page.is_visible("#dlGlb")
+        page.click("#modelBadge"); assert not page.is_visible("#modelDetails")
         (model,) = stack["repo"].models.values()
         assert model["report"]["read_on"] == "browser" and model["job_id"] is None      # read on this computer, not by the server
         assert not any(j["type"] == "ifc_import" for j in stack["repo"].jobs.values())

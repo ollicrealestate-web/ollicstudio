@@ -381,6 +381,7 @@ function resetModel() {
   leaveBuild();
   $("#walkPanel").hidden = true; walkRoom = 0;
   $("#viewerWrap").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
+  $("#modelBadge").hidden = true; $("#modelDetails").hidden = true;
   if (viewer) { viewer.dispose(); viewer = null; }
   viewerModelId = null;
   $("#viewer").replaceChildren(el("div", { class: "viewer-msg", id: "viewerMsg" }, "Loading the 3D model…"));
@@ -491,20 +492,30 @@ $("#viewReset").onclick = () => viewer?.reset();
 $("#storeySelect").onchange = e => { viewer?.setStorey(e.target.value); if (e.target.value) setViewMode("interior"); };
 
 const TYPE_NAME = { IfcWall: "Wall", IfcWallStandardCase: "Wall", IfcSlab: "Floor slab", IfcRoof: "Roof", IfcDoor: "Door", IfcWindow: "Window", IfcSpace: "Room", IfcColumn: "Column", IfcBeam: "Beam", IfcStair: "Stair", IfcCovering: "Covering", IfcRailing: "Railing" };
+/* a tapped part of the building: a small label over the 3D view, gone again with its close button */
 function showElement(x) {
-  const card = $("#elementCard");
-  if (!x) { card.replaceChildren(el("h3", {}, "Element"), el("p", { class: "muted" }, "Tap any part of the building to see what it is.")); return; }
-  card.replaceChildren(el("h3", {}, TYPE_NAME[x.ifcType] || x.ifcType || "Element"),
-    el("dl", { class: "kv" }, el("dt", {}, "Name"), el("dd", {}, x.name || "—"), el("dt", {}, "Floor"), el("dd", {}, x.storey || "—"),
-      el("dt", {}, "IFC type"), el("dd", { class: "mono" }, x.ifcType || "—"), el("dt", {}, "GlobalId"), el("dd", { class: "mono" }, x.globalId || "—")));
+  const host = $("#viewer");
+  let tip = host.querySelector(".el-tip");
+  if (!x) { tip?.remove(); return; }
+  if (!tip) { tip = el("div", { class: "el-tip", role: "status", id: "elementCard" }); host.append(tip); }
+  tip.replaceChildren(el("b", {}, TYPE_NAME[x.ifcType] || (x.ifcType || "Element").replace(/^Ifc/, "")),
+    el("span", {}, [x.name, x.storey].filter(Boolean).join(" · ") || "No name"),
+    el("button", { type: "button", class: "el-close", "aria-label": "Close", onclick: () => tip.remove() }, "×"));
 }
 
+/* the model check: one small badge; the full list only when asked for */
 function drawReport(m) {
   const r = m.report || {};
   const verdict = { pass: "Model checked: ready to use", warn: "Model checked: usable, with notes", fail: "Model has problems" }[r.status] || "Model report";
   $("#reportCard").replaceChildren(el("h3", {}, verdict),
     el("ul", { class: "checks" }, ...(r.checks || []).map(c => el("li", { class: c.status }, c.message))));
+  const badge = $("#modelBadge"), n = (m.stats || {}).with_geometry || r.with_geometry;
+  badge.hidden = false; badge.className = `btn model-badge ${r.status || ""}`;
+  badge.textContent = `${r.status === "fail" ? "! Problems" : r.status === "warn" ? "✓ Ready, with notes" : "✓ Ready"}${n ? ` · ${n.toLocaleString()} parts` : ""}`;
+  badge.title = "Model check and downloads";
+  $("#modelDetails").hidden = r.status !== "fail"; badge.setAttribute("aria-expanded", String(r.status === "fail"));
 }
+$("#modelBadge").onclick = () => { const d = $("#modelDetails"); d.hidden = !d.hidden; $("#modelBadge").setAttribute("aria-expanded", String(!d.hidden)); };
 
 /* "Render this view": a picture of the 3D model becomes the shape the render keeps */
 $("#useView").onclick = async () => {
@@ -625,7 +636,29 @@ function setupTiers(out) {
   updateClipEngines(out.video_engines || {});
 }
 function chosenTier() { return $("#tierPick input[name=tier]:checked")?.value || "standard"; }
+/* AI version: a dropdown. Closed, it shows only the chosen one; open, the list; picking one closes it. */
+function tierToggle() {
+  let b = $("#tierToggle");
+  if (!b) {
+    b = el("button", { type: "button", id: "tierToggle", class: "tier-toggle", "aria-expanded": "false" });
+    b.onclick = () => setTierOpen(!$("#tierPick").classList.contains("open"));
+    $("#tierPick legend").after(b);
+  }
+  return b;
+}
+function setTierOpen(open) {
+  $("#tierPick").classList.toggle("open", open);
+  tierToggle().setAttribute("aria-expanded", String(open));
+}
+function drawTierToggle() {
+  const chosen = $("#tierPick input[name=tier]:checked")?.closest("label");
+  const name = chosen?.querySelector("b")?.textContent || "Standard render", note = chosen?.querySelector("small")?.textContent || "";
+  tierToggle().replaceChildren(el("span", {}, el("b", {}, name), el("small", {}, note)), el("span", { class: "chev", "aria-hidden": "true" }, "▾"));
+  tierToggle().classList.toggle("pro", !!chosen?.classList.contains("premium-tag"));
+}
 function tierChanged() {
+  drawTierToggle();
+  setTierOpen(false);
   const t = chosenTier(), info = tierInfo?.[t] || {};
   $("#qualityField").hidden = t !== "premium";  // the free model has one detail level
   $("#renderLimit").textContent = info.daily_limit ? `${info.name}: up to ${info.daily_limit} a day, reset at 01:00 Lagos time. Failed ones do not count.` : "";
