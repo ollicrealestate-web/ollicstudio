@@ -88,20 +88,41 @@
     <div class="page-head" style="margin-top:8px">
       <div><span class="eyebrow">Project</span><h1 style="margin-top:10px" id="projectName"></h1><p class="meta muted" id="projectMeta"></p></div>
     </div>
-    <div class="drop" id="dropZone">
-      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
-      <h3>Add drawings or a model</h3>
-      <p class="muted">PNG or JPEG sketches, PDF drawings, or an IFC model (IFC2X3 or IFC4). Revit users: File &gt; Export &gt; IFC.</p>
-      <label class="btn primary" style="cursor:pointer">Choose files<input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.pdf,.ifc" multiple hidden></label>
-      <p class="hint">or drop them here</p>
-    </div>
-    <div class="uploads" id="uploads" aria-live="polite"></div>
-    <div class="table-wrap" id="filesWrap" hidden>
-      <table>
-        <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Details</th><th>Uploaded</th><th>Checksum</th><th><span class="sr-only">Actions</span></th></tr></thead>
-        <tbody id="fileRows"></tbody>
-      </table>
-    </div>
+    <nav class="svc-tabs" id="svcTabs" aria-label="Services"></nav>
+
+    <section class="svc-pick" id="svcPick" hidden aria-labelledby="svcPickTitle">
+      <h2 id="svcPickTitle" class="studio-title">What do you want to make?</h2>
+      <p class="muted">Pick one. You can switch to another service at any time from the bar above; everything you make stays in this project's Library.</p>
+      <div class="svc-grid" id="svcGrid"></div>
+    </section>
+
+    <section class="svc-start" id="svcStart" hidden aria-labelledby="svcTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow" id="svcEyebrow">Step 1 of 2 · Your file</span><h2 id="svcTitle" class="studio-title"></h2><p class="muted" id="svcLead"></p></div>
+      </div>
+      <div class="svc-start-grid">
+        <div>
+        <div class="drop" id="dropZone">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
+          <h3>Add drawings or a model</h3>
+          <p class="muted">PNG or JPEG sketches, PDF drawings, or an IFC model (IFC2X3 or IFC4). Revit users: File &gt; Export &gt; IFC.</p>
+          <label class="btn primary" style="cursor:pointer">Choose files<input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.pdf,.ifc" multiple hidden></label>
+          <p class="hint">or drop them here</p>
+        </div>
+        <div class="uploads" id="uploads" aria-live="polite"></div>
+        </div>
+        <div class="card svc-lib" id="svcLib">
+          <h3>Or use a file from your Library</h3>
+          <p class="hint" id="svcLibHint"></p>
+          <div class="svc-files" id="svcFiles" role="group" aria-label="Files in this project"></div>
+          <div class="row svc-actions">
+            <button type="button" class="btn primary" id="svcGo" disabled>Continue</button>
+            <button type="button" class="btn" id="svcSkip" hidden>Skip, describe it only</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="model" id="modelSection" aria-labelledby="modelTitle">
       <div class="studio-head">
         <div><span class="eyebrow">3D model</span><h2 id="modelTitle" class="studio-title">Your Revit model in 3D</h2>
@@ -143,6 +164,7 @@
             <span class="mono" id="animTime">0:00 / 0:00</span>
           </div>
           <div class="anim-chapters" id="animChapters" role="group" aria-label="Jump to a stage"></div>
+          <div class="tier-slot" id="tierSlotBuild"></div>
           <div class="anim-heroes" id="animHeroes">
             <div class="anim-heroes-head">
               <div><b>Photoreal views</b> <span class="hint" id="heroNote">The gold wireframe turns into these AI renders as the line of light sweeps up. Each view uses one render from your daily allowance.</span></div>
@@ -210,7 +232,7 @@
           <div class="card" id="reportCard"></div>
         </div>
       </div>
-      <div class="empty" id="modelEmpty" hidden>No 3D model yet. Upload your Revit export (.ifc) above to see it here.</div>
+      <div class="empty" id="modelEmpty" hidden>Your IFC model is being read into 3D. This takes a few seconds to a minute.</div>
     </section>
     <section class="img-anim" id="imgAnimSection" aria-labelledby="iaTitle">
       <div class="studio-head">
@@ -218,8 +240,9 @@
           <p class="muted">No model file? Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). The AI makes it photoreal at night, Ollic draws the building's lines in glowing gold from the ground up, then a line of light sweeps up and reveals the finished building. Up to three images become three shots of one video.</p></div>
       </div>
       <div class="card ia-card">
+        <div class="tier-slot" id="tierSlotIA"></div>
         <fieldset class="field"><legend>Images to animate <span class="hint">Tick up to 3, in order</span></legend>
-          <div class="ia-pick" id="iaPick"><span class="hint">Upload a 3D image of the building above and it appears here.</span></div></fieldset>
+          <div class="ia-pick" id="iaPick"><span class="hint">Choose the images in step 1 of this service.</span></div></fieldset>
         <div class="anim-heroes">
           <div class="anim-heroes-head">
             <div><b>Photoreal views</b> <span class="hint">Each image uses two renders: its photoreal version and a clean line drawing of it, which becomes the gold wireframe. Tick “already photoreal” to use an image as it is.</span></div>
@@ -263,11 +286,11 @@
       </div>
       <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
       <form id="renderForm" class="render-form card" hidden>
-        <fieldset class="tiers span2" id="tierPick">
-          <legend>Render type</legend>
+        <div class="span2" id="tierHome"><fieldset class="tiers" id="tierPick">
+          <legend>AI version <span class="hint">Used for every picture this service makes</span></legend>
           <label class="tier"><input type="radio" name="tier" value="standard" checked><span><b>Standard render</b><small id="stdNote">Free</small></span></label>
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
-        </fieldset>
+        </fieldset></div>
         <div class="span2 start-from">
           <div class="field">Floor plan <span class="hint">Optional. The render follows its layout.</span>
             <div class="row"><select id="rPlan"><option value="">No plan</option></select>
@@ -306,18 +329,18 @@
       </form>
       <div class="jobs" id="jobList" aria-live="polite"></div>
       <div class="gallery" id="gallery"></div>
-      <div class="empty" id="galleryEmpty" hidden>No concepts yet. Describe the house above and press Create concept.</div>
+      <div class="empty" id="galleryEmpty" hidden>No renders yet.</div>
     </section>
     <section class="walkthrough" id="walkSection" aria-labelledby="walkTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Walkthrough</span><h2 id="walkTitle" class="studio-title">Room by room, then a video</h2>
           <p class="muted">Save shots as you walk through the 3D model, render them all in one go with the same look, then turn the renders into an MP4 walkthrough with slow camera moves, room titles and your project name.</p></div>
       </div>
-      <div class="empty" id="shotsEmpty">No shots yet. In the 3D model above, press <b>Walk through</b>, pick a room, frame the view and press <b>Save shot</b>. Outside views can be saved too.</div>
+      <div class="empty" id="shotsEmpty">No shots yet. In the 3D model above, pick a room, frame the view and press <b>Save shot</b>. Outside views can be saved too.</div>
       <ol class="shot-strip" id="shotStrip"></ol>
       <div class="shot-go" id="shotGo" hidden>
         <button type="button" class="btn primary" id="renderAllBtn">Render all shots</button>
-        <span class="hint" id="renderAllNote">Renders the ticked shots with the description, style, light and look references set in Concept renders above, so the rooms match. Each shot is one render of your daily allowance.</span>
+        <span class="hint" id="renderAllNote">Renders the ticked shots with the description, style, light and look set in Concept renders above, so the rooms match. Each shot is one render of your daily allowance.</span>
       </div>
       <div class="jobs" id="walkJobs" aria-live="polite"></div>
       <form class="card video-form" id="videoForm" hidden>
@@ -342,7 +365,26 @@
       </form>
       <div class="video-list" id="videoList"></div>
     </section>
-    <div class="danger-zone">
+    <section class="library" id="libSection" hidden aria-labelledby="libTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">Library</span><h2 id="libTitle" class="studio-title">Everything in this project</h2>
+          <p class="muted">Your uploaded files, every render and every video. Pick any service above to use them.</p></div>
+      </div>
+      <h3>Files</h3>
+      <div class="empty" id="libFilesEmpty">No files yet.</div>
+      <div class="table-wrap" id="filesWrap" hidden>
+        <table>
+          <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Details</th><th>Uploaded</th><th>Checksum</th><th><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody id="fileRows"></tbody>
+        </table>
+      </div>
+      <h3 class="lib-h">Renders</h3>
+      <div id="libGallery"></div>
+      <h3 class="lib-h">Videos</h3>
+      <div class="video-list" id="libVideos"></div>
+      <div class="empty" id="libVideosEmpty">No videos yet.</div>
+    </section>
+    <div class="danger-zone" id="dangerZone">
       <div><h3>Delete this project</h3><p class="muted">Removes the project, every file, render and video in it. This cannot be undone.</p></div>
       <div class="confirm" id="deleteArea"><button class="btn danger" type="button" id="deleteBtn">Delete project</button></div>
     </div>

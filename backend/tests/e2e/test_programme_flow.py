@@ -34,15 +34,12 @@ def test_animation_follows_the_programme(stack, tmp_path):  # noqa: F811
         page.fill("#upName", "Bo"); page.fill("#upEmail", "bo@build.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
         page.fill("#newProjectName", "Programme villa"); page.click("#newProjectForm button[type=submit]")
-        page.wait_for_selector("#modelEmpty:not([hidden])")
+        page.click(".svc-card:has-text('Construction animation')"); page.wait_for_selector("#svcStart:not([hidden])")
         page.set_input_files("#fileInput", str(ifc))
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
-        page.click("#viewBuild")                      # too early: the model is still downloading
-        page.wait_for_function("document.body.textContent.includes('still loading')")
-        assert page.is_hidden("#animPanel")
-        page.wait_for_timeout(5000)
-        page.click("#viewBuild"); page.wait_for_selector("#animPanel:not([hidden])")
+        assert page.is_hidden("#animPanel")           # the model is still downloading: the animation waits for it
+        page.wait_for_selector("#animPanel:not([hidden])", timeout=30000)
         assert "usual order" in page.inner_text("#progNote")
 
         page.set_input_files("#progFile", str(xml))

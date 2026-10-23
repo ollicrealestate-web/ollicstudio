@@ -80,14 +80,13 @@ def test_construction_animation_in_the_browser(stack, tmp_path):
         page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@build.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
         page.fill("#newProjectName", "Two-storey villa"); page.click("#newProjectForm button[type=submit]")
-        page.wait_for_selector("#modelEmpty:not([hidden])")
+        page.click(".svc-card:has-text('Construction animation')"); page.wait_for_selector("#svcStart:not([hidden])")
         page.set_input_files("#fileInput", str(ifc))
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
 
         # 1. the animation with its default settings: every stage of the build, then the rooms
-        page.click("#viewBuild")
-        page.wait_for_selector("#animPanel:not([hidden])")
+        page.wait_for_selector("#animPanel:not([hidden])")             # this service opens straight on the animation
         assert page.get_attribute("#viewBuild", "aria-pressed") == "true" and not page.is_visible("#useView")
         chapters = [c.title() for c in page.locator("#animChapters button").all_text_contents()]
         assert chapters == ["Site", "Foundation", "Structure", "Walls", "Structure", "Walls", "Doors And Windows", "Roof", "Completed Building"]
@@ -126,8 +125,8 @@ def test_construction_animation_in_the_browser(stack, tmp_path):
         # 3. export (a short version)
         page.evaluate("s => { localStorage.setItem('ollic-anim-' + new URLSearchParams(location.search).get('project'), JSON.stringify(s)); }",
                       {**SHORT, "format": "1:1"})
-        page.click("#viewOutside"); page.click("#viewBuild")
-        assert "0:10" in page.inner_text("#animTime")
+        page.reload(); page.wait_for_selector("#animPanel:not([hidden])", timeout=60000)     # same service, same model after a reload
+        page.wait_for_function("document.querySelector('#animTime').textContent.includes('0:10')")
         page.wait_for_function("document.querySelector('#heroList')?.textContent.includes('Ready') || document.querySelector('#heroList')?.textContent.includes('Wireframe')")
         page.screenshot(path=str(shots / "e2e-construction.png"), full_page=True)
         page.click("#animExport")                 # no photoreal view for the square format yet: a warning first

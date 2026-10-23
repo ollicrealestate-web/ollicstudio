@@ -95,3 +95,11 @@ checked matches in the animation settings (`schedule`, `schedule_seconds`, `show
 animation: each task builds the model elements of its part and floor not taken by an earlier task;
 parts no task names are built with the last task of the same kind of work, or at the end. The director
 can change the length and the date display but never the programme.
+
+## Project page: services
+
+`web/assets/app.js` (`SERVICES`) lists the services, the file types each takes, which page sections it
+shows, and which 3D view modes it uses. `goTo(service, step)` switches between the picker, step 1 (upload
+or choose from the Library: `drawStart`, `useFiles`) and step 2 (the service's sections only); the
+address carries `service`, `step` and the chosen IFC (`model`). The AI version picker (`#tierPick`) is
+moved into the screen of the active service, and the renders gallery into the Library when it is open.

@@ -115,10 +115,26 @@ def test_customer_journey_and_isolation(stack, tmp_path):
         page.fill("#newProjectName", "Lekki duplex"); page.click("#newProjectForm button[type=submit]")
         page.wait_for_selector("#projectView:not([hidden])")
         assert page.inner_text("#projectName") == "Lekki duplex"
+        # a new project asks what to make; one service at a time
+        assert page.is_visible("#svcPick") and page.locator(".svc-card").count() == 6
+        assert not any(page.is_visible(s) for s in ("#studio", "#modelSection", "#imgAnimSection", "#walkSection", "#svcStart"))
+        page.screenshot(path=str(stack["dir"].parent / "e2e-services.png"), full_page=True)
+        page.set_viewport_size({"width": 390, "height": 844}); page.screenshot(path=str(stack["dir"].parent / "e2e-services-phone.png"), full_page=True)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.click(".svc-card:has-text('Photoreal render')")
+        page.wait_for_selector("#svcStart:not([hidden])")
+        assert "Photoreal render" in page.inner_text("#svcTitle") and "Nothing suitable" in page.inner_text("#svcLibHint")
         page.set_input_files("#fileInput", str(png))
-        page.wait_for_selector("#fileRows tr")
+        page.wait_for_selector("#studio:not([hidden])")                # uploaded: straight to the render screen, with the file in place
+        assert page.input_value("#rBase") != "" and not page.is_visible("#svcStart")
+        assert "service=render" in page.url and "step=work" in page.url
+        page.click("#svcTabs button:has-text('Library')"); page.wait_for_selector("#libSection:not([hidden])")
         row = page.inner_text("#fileRows tr")
         assert "ground-floor.png" in row and "PNG" in row and "800 × 600 px" in row
+        page.click("#svcTabs button:has-text('Photoreal render')"); page.wait_for_selector("#svcStart:not([hidden])")
+        assert page.locator("#svcFiles .svc-file").count() == 1           # the picture is offered from the Library
+        page.check("#svcFiles input"); page.screenshot(path=str(stack["dir"].parent / "e2e-service-start.png"), full_page=True)
         page.set_input_files("#fileInput", str(fake))
         page.wait_for_selector(".upload-row.error .reason")
         assert "contents are a PDF" in page.inner_text(".upload-row.error .reason")
@@ -145,7 +161,8 @@ def test_customer_journey_and_isolation(stack, tmp_path):
         assert "do not match" in page.inner_text("#authMsg")
         page.fill("#inPassword", "correct-horse-1"); page.click("#signInForm button[type=submit]")
         page.wait_for_selector(".project")
-        page.click(".project"); page.wait_for_selector("#fileRows tr")
+        page.click(".project"); page.wait_for_selector("#svcPick:not([hidden])")
+        page.click("#svcTabs button:has-text('Library')"); page.wait_for_selector("#fileRows tr")
         page.click("#deleteBtn"); page.click("text=Yes, delete it")
         page.wait_for_selector("#projectsView:not([hidden])"); page.wait_for_selector("#projectsEmpty:not([hidden])")
         assert stack["storage"].objects == {} and stack["repo"].projects == {}

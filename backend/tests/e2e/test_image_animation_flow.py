@@ -48,9 +48,12 @@ def test_animation_from_3d_images(stack, tmp_path):  # noqa: F811
         page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@image.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
         page.fill("#newProjectName", "Lekki tower"); page.click("#newProjectForm button[type=submit]")
-        page.wait_for_selector("#renderForm:not([hidden])")
+        page.click(".svc-card:has-text('Animation from a 3D image')"); page.wait_for_selector("#svcStart:not([hidden])")
         page.set_input_files("#fileInput", [str(a), str(b2)])
+        page.wait_for_selector("#imgAnimSection:not([hidden])")
         page.wait_for_function("document.querySelectorAll('#iaPick .ia-item').length === 2", timeout=30000)
+        assert page.is_visible("#tierSlotIA #tierPick") and not page.is_visible("#studio")    # the AI version choice is on this screen
+        page.uncheck("#iaPick .ia-item >> nth=1 >> text=Animate this")      # both uploads were ticked; start with the first
 
         # tick the first: it needs a photoreal view
         page.check("#iaPick .ia-item >> nth=0 >> text=Animate this")

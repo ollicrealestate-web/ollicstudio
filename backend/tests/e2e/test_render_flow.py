@@ -81,13 +81,13 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@render.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
         page.fill("#newProjectName", "Ikoyi villa"); page.click("#newProjectForm button[type=submit]")
+        page.click(".svc-card:has-text('Photoreal render')"); page.wait_for_selector("#svcStart:not([hidden])")
+
+        # the uploaded sketch opens the render screen as the shape to keep
+        page.set_input_files("#fileInput", str(sketch))
         page.wait_for_selector("#renderForm:not([hidden])")
         assert page.is_visible("#galleryEmpty") and not page.is_visible("#studioOff")
-
-        # the uploaded sketch becomes a choice in "Keep the shape from"
-        page.set_input_files("#fileInput", str(sketch)); page.wait_for_selector("#fileRows tr")
-        page.wait_for_function("document.querySelectorAll('#rBase option').length === 2")
-        page.select_option("#rBase", label="front-elevation.png")
+        assert page.evaluate("document.querySelector('#rBase').selectedOptions[0].textContent") == "front-elevation.png"
         page.fill("#rPrompt", "Two-storey villa, white render, bronze window frames")
         page.select_option("#rLight", "golden hour"); page.fill("#rMaterials", "white render, bronze frames")
         page.click("#renderBtn")
@@ -130,7 +130,9 @@ def test_concept_render_and_revision_in_the_browser(stack, tmp_path):
         page.click(".shot >> nth=0 >> button[aria-label='Delete this render']")
         page.wait_for_function(f"document.querySelectorAll('.shot').length === {n - 1}")
         assert len(stack["repo"].images) == n - 1
-        # and an uploaded file
+        # and an uploaded file, in the Library
+        page.click("#svcTabs button:has-text('Library')"); page.wait_for_selector("#libSection:not([hidden])")
+        assert page.locator("#libGallery .shot").count() == n - 1          # the renders are in the Library too
         page.click("#fileRows tr >> nth=0 >> button:has-text('Delete')"); page.click("#fileRows tr >> nth=0 >> button:has-text('Yes, delete')")
         page.wait_for_function("document.querySelectorAll('#fileRows tr').length === 0")
         assert stack["storage"].objects == {}

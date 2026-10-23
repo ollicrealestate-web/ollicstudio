@@ -71,7 +71,8 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@model.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
         page.fill("#newProjectName", "Maitama block"); page.click("#newProjectForm button[type=submit]")
-        page.wait_for_selector("#modelEmpty:not([hidden])")
+        page.click(".svc-card:has-text('Render your Revit model')"); page.wait_for_selector("#svcStart:not([hidden])")
+        assert page.get_attribute("#fileInput", "accept") == ".ifc"
         assert "Make 3D model" not in page.content()   # the plan-to-model tools are gone
 
         # 1. Revit IFC: imported automatically, shown in 3D, report
@@ -79,6 +80,8 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
         assert "26 elements" in page.inner_text("#reportCard")
+        # only this service's views: outside and inside, no walk or construction
+        assert page.is_visible("#viewInside") and not page.is_visible("#viewWalk") and not page.is_visible("#viewBuild") and page.is_visible("#studio")
         page.click("#viewInside"); page.wait_for_timeout(500)
         assert page.locator(".viewer-labels span").count() == 5
         page.click("#viewOutside"); page.wait_for_timeout(500)

@@ -78,12 +78,12 @@ def test_walk_through_rooms_render_all_and_make_a_video(stack, tmp_path):
         page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@walk.test"); page.fill("#upPassword", "correct-horse-1")
         page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
         page.fill("#newProjectName", "Lekki bungalow"); page.click("#newProjectForm button[type=submit]")
-        page.wait_for_selector("#modelEmpty:not([hidden])")
-        assert page.is_visible("#shotsEmpty") and not page.is_visible("#videoForm")
+        page.click(".svc-card:has-text('Walkthrough video')"); page.wait_for_selector("#svcStart:not([hidden])")
 
         page.set_input_files("#fileInput", str(ifc))
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_function("document.querySelector('#reportCard h3')?.textContent.includes('ready to use')", timeout=30000)
+        assert page.is_visible("#shotsEmpty") and not page.is_visible("#videoForm") and not page.is_visible("#viewBuild")
 
         # 1. walk through the rooms
         page.click("#viewWalk")

@@ -84,8 +84,12 @@ async function openProject(id) {
   $("#gallery").replaceChildren(); $("#jobList").replaceChildren(); message($("#renderMsg"), "");
   $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
   resetModel(); resetWalk(); resetIA(); outputsLoadedOnce = false; seenDone = new Set();
-  history.replaceState(null, "", `${location.pathname}?project=${encodeURIComponent(id)}`);
-  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadShots(); loadVideos(); }
+  const q = new URLSearchParams(location.search), same = q.get("project") === id;
+  service = same && SERVICES[q.get("service")] ? q.get("service") : null;
+  step = service ? (q.get("step") === "start" && service !== "library" ? "start" : "work") : null;
+  chosenIfc = same ? q.get("model") : null;
+  applyView();
+  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadShots(); loadVideos(); applyView(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
@@ -98,6 +102,8 @@ function renderProject() {
     el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"),
     el("td", {}, el("div", { class: "file-actions" }, ...fileActions(f))))));
   $("#filesWrap").hidden = current.source_files.length === 0;
+  $("#libFilesEmpty").hidden = current.source_files.length > 0;
+  if (step === "start") drawStart();
   fillPickers(); drawIA();
 }
 
@@ -137,6 +143,147 @@ $("#readPlanBtn").onclick = async () => {
   finally { btn.disabled = false; btn.textContent = "Read my plan"; }
 };
 $("#backBtn").onclick = () => { stopPolling(); listProjects(); };
+
+/* ---------- services: pick one, give it a file, then only its screen is shown ---------- */
+const IMG = ["png", "jpeg"];
+const SERVICES = {
+  render: { name: "Photoreal render", short: "Photoreal render", accept: [...IMG, "pdf"], multi: 4, optional: true, needs: "a picture or a PDF drawing",
+    lead: "Turn a sketch, photo, 3D view or PDF drawing into a photoreal image, or just describe the building.",
+    hint: "Tick the pictures to use. The first keeps its shape and camera; the others give the look and materials. A PDF is used as the floor plan.",
+    sections: ["studio"], icon: "M4 20 10 4h4l6 16M7 13h10" },
+  plan: { name: "Floor plan to 3D", short: "Floor plan to 3D", accept: [...IMG, "pdf"], multi: 1, needs: "a floor plan (PDF or picture)",
+    lead: "Upload a floor plan. Ollic reads the rooms and makes photoreal 3D views of the building that follow the layout.",
+    hint: "Choose the floor plan.", sections: ["studio"], icon: "M3 3h18v18H3zM3 12h8V3M11 12v9M15 12h6" },
+  model: { name: "Render your Revit model", short: "Revit model", accept: ["ifc"], multi: 1, needs: "an IFC model (Revit: File > Export > IFC)",
+    lead: "Upload your Revit model as IFC. See it in 3D inside and out, then turn any view into a photoreal render of your exact building.",
+    hint: "Choose the IFC model.", sections: ["modelSection", "studio"], modes: ["exterior", "interior"], icon: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10" },
+  walk: { name: "Walkthrough video", short: "Walkthrough", accept: ["ifc"], multi: 1, needs: "an IFC model",
+    lead: "Walk through your IFC model room by room, save the shots, render them all with one look, and make an MP4 walkthrough.",
+    hint: "Choose the IFC model.", sections: ["modelSection", "studio", "walkSection"], modes: ["walk", "exterior"], icon: "M13 4a2 2 0 1 0 0 .1M10 22l2-7 3 3v4M8 11l3-3 4 2 3 3M12 15l-3-4" },
+  build: { name: "Construction animation", short: "Construction", accept: ["ifc"], multi: 1, needs: "an IFC model",
+    lead: "Your IFC model builds itself on video: gold setting-out, a wireframe rising floor by floor, then a light sweep to the photoreal building. It can follow your construction programme, and make AI cinematic clips.",
+    hint: "Choose the IFC model.", sections: ["modelSection"], modes: ["build"], icon: "M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6" },
+  imageanim: { name: "Animation from a 3D image", short: "3D image animation", accept: IMG, multi: 3, needs: "a 3D image (PNG or JPEG)",
+    lead: "No model file? Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). Gold lines rise from the ground, then a light sweep reveals the photoreal building.",
+    hint: "Tick up to three images, in order. Each becomes one shot of the video.", sections: ["imgAnimSection"], icon: "M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4" },
+  library: { name: "Library", short: "Library", sections: ["libSection"], icon: "M4 4h6v16H4zM14 4h6v16h-6z" },
+};
+const SVC_ORDER = ["render", "plan", "model", "walk", "build", "imageanim"];
+const WORK = ["modelSection", "imgAnimSection", "studio", "walkSection", "libSection"];
+const MODE_BTN = { exterior: "#viewOutside", interior: "#viewInside", walk: "#viewWalk", build: "#viewBuild" };
+const EXT = { png: ".png", jpeg: ".jpg,.jpeg", pdf: ".pdf", ifc: ".ifc" };
+let service = null, step = null, chosenIfc = null, lastJobs = [], modelsNow = [], svcPicked = [];
+function svcIcon(d) {   // SVG needs its own namespace, so it is built from markup
+  const t = document.createElement("template");
+  t.innerHTML = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+  return t.content.firstChild;
+}
+
+function goTo(svc, st) {
+  if (svc !== service && service) leaveBuild();
+  service = svc; step = svc ? st : null;
+  const q = new URLSearchParams({ project: current?.id || new URLSearchParams(location.search).get("project") || "" });
+  if (service) { q.set("service", service); q.set("step", step); }
+  if (chosenIfc && SERVICES[service]?.modes) q.set("model", chosenIfc);
+  history.replaceState(null, "", `${location.pathname}?${q}`);
+  applyView();
+  if (!reduceMotion()) window.scrollTo({ top: 0 }); else window.scrollTo(0, 0);
+}
+function chooseService(k) { svcPicked = []; goTo(k, k === "library" ? "work" : "start"); }
+
+function applyView() {
+  const svc = SERVICES[service];
+  const pv = $("#projectView"); pv.dataset.service = service || ""; pv.dataset.step = step || "";
+  $("#svcTabs").replaceChildren(...[...SVC_ORDER, "library"].map(k => el("button", { type: "button", class: `svc-tab${k === service ? " on" : ""}${k === "library" ? " lib" : ""}`,
+    "aria-pressed": String(k === service), onclick: () => chooseService(k) }, svcIcon(SERVICES[k].icon), SERVICES[k].short)));
+  $("#svcGrid").replaceChildren(...SVC_ORDER.map(k => el("button", { type: "button", class: "svc-card", onclick: () => chooseService(k) },
+    svcIcon(SERVICES[k].icon), el("b", {}, SERVICES[k].name), el("span", {}, SERVICES[k].lead), el("small", {}, `You upload: ${SERVICES[k].needs}`))));
+  $("#svcPick").hidden = !!service;
+  $("#svcStart").hidden = step !== "start";
+  const show = step === "work" && svc ? svc.sections : [];
+  WORK.forEach(id => { $("#" + id).hidden = !show.includes(id); });
+  $("#dangerZone").hidden = service !== "library";
+  // the 3D view offers only this service's views and buttons
+  Object.entries(MODE_BTN).forEach(([m, sel]) => { $(sel).hidden = !(svc?.modes || []).includes(m) || (svc?.modes || []).length < 2; });
+  $("#useView").hidden = !["model", "walk"].includes(service);
+  $("#saveShot").hidden = service !== "walk";
+  // the AI version choice sits in the screen that makes the pictures
+  const slot = service === "build" ? "#tierSlotBuild" : service === "imageanim" ? "#tierSlotIA" : "#tierHome";
+  if ($("#tierPick").parentElement !== $(slot)) $(slot).append($("#tierPick"));
+  // renders: in the studio, or in the Library
+  const gHome = service === "library" ? $("#libGallery") : $("#studio");
+  if ($("#gallery").parentElement !== gHome) gHome.append($("#gallery"), $("#galleryEmpty"));
+  if (step === "start") drawStart();
+  if (step === "work" && svc?.modes && viewer && !modelLoading && viewerModelId) setViewMode(svc.modes[0]);
+  if (step === "work" && !svc?.modes) leaveBuild();
+}
+
+/* step 1: upload a file for this service, or pick one already in the project */
+function svcFiles() {
+  const svc = SERVICES[service];
+  return (current?.source_files || []).filter(f => svc.accept.includes(f.detected_type) && !/^(Photoreal view|Cinematic start view) \d/.test(f.original_name));
+}
+function drawStart() {
+  const svc = SERVICES[service];
+  if (!svc || !svc.accept) return;
+  $("#svcTitle").textContent = svc.name; $("#svcLead").textContent = svc.lead;
+  $("#svcEyebrow").textContent = "Step 1 of 2 · Your file";
+  const input = $("#fileInput");
+  input.accept = svc.accept.map(t => EXT[t]).join(","); input.multiple = svc.multi > 1;
+  $("#dropZone h3").textContent = svc.multi > 1 ? "Upload new files" : "Upload a new file";
+  $("#dropZone p.muted").textContent = `For this service: ${svc.needs}.`;
+  const files = current ? svcFiles() : [];
+  svcPicked = svcPicked.filter(id => files.some(f => f.id === id));
+  $("#svcLibHint").textContent = files.length ? svc.hint : "Nothing suitable in this project yet. Upload a file to start.";
+  const model = id => modelsNow.find(m => m.source_file_id === id);
+  $("#svcFiles").replaceChildren(...files.map(f => {
+    const on = svcPicked.includes(f.id);
+    const box = el("input", { type: svc.multi > 1 ? "checkbox" : "radio", name: "svcFile", value: f.id, ...(on ? { checked: "" } : {}) });
+    box.onchange = () => {
+      if (svc.multi > 1) {
+        if (box.checked && svcPicked.length >= svc.multi) { box.checked = false; toast(`Use up to ${svc.multi} files here.`); return; }
+        svcPicked = box.checked ? [...svcPicked, f.id] : svcPicked.filter(x => x !== f.id);
+      } else svcPicked = [f.id];
+      drawStart();
+    };
+    const order = svc.multi > 1 && on ? el("span", { class: "chip" }, String(svcPicked.indexOf(f.id) + 1)) : "";
+    const note = f.detected_type === "ifc" ? (model(f.id) ? "3D model ready" : "not read into 3D yet") : (TYPE[f.detected_type] || f.detected_type);
+    return el("label", { class: `svc-file${on ? " on" : ""}` }, box, el("span", { class: "svc-file-name" }, f.original_name, el("small", { class: "muted" }, ` ${note} · ${fmtDate(f.created_at)}`)), order);
+  }));
+  $("#svcLib").classList.toggle("empty-lib", !files.length);
+  $("#svcGo").disabled = !svcPicked.length;
+  $("#svcSkip").hidden = !svc.optional;
+}
+$("#svcGo").onclick = () => { if (svcPicked.length) useFiles(svcPicked); };
+$("#svcSkip").onclick = () => useFiles([]);
+
+/* step 2: the service's own screen, with the chosen files already in place */
+function useFiles(ids) {
+  const files = ids.map(id => current.source_files.find(f => f.id === id)).filter(Boolean);
+  if (SERVICES[service].modes) {
+    const f = files[0];
+    chosenIfc = f ? f.id : null;
+    viewerModelId = viewerModelId && modelsNow.find(m => m.id === viewerModelId)?.source_file_id === chosenIfc ? viewerModelId : null;
+    if (!viewerModelId && viewer) resetModel();
+    const busy = lastJobs.some(j => j.type === "ifc_import" && ["queued", "running"].includes(j.status) && (j.input || {}).source_file_id === chosenIfc);
+    if (f && !modelsNow.some(m => m.source_file_id === f.id) && !busy) startImport(f);
+    goTo(service, "work"); loadModels(); return;
+  }
+  if (service === "imageanim") { iaSel = files.map(f => f.id).slice(0, 3); goTo(service, "work"); drawIA(); return; }
+  // renders: a PDF is the floor plan; the first picture keeps its shape (or is the plan); the rest give the look
+  fillPickers();
+  const pdf = files.find(f => f.detected_type === "pdf"), pics = files.filter(f => f.detected_type !== "pdf");
+  $("#rLooks").querySelectorAll("input").forEach(i => { i.checked = false; });
+  if (service === "plan") { $("#rPlan").value = (pdf || pics[0])?.id || ""; $("#rBase").value = ""; }
+  else {
+    $("#rPlan").value = pdf?.id || "";
+    $("#rBase").value = pics[0]?.id || "";
+    pics.slice(1, 4).forEach(f => { const i = $(`#rLooks input[value="${f.id}"]`); if (i) i.checked = true; });
+  }
+  $("#readPlanBtn").disabled = !$("#rPlan").value; $("#planNote").textContent = service === "plan" && $("#rPlan").value ? "Press “Read my plan” so the AI writes the rooms into the description, then check it." : "";
+  goTo(service, "work");
+  $("#rPrompt").focus({ preventScroll: true });
+}
 
 /** A delete button that asks once ("Delete?" then "Yes, delete") before acting. */
 function deleteButton(what, onDelete, small = true) {
@@ -185,7 +332,9 @@ async function loadModels() {
   let models;
   try { models = await api.models(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
   if (current?.id !== pid) return;
-  const m = models[0];
+  modelsNow = models;
+  // the IFC chosen in this service's first step; while it is still being read, nothing else is shown
+  const m = chosenIfc ? models.find(x => x.source_file_id === chosenIfc) : models[0];
   if (!m && viewerModelId) resetModel();
   $("#viewerWrap").hidden = !m;
   $("#modelEmpty").hidden = !!m;
@@ -210,6 +359,7 @@ async function loadModels() {
     pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
     $("#storeyPick").hidden = info.storeys.length < 2;
     showElement(null);
+    if (step === "work" && SERVICES[service]?.modes) setViewMode(SERVICES[service].modes[0]);
   } catch (err) {
     $("#viewer").append(el("div", { class: "viewer-msg" }, "The 3D view could not start on this device. You can still download the model."));
   }
@@ -324,7 +474,7 @@ async function loadOutputs() {
   catch (err) { if (err.status === 401) return handle(err); pollTimer = setTimeout(loadOutputs, 8000); return; }
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
-  setupTiers(out);
+  setupTiers(out); lastJobs = out.jobs;
   const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export", "animation_export", "cinematic_clip"];
   drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type) && !VIDEO_JOBS.includes(j.type)), "#jobList");
   drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
@@ -465,6 +615,7 @@ async function cancel(id) {
 
 /* ---------- uploads ---------- */
 async function uploadAll(files) {
+  const done = [];
   for (const file of files) {
     const bar = el("i"); const status = el("span", { class: "muted mono" }, "0%");
     const row = el("div", { class: "upload-row" }, el("span", { class: "name" }, file.name), status, el("div", { class: "progress" }, bar));
@@ -474,19 +625,29 @@ async function uploadAll(files) {
       const saved = await uploaded;
       bar.style.width = "100%"; status.textContent = "Checked and saved";
       if (saved?.detected_type === "ifc") startImport(saved);
+      if (saved) done.push(saved);
       current = await api.getProject(current.id); renderProject();
       setTimeout(() => row.remove(), 2500);
     } catch (err) {
       row.classList.add("error"); status.textContent = "Not uploaded"; row.append(el("span", { class: "reason" }, err.message));
-      if (err.status === 401) return handle(err);
+      if (err.status === 401) { handle(err); return done; }
     }
   }
+  return done;
 }
-$("#fileInput").onchange = e => { uploadAll([...e.target.files]); e.target.value = ""; };
+/* a file uploaded in a service's first step is used straight away */
+async function uploadForService(files) {
+  const svc = service, saved = await uploadAll(files);
+  if (!svc || service !== svc || step !== "start") return;
+  const fits = saved.filter(f => SERVICES[svc].accept.includes(f.detected_type));
+  if (fits.length) useFiles(fits.map(f => f.id));
+  else if (saved.length) toast(`Saved to your Library. ${SERVICES[svc].name} needs ${SERVICES[svc].needs}.`);
+}
+$("#fileInput").onchange = e => { uploadForService([...e.target.files]); e.target.value = ""; };
 const dz = $("#dropZone");
 ["dragenter", "dragover"].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.add("over"); }));
 ["dragleave", "drop"].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.remove("over"); }));
-dz.addEventListener("drop", e => uploadAll([...e.dataTransfer.files]));
+dz.addEventListener("drop", e => uploadForService([...e.dataTransfer.files]));
 
 /* ---------- delete with an in-page confirmation ---------- */
 function resetDelete() { $("#deleteArea").replaceChildren(el("button", { class: "btn danger", type: "button", id: "deleteBtn", onclick: askDelete }, "Delete project")); }
@@ -644,6 +805,8 @@ function drawVideos() {
   $("#videoList").replaceChildren(...videos.filter(v => v.kind !== "construction").map(card));
   $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
   $("#iaVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
+  $("#libVideos").replaceChildren(...videos.map(card));
+  $("#libVideosEmpty").hidden = videos.length > 0;
 }
 
 /* ---------- construction animation ---------- */
@@ -939,7 +1102,7 @@ const imgCache = new Map(), linkCache = new Map();
 const IA_SIZE = { "16:9": [960, 540], "9:16": [540, 960], "1:1": [720, 720] };
 function resetIA() {
   iaSel = []; iaAsIs = new Set(); iaPending = new Set(); iaAnim = null; iaT = 0; iaKey = iaBuildKey = ""; iaStop();
-  $("#iaPick").replaceChildren(el("span", { class: "hint" }, "Upload a 3D image of the building above and it appears here."));
+  $("#iaPick").replaceChildren(el("span", { class: "hint" }, "Choose the images in step 1 of this service."));
   $("#iaStage").hidden = true; $("#iaExport").disabled = true; message($("#iaMsg"), "");
 }
 function loadImg(url) {
@@ -997,7 +1160,7 @@ function drawIA() {
           el("label", { class: "check" }, use, "Animate this"), el("label", { class: "check" }, real, "Already photoreal"),
           (r || asIs) && ln ? el("button", { class: "btn clip", type: "button", onclick: e => startClip({ kind: "lines", id: ln.id }, asIs ? { kind: "file", id: f.id } : { kind: "render", id: r.id },
             $("#iaFormat").value, $("#iaTitle2").value.trim() || current.name, "ia", e.currentTarget) }, "Cinematic clip") : ""));
-    }) : [el("span", { class: "hint" }, "Upload a 3D image of the building above and it appears here.")]));
+    }) : [el("span", { class: "hint" }, "Choose the images in step 1 of this service.")]));
   }
   buildIA();
 }
