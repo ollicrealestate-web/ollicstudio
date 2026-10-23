@@ -93,7 +93,7 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#viewInside"); page.wait_for_timeout(500)
         assert page.locator(".viewer-labels span").count() == 5
         page.click("#viewOutside"); page.wait_for_timeout(500)
-        page.locator("#viewer").screenshot(path=str(shots / "e2e-3d-outside.png"))
+        page.screenshot(path=str(shots / "e2e-3d-outside.png"), clip=(page.locator("#viewer").scroll_into_view_if_needed() or page.locator("#viewer").bounding_box()), timeout=120000)
 
         # 2. "Capture view": the view goes into the render box; the AI reads it (and the model) and writes the prompt
         page.click("#useView")

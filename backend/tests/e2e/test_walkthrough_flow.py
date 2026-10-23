@@ -93,7 +93,7 @@ def test_walk_through_rooms_render_all_and_make_a_video(stack, tmp_path):
         page.click("#roomList button:has-text('Living')")
         fwd = page.locator(".walk-pad [aria-label='Walk forward']")
         fwd.dispatch_event("pointerdown"); page.wait_for_timeout(400); fwd.dispatch_event("pointerup")
-        page.locator("#viewer").screenshot(path=str(shots_dir / "e2e-walk-living.png"))
+        page.screenshot(path=str(shots_dir / "e2e-walk-living.png"), clip=(page.locator("#viewer").scroll_into_view_if_needed() or page.locator("#viewer").bounding_box()), timeout=120000)
         page.click("#saveShot")
         page.wait_for_selector("#shotStrip li")
         page.click("#roomList button:has-text('Kitchen')")

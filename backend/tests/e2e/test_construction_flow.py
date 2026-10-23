@@ -104,9 +104,9 @@ def test_construction_animation_in_the_browser(stack, tmp_path):
         assert tags == [0, 1] and "Remake" in page.inner_text("#heroBtn")
         page.click("#animChapters button:has-text('Roof')")
         assert "Roof" in page.inner_text("#animTime")
-        page.locator("#viewer").screenshot(path=str(shots / "e2e-construction-roof.png"))
+        page.screenshot(path=str(shots / "e2e-construction-roof.png"), clip=(page.locator("#viewer").scroll_into_view_if_needed() or page.locator("#viewer").bounding_box()), timeout=120000)
         page.fill("#animScrub", "3300"); page.dispatch_event("#animScrub", "input")     # mid-sweep of view 1
-        page.locator("#viewer").screenshot(path=str(shots / "e2e-construction-reveal.png"))
+        page.screenshot(path=str(shots / "e2e-construction-reveal.png"), clip=(page.locator("#viewer").scroll_into_view_if_needed() or page.locator("#viewer").bounding_box()), timeout=120000)
         page.fill("#animScrub", "1500")      # 15 s: first-floor structure (site 3, foundation 4, ground floor 4 + 3)
         page.dispatch_event("#animScrub", "input")
         assert "First floor · structure" in page.inner_text("#animTime")

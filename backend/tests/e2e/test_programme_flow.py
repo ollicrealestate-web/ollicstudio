@@ -60,7 +60,7 @@ def test_animation_follows_the_programme(stack, tmp_path):  # noqa: F811
         page.fill("#animScrub", str(round(t * 100))); page.dispatch_event("#animScrub", "input")
         label = page.inner_text("#animTime")
         assert "Feb 2027" in label and "Columns" in label, label
-        page.locator("#viewer").screenshot(path=str(shots / "e2e-programme.png"))
+        page.screenshot(path=str(shots / "e2e-programme.png"), clip=(page.locator("#viewer").scroll_into_view_if_needed() or page.locator("#viewer").bounding_box()), timeout=120000)
         # move the blockwork to the first floor: it then builds the first-floor walls
         wall = row("Blockwork")
         wall.locator("select").nth(2).select_option("First floor")

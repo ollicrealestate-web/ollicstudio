@@ -373,7 +373,7 @@ export function createViewer(host, { onSelect } = {}) {
   // scored by how far one can see around it at eye height; faces its longest view
   const DIRS = Array.from({ length: 12 }, (_, i) => { const a = i / 12 * Math.PI * 2; return { yaw: a, v: new THREE.Vector3(-Math.sin(a), 0, -Math.cos(a)) }; });
   function openSpot(y, near0 = null) {
-    const band = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && o.userData.cls !== "glass" && o.geometry.boundingBox
+    const band = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && o.geometry.boundingBox
       && (() => { const b = new THREE.Box3().setFromObject(o); return b.max.y > y + 0.2 && b.min.y < y + 2.6; })());
     const floors = elements.filter(o => o.visible && o.userData.ifcType !== "IfcSpace" && (() => { const b = new THREE.Box3().setFromObject(o); return b.max.y > y - 0.6 && b.min.y < y + 0.9; })());
     const b = frameBox, N = 11, best = { score: -1 };
@@ -385,16 +385,12 @@ export function createViewer(host, { onSelect } = {}) {
       const f = r.intersectObjects(floors, false).find(h => h.face && Math.abs(h.face.normal.y) > 0.7);
       if (!f) continue;                     // no floor here (outside, or a void)
       const eye = new THREE.Vector3(x, f.point.y + 1.2, z);
-      let score = 0, far = 0, fy = 0, close = 0;
-      for (const d of DIRS) {
-        r.set(eye, d.v); r.far = 15;
-        const h = r.intersectObjects(band, false)[0], dist = h ? h.distance : 15;
-        if (dist < 0.5) close++;
-        if (dist < 0.7) score -= 6;          // too close to a wall or door
-        score += Math.min(dist, 8);
-        if (dist > far) { far = dist; fy = d.yaw; }
-      }
-      if (close > 2 || far >= 15 && score > 8 * 10) continue;   // inside a wall, or outside the building
+      // how far one sees in each direction (windows count as the room's edge); faces the widest open view
+      const dist = DIRS.map(d => { r.set(eye, d.v); r.far = 15; const h = r.intersectObjects(band, false)[0]; return h ? h.distance : 15; });
+      const open = dist.filter(v => v >= 15).length, nearest = Math.min(...dist);
+      if (nearest < 0.8 || open > 6) continue;   // against a wall, or outside the building
+      let score = dist.reduce((s, v) => s + Math.min(v, 8), 0), far = -1, fy = 0;
+      dist.forEach((v, k) => { const w = Math.min(v, 10) + 0.5 * (Math.min(dist[(k + 1) % 12], 10) + Math.min(dist[(k + 11) % 12], 10)); if (w > far) { far = w; fy = DIRS[k].yaw; } });
       if (near0) score -= Math.hypot(x - near0.x, z - near0.z) * 0.5;
       if (score > best.score) Object.assign(best, { score, x, z, feet: f.point.y, yaw: fy });
     }
