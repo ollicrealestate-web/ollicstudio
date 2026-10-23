@@ -35,7 +35,7 @@ SYSTEM = (
     "Study the pictures closely before writing. On the view to render, count and describe exactly what is there: the massing and "
     "setbacks, the number of floors, the roof and parapets, every band of windows and how it is divided, balconies, louvres, fins, "
     "cladding panels, columns, canopies, the entrance, terraces and roof plant, and the camera position, height, angle and framing. "
-    "Use the model facts (floors, element counts) to be precise. On a floor plan, read the footprint, units, core and balconies. On a "
+    "Use the model facts (floors, element counts) only to understand the building; never copy element counts or IFC words into the prompt, describe what is seen instead. On a floor plan, read the footprint, units, core and balconies. On a "
     "reference, note only its scene: surroundings, landscaping, sky, time of day, light, mood and materials palette.\n"
     "Then write ONE prompt that: (1) tells the image model to keep the view to render exactly: same building form, same number of "
     "floors, same openings and facade elements in the same places, same camera and framing; it may only add realistic materials, "
@@ -59,6 +59,7 @@ def facts_text(model: dict | None) -> str:
     r = model.get("report") or {}
     lines = []
     if r.get("storeys"):
+        lines.append("(These facts are for understanding the building; do not quote the numbers in the prompt.)")
         lines.append(f"Storeys in the model ({len(r['storeys'])}, bottom to top): " + ", ".join(r["storeys"][:20]))
     counts = r.get("counts") or {}
     if counts:
