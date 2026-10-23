@@ -1,0 +1,43 @@
+"""A minimal IFC2X3 model written by hand (as Revit's IFC2X3 exports are laid out): one storey
+and one 6 x 4 m slab. IFC2X3 lacks entities that IFC4 has, such as IfcMapConversion."""
+
+IFC2X3_SLAB = b"""ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [CoordinationView_V2.0]'),'2;1');
+FILE_NAME('slab.ifc','2026-10-23T10:00:00',(''),(''),'Ollic tests','Ollic tests','');
+FILE_SCHEMA(('IFC2X3'));
+ENDSEC;
+DATA;
+#1=IFCPERSON($,'Test',$,$,$,$,$,$);
+#2=IFCORGANIZATION($,'Ollic tests',$,$,$);
+#3=IFCPERSONANDORGANIZATION(#1,#2,$);
+#4=IFCAPPLICATION(#2,'1','Ollic tests','ollic-tests');
+#5=IFCOWNERHISTORY(#3,#4,$,.ADDED.,$,$,$,0);
+#6=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
+#7=IFCUNITASSIGNMENT((#6));
+#8=IFCCARTESIANPOINT((0.,0.,0.));
+#9=IFCAXIS2PLACEMENT3D(#8,$,$);
+#10=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#9,$);
+#11=IFCPROJECT('0YvctVUKr0kugbFTf53O9L',#5,'Slab test',$,$,$,$,(#10),#7);
+#12=IFCLOCALPLACEMENT($,#9);
+#13=IFCSITE('1YvctVUKr0kugbFTf53O9L',#5,'Site',$,$,#12,$,$,.ELEMENT.,$,$,$,$,$);
+#14=IFCLOCALPLACEMENT(#12,#9);
+#15=IFCBUILDING('2YvctVUKr0kugbFTf53O9L',#5,'Building',$,$,#14,$,$,.ELEMENT.,$,$,$);
+#16=IFCLOCALPLACEMENT(#14,#9);
+#17=IFCBUILDINGSTOREY('3YvctVUKr0kugbFTf53O9L',#5,'Ground floor',$,$,#16,$,$,.ELEMENT.,0.);
+#18=IFCRELAGGREGATES('4YvctVUKr0kugbFTf53O9L',#5,$,$,#11,(#13));
+#19=IFCRELAGGREGATES('5YvctVUKr0kugbFTf53O9L',#5,$,$,#13,(#15));
+#20=IFCRELAGGREGATES('6YvctVUKr0kugbFTf53O9L',#5,$,$,#15,(#17));
+#21=IFCCARTESIANPOINT((3.,2.));
+#22=IFCAXIS2PLACEMENT2D(#21,$);
+#23=IFCRECTANGLEPROFILEDEF(.AREA.,$,#22,6.,4.);
+#24=IFCDIRECTION((0.,0.,1.));
+#25=IFCEXTRUDEDAREASOLID(#23,#9,#24,0.2);
+#26=IFCSHAPEREPRESENTATION(#10,'Body','SweptSolid',(#25));
+#27=IFCPRODUCTDEFINITIONSHAPE($,$,(#26));
+#28=IFCLOCALPLACEMENT(#16,#9);
+#29=IFCSLAB('7YvctVUKr0kugbFTf53O9L',#5,'Ground slab',$,$,#28,#27,$,.FLOOR.);
+#30=IFCRELCONTAINEDINSPATIALSTRUCTURE('8YvctVUKr0kugbFTf53O9L',#5,$,$,(#29),#17);
+ENDSEC;
+END-ISO-10303-21;
+"""

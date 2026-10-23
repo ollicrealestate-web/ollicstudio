@@ -310,8 +310,12 @@ function fileActions(f) {
 }
 async function startImport(f, btn) {
   if (btn) btn.disabled = true;
-  try { await api.importIfc(current.id, f.id, newKey()); toast("Reading the IFC model. This takes a few seconds to a minute."); loadOutputs(); }
-  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+  try {
+    await api.importIfc(current.id, f.id, newKey());
+    $("#modelEmpty").textContent = "Your IFC model is being read into 3D. Small models take under a minute; large ones several minutes.";
+    toast("Reading the IFC model. Small models take under a minute; large ones several minutes."); loadOutputs();
+  }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); $("#modelEmpty").textContent = err.message; }
   finally { if (btn) btn.disabled = false; }
 }
 

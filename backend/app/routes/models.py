@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from ..auth import CurrentUser, get_current_user
 from ..bim.jobs import run_ifc_import
 from .projects import _owned_project, _repo, _storage
-from .renders import _require_token_life, _start_job
+from ..jobs import ACTIVE, is_stale
+from .renders import _require_token_life, _start_job, public_job
 
 router = APIRouter()
 
@@ -42,6 +43,17 @@ def import_ifc(project_id: uuid.UUID, body: SourceIn, request: Request, response
     if src.get("detected_type") != "ifc":
         raise HTTPException(422, {"code": "not_ifc", "reason": "Only IFC files can be imported as a model. Revit: File > Export > IFC."})
     _require_token_life(user)
+    limit = request.app.state.settings.ifc_max_mb
+    size_mb = (src.get("size_bytes") or 0) / 1e6
+    if limit and size_mb > limit:
+        raise HTTPException(413, {"code": "model_too_large", "reason": (
+            f"This model is {size_mb:.0f} MB. Ollic can read IFC files up to {limit} MB at the moment, and larger ones are coming soon. "
+            "To make it smaller, export only the building from Revit: leave out the site, furniture, linked models and detail you don't need to see.")})
+    # the same file already being read: return that job instead of reading it twice
+    for j in _repo(request).list_jobs(user, str(project_id)):
+        if j.get("type") == "ifc_import" and j.get("status") in ACTIVE and not is_stale(j) and (j.get("input") or {}).get("source_file_id") == str(body.source_file_id):
+            response.status_code = status.HTTP_200_OK
+            return public_job(j)
     return _start_job(request, user, str(project_id), "ifc_import", {"source_file_id": str(body.source_file_id)}, idempotency_key, response, run=run_ifc_import)
 
 

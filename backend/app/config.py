@@ -47,6 +47,9 @@ class Settings:
     kling_base_url: str = "https://api-singapore.klingai.com"   # Kling's endpoint for servers outside China
     kling_model: str = "kling-3.0"
     daily_clips_per_user: int = 5              # cinematic clips a paid customer may start per day
+    # largest IFC the server reads; reading takes about 17x the file size in memory, so 12 MB suits
+    # a 512 MB server; set IFC_MAX_MB=80 on a 2 GB one
+    ifc_max_mb: int = 12
     # Google Gemini API (direct): Nano Banana images, used for animation line drawings
     gemini_api_key: str | None = field(default=None, repr=False)
     fal_key: str | None = field(default=None, repr=False)          # Ollic VS (fal.ai): images and video
@@ -121,6 +124,7 @@ class Settings:
             kling_base_url=(os.environ.get("KLING_BASE_URL", "").strip() or "https://api-singapore.klingai.com").rstrip("/"),
             kling_model=os.environ.get("KLING_MODEL", "").strip() or "kling-3.0",
             daily_clips_per_user=_int("DAILY_CLIPS_PER_USER", 5),
+            ifc_max_mb=_int("IFC_MAX_MB", 12),
             gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip() or None,
             fal_key=os.environ.get("FAL_KEY", "").strip() or None,
             gemini_image_model=os.environ.get("GEMINI_IMAGE_MODEL", "").strip() or "gemini-nano-banana-2.1",

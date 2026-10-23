@@ -7,9 +7,13 @@ same geometry. The GLB opens in the website's 3D viewer and imports into Blender
 
 from __future__ import annotations
 
+import gc
 import io
+import json
 import logging
 import math
+import os
+import struct
 import re
 import tempfile
 from collections import Counter
@@ -20,9 +24,9 @@ import ifcopenshell.geom
 import ifcopenshell.util.element
 import ifcopenshell.util.unit
 import numpy as np
-import trimesh
 
 log = logging.getLogger("ollic.ifc")
+THREADS = max(1, min(4, os.cpu_count() or 1))     # processors used to build the 3D shapes
 
 SUPPORTED_SCHEMAS = ("IFC2X3", "IFC4", "IFC4X3")
 GUID_RE = re.compile(r"^[0-9A-Za-z_$]{22}$")
@@ -78,15 +82,19 @@ def _jsonable(v):
     return str(v)[:200]
 
 
-def import_ifc(data: bytes, progress=lambda stage: None) -> ImportResult:
+def import_ifc(data: bytes | str, progress=lambda stage: None) -> ImportResult:
+    """data: the IFC's bytes, or the path of a file holding them (less memory for large models)."""
     progress("Reading the IFC file")
-    with tempfile.NamedTemporaryFile(suffix=".ifc") as tmp:
-        tmp.write(data)
-        tmp.flush()
-        try:
-            f = ifcopenshell.open(tmp.name)
-        except Exception as exc:
-            raise ImportFailed("The IFC file could not be read. It may be damaged or cut off. Export it from Revit again (File > Export > IFC).") from exc
+    try:
+        if isinstance(data, str):
+            f = ifcopenshell.open(data)
+        else:
+            with tempfile.NamedTemporaryFile(suffix=".ifc") as tmp:
+                tmp.write(data)
+                tmp.flush()
+                f = ifcopenshell.open(tmp.name)
+    except Exception as exc:
+        raise ImportFailed("The IFC file could not be read. It may be damaged or cut off. Export it from Revit again (File > Export > IFC).") from exc
 
     checks: list[dict] = []
     schema = f.schema_identifier if hasattr(f, "schema_identifier") else f.schema
@@ -145,9 +153,9 @@ def import_ifc(data: bytes, progress=lambda stage: None) -> ImportResult:
     except Exception:
         pass
     wanted = {p.id() for p in products}
-    meshes: dict[str, trimesh.Trimesh] = {}
+    meshes: dict[str, _Mesh] = {}
     no_geometry: list[str] = []
-    it = ifcopenshell.geom.iterator(settings, f, include=products) if products else None
+    it = ifcopenshell.geom.iterator(settings, f, THREADS, include=products) if products else None
     if it is not None and it.initialize():
         while True:
             shape = it.get()
@@ -176,7 +184,11 @@ def import_ifc(data: bytes, progress=lambda stage: None) -> ImportResult:
         _check(checks, "size", "warn", f"The model is only {size[0]:.2f} x {size[1]:.2f} m across. Check the export units.")
     else:
         _check(checks, "size", "pass", f"Building is {size[0]:.1f} m x {size[1]:.1f} m and {size[2]:.1f} m tall")
-    if f.by_type("IfcMapConversion") or any(getattr(s, "RefLatitude", None) for s in f.by_type("IfcSite")):
+    try:
+        mapped = bool(f.by_type("IfcMapConversion"))      # IFC4 and later only
+    except RuntimeError:                                  # IFC2X3 has no such entity
+        mapped = False
+    if mapped or any(getattr(s, "RefLatitude", None) for s in f.by_type("IfcSite")):
         _check(checks, "location", "pass", "The model is georeferenced")
     else:
         _check(checks, "location", "info", "The model is not georeferenced. You can place it on the map later (Google Earth site view).")
@@ -200,23 +212,43 @@ def import_ifc(data: bytes, progress=lambda stage: None) -> ImportResult:
             kinds[p.GlobalId] = ifcopenshell.util.element.get_predefined_type(p)
         except Exception:
             kinds[p.GlobalId] = None
-    glb = _glb(meshes, {c["global_id"]: {**c, "predefined": kinds.get(c["global_id"])} for c in components}, lo, hi)
+    n_elements, n_geometry = len(products), len(meshes)
+    comps = {c["global_id"]: {**c, "predefined": kinds.get(c["global_id"])} for c in components}
+    storey_names = [s.Name for s in storeys]
+    # the IFC itself is no longer needed: free it before the 3D file is written
+    del f, it, products, spaces, storeys, settings
+    gc.collect()
+    glb = _glb(meshes, comps, lo, hi)
+    meshes.clear()
 
     status = "fail" if any(c["status"] == "fail" for c in checks) else "warn" if any(c["status"] == "warn" for c in checks) else "pass"
     report = {
         "status": status, "schema": schema, "units": unit_name, "checks": checks,
-        "counts": dict(counts.most_common()), "families": dict(by_family), "storeys": [s.Name for s in storeys],
-        "size_m": [round(float(x), 2) for x in size], "elements": len(products), "with_geometry": len(meshes),
+        "counts": dict(counts.most_common()), "families": dict(by_family), "storeys": storey_names,
+        "size_m": [round(float(x), 2) for x in size], "elements": n_elements, "with_geometry": n_geometry,
     }
     return ImportResult(report=report, glb=glb, components=components,
-                        stats={"elements": len(products), "with_geometry": len(meshes), "glb_bytes": len(glb), "mep": mep})
+                        stats={"elements": n_elements, "with_geometry": n_geometry, "glb_bytes": len(glb), "mep": mep})
 
 
-def _to_mesh(shape) -> trimesh.Trimesh:
+class _Mesh:
+    """One element's triangles, kept small: float32 corners and uint32 corner numbers."""
+    __slots__ = ("verts", "faces", "rgba", "ifc_type")
+
+    def __init__(self, verts, faces, rgba, ifc_type):
+        self.verts, self.faces, self.rgba, self.ifc_type = verts, faces, rgba, ifc_type
+
+    @property
+    def bounds(self):
+        return np.array([self.verts.min(axis=0), self.verts.max(axis=0)])
+
+
+def _to_mesh(shape) -> _Mesh:
     g = shape.geometry
-    v = np.asarray(g.verts, dtype=np.float64).reshape(-1, 3)
-    fc = np.asarray(g.faces, dtype=np.int64).reshape(-1, 3)
-    mesh = trimesh.Trimesh(vertices=v, faces=fc, process=False)
+    v = np.asarray(g.verts, dtype=np.float32).reshape(-1, 3)
+    fc = np.asarray(g.faces, dtype=np.uint32).reshape(-1, 3)
+    if not len(v) or not len(fc):
+        raise ValueError("empty geometry")
     rgba = None
     mats = list(g.materials)
     if mats:
@@ -228,32 +260,61 @@ def _to_mesh(shape) -> trimesh.Trimesh:
             rgba = (r, gg, b, 1 - t if t == t else 1.0)
         except Exception:
             rgba = None
-    mesh.metadata["rgba"] = rgba
-    mesh.metadata["ifc_type"] = shape.type
-    return mesh
+    return _Mesh(v, fc, rgba, shape.type)
 
 
-def _glb(meshes: dict[str, trimesh.Trimesh], comps: dict[str, dict], lo, hi) -> bytes:
-    """One node per element, named by GlobalId, in glTF's y-up axes, centred on the site origin."""
-    centre = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
-    to_y_up = np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]], dtype=float)
-    shift = np.eye(4)
-    shift[:3, 3] = -centre
-    scene = trimesh.Scene()
+def _glb(meshes: dict[str, _Mesh], comps: dict[str, dict], lo, hi) -> bytes:
+    """One node per element, named by GlobalId, in glTF's y-up axes, centred on the site origin.
+    Written directly (no scene library copy), so a large model needs little memory beyond its
+    triangles. Normals are left out: every triangle has its own corners, so the viewer works out
+    flat normals itself, and the file is a third smaller."""
+    cx, cy, cz = float((lo[0] + hi[0]) / 2), float((lo[1] + hi[1]) / 2), float(lo[2])
+    chunks, views, accessors, gl_meshes, nodes, materials, mat_index = [], [], [], [], [], [], {}
+    offset = 0
+
+    def add(arr: np.ndarray, target: int) -> int:
+        nonlocal offset
+        b = arr.tobytes()
+        pad = (-len(b)) % 4
+        chunks.append(b + b"\0" * pad)
+        views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(b), "target": target})
+        offset += len(b) + pad
+        return len(views) - 1
+
     for gid, m in meshes.items():
-        m = m.copy()
-        m.apply_transform(to_y_up @ shift)
         c = comps.get(gid, {})
-        rgba = m.metadata.get("rgba") or DEFAULT_COLOURS.get(c.get("ifc_type"), (0.8, 0.8, 0.8, 1))
+        rgba = m.rgba or DEFAULT_COLOURS.get(c.get("ifc_type"), (0.8, 0.8, 0.8, 1))
         if c.get("ifc_type") == "IfcSpace":
             rgba = (rgba[0], rgba[1], rgba[2], min(rgba[3], 0.15))
-        material = trimesh.visual.material.PBRMaterial(
-            baseColorFactor=[float(x) for x in rgba], metallicFactor=0.0, roughnessFactor=0.85,
-            alphaMode="BLEND" if rgba[3] < 0.99 else "OPAQUE", doubleSided=True)
-        m.visual = trimesh.visual.TextureVisuals(material=material)
+        rgba = tuple(round(float(x), 4) for x in rgba)
+        if rgba not in mat_index:
+            mat_index[rgba] = len(materials)
+            materials.append({"pbrMetallicRoughness": {"baseColorFactor": list(rgba), "metallicFactor": 0.0, "roughnessFactor": 0.85},
+                              "alphaMode": "BLEND" if rgba[3] < 0.99 else "OPAQUE", "doubleSided": True})
+        # IFC is z-up; glTF is y-up: (x, y, z) -> (x - cx, z - cz, -(y - cy))
+        v = np.empty_like(m.verts)
+        v[:, 0] = m.verts[:, 0] - cx
+        v[:, 1] = m.verts[:, 2] - cz
+        v[:, 2] = cy - m.verts[:, 1]
+        pos = len(accessors)
+        accessors.append({"bufferView": add(v, 34962), "componentType": 5126, "count": int(len(v)), "type": "VEC3",
+                          "min": [float(x) for x in v.min(axis=0)], "max": [float(x) for x in v.max(axis=0)]})
+        idx = m.faces.ravel().astype(np.uint16) if len(v) < 65536 else m.faces.ravel()
+        accessors.append({"bufferView": add(idx, 34963), "componentType": 5123 if idx.dtype == np.uint16 else 5125, "count": int(idx.size), "type": "SCALAR"})
+        gl_meshes.append({"name": gid, "primitives": [{"attributes": {"POSITION": pos}, "indices": pos + 1, "material": mat_index[rgba]}]})
         extras = {"globalId": gid, "ifcType": c.get("ifc_type"), "name": c.get("name"), "storey": c.get("storey"), "family": c.get("family"),
                   "predefined": c.get("predefined")}
-        scene.add_geometry(m, node_name=gid, geom_name=gid, metadata=extras)
-    buf = io.BytesIO()
-    buf.write(scene.export(file_type="glb", include_normals=True))
-    return buf.getvalue()
+        nodes.append({"name": gid, "mesh": len(gl_meshes) - 1, "extras": extras})
+    doc = {"asset": {"version": "2.0", "generator": "Ollic Design Studio"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}],
+           "nodes": nodes, "meshes": gl_meshes, "materials": materials, "accessors": accessors, "bufferViews": views,
+           "buffers": [{"byteLength": offset}]}
+    js = json.dumps(doc, separators=(",", ":")).encode()
+    js += b" " * ((-len(js)) % 4)
+    out = io.BytesIO()
+    out.write(struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(js) + 8 + offset))
+    out.write(struct.pack("<I4s", len(js), b"JSON")); out.write(js)
+    out.write(struct.pack("<I4s", offset, b"BIN\0"))
+    for b in chunks:
+        out.write(b)
+    chunks.clear()
+    return out.getvalue()

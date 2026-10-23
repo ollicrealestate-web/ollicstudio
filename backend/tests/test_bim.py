@@ -4,6 +4,7 @@ The sample IFC comes from a small builder that lives only in the tests (tests/fi
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 import math
@@ -135,3 +136,34 @@ def test_files_have_private_download_links(bim, alice, bob, sample_ifc):
     link = c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=alice["headers"]).json()
     assert "/object/sign/source-files/" in link["url"] and link["download_url"].endswith("&download=house.ifc")
     assert c.get(f"/api/projects/{pid}/files/{f['id']}/link", headers=bob["headers"]).status_code == 404
+
+
+def test_ifc2x3_models_from_revit_are_read(bim, alice):
+    """IFC2X3 has no IfcMapConversion; asking for it used to fail every IFC2X3 model at the last step."""
+    from tests.fixtures.ifc2x3_slab import IFC2X3_SLAB
+    r = import_ifc(IFC2X3_SLAB)
+    assert r.report["schema"] == "IFC2X3" and r.report["status"] == "pass" and r.stats["with_geometry"] == 1
+    loc = next(c for c in r.report["checks"] if c["key"] == "location")
+    assert loc["status"] == "info"
+    scene = trimesh.load(io.BytesIO(r.glb), file_type="glb")
+    lo, hi = scene.bounds
+    assert abs(lo[1]) < 1e-6 and abs(hi[1] - 0.2) < 1e-4 and abs((hi[0] - lo[0]) - 6) < 1e-4    # y-up: 0.2 m thick, 6 m wide
+
+
+def test_the_same_ifc_is_not_read_twice_and_big_ones_are_refused(bim, alice, sample_ifc, repo):
+    from app.jobs import InlineRunner
+    c = bim[0]
+    pid = c.post("/api/projects", json={"name": "x"}, headers=alice["headers"]).json()["id"]
+    f = upload(c, alice, pid, "house.ifc", sample_ifc)
+    held = []
+    c.app.state.runner = type("Hold", (), {"submit": lambda self, fn, *a: held.append((fn, a))})()   # jobs wait, as on a busy server
+    one = c.post(f"/api/projects/{pid}/import-ifc", json={"source_file_id": f["id"]}, headers=alice["headers"])
+    two = c.post(f"/api/projects/{pid}/import-ifc", json={"source_file_id": f["id"]}, headers=alice["headers"])
+    assert one.status_code == 202 and two.status_code == 200 and one.json()["id"] == two.json()["id"] and len(held) == 1
+    c.app.state.runner = InlineRunner()
+    fn, a = held[0]; fn(*a)
+    assert c.get(f"/api/jobs/{one.json()['id']}", headers=alice["headers"]).json()["status"] == "succeeded"
+    c.app.state.settings = dataclasses.replace(c.app.state.settings, ifc_max_mb=1)
+    repo.files[f["id"]]["size_bytes"] = 49_000_000
+    r = c.post(f"/api/projects/{pid}/import-ifc", json={"source_file_id": f["id"]}, headers=alice["headers"])
+    assert r.status_code == 413 and "49 MB" in r.json()["detail"]["reason"] and "up to 1 MB" in r.json()["detail"]["reason"]

@@ -70,6 +70,8 @@ export function createViewer(host, { onSelect } = {}) {
     elements = [];
     model.traverse(o => {
       if (!o.isMesh) return;
+      // 3D files from Ollic leave normals out (each triangle has its own corners), so they are made here
+      if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
       const x = { ...(o.parent?.userData || {}), ...(o.userData || {}) };
       o.userData = x;
       o.castShadow = x.ifcType !== "IfcSpace" && x.ifcType !== "IfcWindow";

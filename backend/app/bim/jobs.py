@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
+import threading
+import time
 import uuid
 
 from ..auth import CurrentUser
@@ -17,6 +20,42 @@ from ..supabase import BackendUnavailable
 # service starts quickly and stays small on the free instance.
 
 log = logging.getLogger("ollic.bim.jobs")
+# Reading a large IFC takes much of the server's memory, so models are read one at a time;
+# the others wait their turn (and say so), instead of running together and exhausting memory.
+ONE_AT_A_TIME = threading.Semaphore(1)
+WAIT_POLL = 20
+BEAT_EVERY = 45
+
+
+class _Heartbeat:
+    """Updates the job every BEAT_EVERY seconds while a long step runs, so the customer sees time
+    passing and the job is not taken for a stuck one (jobs untouched for 10 minutes are)."""
+
+    def __init__(self, repo, user, job_id):
+        self.repo, self.user, self.job_id, self.stage, self.t0 = repo, user, job_id, "Reading the IFC file", time.monotonic()
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def set(self, stage):
+        self.stage = stage
+        try:
+            self.repo.update_job(self.user, self.job_id, {"stage": stage})
+        except BackendUnavailable:
+            pass
+
+    def _run(self):
+        while not self._stop.wait(BEAT_EVERY):
+            m = int((time.monotonic() - self.t0) // 60)
+            try:
+                self.repo.update_job(self.user, self.job_id, {"stage": f"{self.stage} ({m} min so far; large models take several minutes)"})
+            except BackendUnavailable:
+                pass
+
+    def __enter__(self):
+        self._t.start(); return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
 
 
 def _start(repo, user, job_id):
@@ -51,8 +90,18 @@ def run_ifc_import(state, user: CurrentUser, job_id: str) -> None:
         src = repo.get_source_file(user, inp["source_file_id"])
         if not src or src.get("project_id") != job["project_id"] or src.get("detected_type") != "ifc":
             return _fail(repo, user, job_id, "The IFC file is no longer available. Upload it again.")
-        data = storage.download(user, src["storage_path"])
-        result = import_ifc(data, progress=lambda stage: repo.update_job(user, job_id, {"stage": stage}))
+        while not ONE_AT_A_TIME.acquire(timeout=WAIT_POLL):
+            if _cancelled(repo, user, job_id):
+                return
+            repo.update_job(user, job_id, {"stage": "Waiting for another model to finish reading"})
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".ifc") as tmp:
+                tmp.write(storage.download(user, src["storage_path"]))     # on disk, not held in memory while reading
+                tmp.flush()
+                with _Heartbeat(repo, user, job_id) as beat:
+                    result = import_ifc(tmp.name, progress=beat.set)
+        finally:
+            ONE_AT_A_TIME.release()
         if _cancelled(repo, user, job_id):
             return
         repo.update_job(user, job_id, {"stage": "Saving the 3D model"})
