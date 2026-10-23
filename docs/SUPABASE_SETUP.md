@@ -52,3 +52,10 @@ The migration sets a 50 MB limit per file on the bucket. On the free plan, Supab
 3. Start the API (`backend/run_dev.sh`), then run `python scripts/verify_isolation.py`.
 
 Every line must say PASS. This is acceptance test 14 against the real database, and test 22 against real storage.
+
+## Testers (migration 10)
+
+Run `supabase/migrations/20261023000010_testers.sql`. A tester (`profiles.role = 'tester'`) has
+free features without daily limits, plus the one-time paid allowance in `profiles.allowances`,
+e.g. `{"vs_image": 2, "vs_video": 1}` (Ollic VS pictures and clips). Failed or cancelled attempts
+are not counted. Customers cannot change their own role or allowances.

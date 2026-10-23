@@ -329,3 +329,52 @@ def test_fal_requests_follow_the_documented_format():
     with pytest.raises(ProviderError) as e:
         bad.generate(model="x", prompt="p")
     assert "fal" not in e.value.args[0].lower()
+
+
+# ---------------------------------------------------------------- testers
+@needs_ffmpeg
+def test_testers_get_two_vs_pictures_and_one_vs_clip_and_free_things_unlimited(clip_app, alice, repo, render_settings):
+    imgs, vid = FakeGemini(), FakeFalVideo()
+    imgs.provider = "fal"
+    c, kling = clip_app(fal={"images": imgs, "video": vid})
+    repo.roles[alice["id"]] = "tester"
+    repo.allowances[alice["id"]] = {"vs_image": 2, "vs_video": 1}
+    pid = new_project(c, alice)
+    tiers = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()
+    assert tiers["tiers"]["vs"]["allowed"] and tiers["tiers"]["vs"]["left"] == 2 and not tiers["tiers"]["premium"]["allowed"]
+    assert tiers["video_engines"]["vs"]["left"] == 1 and tiers["video_engines"]["vs"]["allowed"] and not tiers["video_engines"]["motion"]["allowed"]
+    assert tiers["tiers"]["standard"]["daily_limit"] is None                         # free renders: no daily limit
+    photo, line = photo_and_lines(c, alice, pid)            # two free renders: a photoreal view and its line drawing
+    # free renders, past the normal daily limit
+    for k in range(render_settings.daily_renders_per_user + 2):
+        r = c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": f"villa {k}"}, headers={**alice["headers"], "Idempotency-Key": f"free-{k:04d}"})
+        assert r.status_code == 202, r.text
+    # two Ollic VS pictures, then no more
+    body = {"prompt": "white villa at dusk", "tier": "vs"}
+    for k in range(2):
+        assert c.post(f"/api/projects/{pid}/architectural-render", json=body, headers={**alice["headers"], "Idempotency-Key": f"vs-tester-{k:04d}"}).status_code == 202
+    r = c.post(f"/api/projects/{pid}/architectural-render", json=body, headers={**alice["headers"], "Idempotency-Key": "vs-tester-0009"})
+    assert r.status_code == 403 and "used your free Ollic VS pictures" in r.json()["detail"]["reason"]
+    assert c.post(f"/api/projects/{pid}/architectural-render", json={**body, "tier": "premium"}, headers={**alice["headers"], "Idempotency-Key": "premium-tester-01"}).status_code in (403, 503)
+    assert c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["tiers"]["vs"]["left"] == 0
+    # one Ollic VS clip; Ollic Motion stays for paid plans
+    clip = {"engine": "vs", "start": {"kind": "lines", "id": line["id"]}, "end": {"kind": "render", "id": photo["id"]}, "seconds": 5}
+    assert c.post(f"/api/projects/{pid}/cinematic", json={**clip, "engine": "motion"}, headers=alice["headers"]).status_code == 403
+    assert c.post(f"/api/projects/{pid}/cinematic", json=clip, headers=alice["headers"]).status_code == 202
+    r = c.post(f"/api/projects/{pid}/cinematic", json=clip, headers=alice["headers"])
+    assert r.status_code == 403 and "used your free Ollic VS clip" in r.json()["detail"]["reason"]
+
+
+def test_a_failed_attempt_does_not_use_up_the_allowance(clip_app, alice, repo):
+    c, _ = clip_app()
+    repo.roles[alice["id"]] = "tester"; repo.allowances[alice["id"]] = {"vs_image": 2}
+    pid = new_project(c, alice)
+    from app.routes.renders import allowance_left
+    class R: pass
+    for k, status in enumerate(("failed", "cancelled", "succeeded")):
+        repo.jobs[f"j{k}"] = {"id": f"j{k}", "owner_id": alice["id"], "project_id": pid, "status": status, "input": {"tier": "vs"}, "created_at": "2026-10-23T00:00:00+00:00"}
+    req = R(); req.app = c.app
+    from app.auth import CurrentUser
+    user = CurrentUser(id=alice["id"], email="a@x", token=alice["headers"]["Authorization"][7:], expires_at=None)
+    assert allowance_left(req, user, "vs_image") == 1
+    assert allowance_left(req, user, "vs_video") is None

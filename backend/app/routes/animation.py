@@ -18,7 +18,7 @@ from ..schedule import GROUP_NAMES, GROUPS, KINDS, ScheduleUnreadable, match_all
 from ..supabase import BackendUnavailable
 from ..video import FORMATS as SIZES, VideoFailed, probe
 from .projects import _owned_project, _repo
-from .renders import UNLIMITED_ROLES, _require_token_life, _start_job, _utc_midnight, user_plan
+from .renders import FREE_UNLIMITED_ROLES, _require_token_life, _start_job, _utc_midnight, user_plan
 
 router = APIRouter()
 MAX_UPLOAD = 200 * 1024 * 1024
@@ -72,7 +72,7 @@ def direct(project_id: uuid.UUID, body: DirectIn, request: Request, user: Curren
     repo = _repo(request)
     midnight = _utc_midnight()
     used = sum(1 for e in repo.list_usage_events(user, limit=200) if e.get("operation") == "animation_direct" and str(e.get("created_at") or "") >= midnight)
-    if used >= DAILY_DIRECTIONS and (repo.get_profile(user) or {}).get("role") not in UNLIMITED_ROLES:
+    if used >= DAILY_DIRECTIONS and (repo.get_profile(user) or {}).get("role") not in FREE_UNLIMITED_ROLES:
         raise HTTPException(429, {"code": "daily_limit", "reason": f"You have used today's {DAILY_DIRECTIONS} plain-language edits. Use the settings below, or try again after 01:00 Lagos time."})
     try:
         out = director.direct(body.instruction.strip(), body.script, body.context.model_dump())

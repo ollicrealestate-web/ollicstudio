@@ -1,4 +1,5 @@
-"""Checks a returned image and stamps the concept label onto the copy people see and share."""
+"""Checks a returned image and stamps the Ollicstudio mark onto the copy people see and share.
+The record keeps the "AI concept — not to scale" label, shown beside the picture in the app."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 
 CONCEPT_LABEL = "AI concept — not to scale"
-STAMP_TEXT = CONCEPT_LABEL
+STAMP_TEXT = "Ollicstudio"        # the mark on every picture people download and share
 FONT = Path(__file__).parent / "fonts" / "Outfit.ttf"  # the site's typeface (SIL Open Font Licence)
 
 

@@ -14,7 +14,7 @@ from ..engines import VIDEO_ENGINES
 from ..fal import video_cost
 from ..kling import estimate_cost
 from .projects import _owned_project, _repo
-from .renders import UNLIMITED_ROLES, _require_token_life, _start_job, _utc_midnight, user_plan
+from .renders import UNLIMITED_ROLES, _require_token_life, allowance_left, _start_job, _utc_midnight, user_plan
 
 router = APIRouter()
 
@@ -49,9 +49,14 @@ def make_clip(project_id: uuid.UUID, body: ClipIn, request: Request, response: R
     if (getattr(request.app.state, "video_clients", None) or {}).get(body.engine) is None:
         raise HTTPException(503, {"code": "not_configured", "reason": f"{VIDEO_ENGINES[body.engine]['name']} is not connected yet."})
     repo = _repo(request)
-    role = (repo.get_profile(user) or {}).get("role")
+    profile = repo.get_profile(user) or {}
+    role = profile.get("role")
     if user_plan(request, user) != "premium" and role not in UNLIMITED_ROLES:
-        raise HTTPException(403, {"code": "premium_only", "reason": "Cinematic clips are for paid plans."})
+        left = allowance_left(request, user, "vs_video", profile) if body.engine == "vs" else None
+        if left == 0:
+            raise HTTPException(403, {"code": "allowance_used", "reason": "You have used your free Ollic VS clip."})
+        if left is None:
+            raise HTTPException(403, {"code": "premium_only", "reason": "Cinematic clips are for paid plans."})
     for ref in (body.start, body.end):
         if ref.kind == "file":
             f = repo.get_source_file(user, str(ref.id))
@@ -63,12 +68,12 @@ def make_clip(project_id: uuid.UUID, body: ClipIn, request: Request, response: R
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Picture not found in this project.")
     limit = request.app.state.settings.daily_clips_per_user
     if role not in UNLIMITED_ROLES and limit:
-        used = repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), "clip")
+        used = sum(repo.count_jobs_since(user, _utc_midnight(), ("queued", "running", "succeeded"), t) for t in ("clip", "clip-vs"))
         if used >= limit:
             raise HTTPException(429, {"code": "daily_limit", "reason": f"You have made today's {limit} cinematic clips. They reset at 01:00 Lagos time."})
     if body.engine == "vs" and body.seconds < 4:
         raise HTTPException(422, {"code": "too_short", "reason": "Ollic VS clips are 4 to 15 seconds."})
     est = video_cost(body.resolution, body.seconds) if body.engine == "vs" else estimate_cost(body.resolution, body.seconds, body.audio)
-    job_input = body.model_dump(mode="json") | {"tier": "clip", "estimate_usd": str(est)}
+    job_input = body.model_dump(mode="json") | {"tier": "clip-vs" if body.engine == "vs" else "clip", "estimate_usd": str(est)}
     job = _start_job(request, user, str(project_id), "cinematic_clip", job_input, None, response, run=run_clip_job, max_active=3)
     return job | {"estimate_usd": job_input["estimate_usd"]}

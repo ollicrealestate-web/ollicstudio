@@ -34,7 +34,8 @@ class FakeRepo:
         self.images: dict[str, dict] = {}
         self.usage: list[dict] = []
         self.plans: dict[str, str] = {}  # user id -> "premium"; everyone else is on "free"
-        self.roles: dict[str, str] = {}  # user id -> "admin" / "reviewer"; everyone else is a "customer"
+        self.roles: dict[str, str] = {}  # user id -> "admin" / "reviewer" / "tester"; everyone else is a "customer"
+        self.allowances: dict[str, dict] = {}  # user id -> {"vs_image": 2, "vs_video": 1}
         self.models: dict[str, dict] = {}
         self.components: list[dict] = []
         self.shots: dict[str, dict] = {}
@@ -156,7 +157,7 @@ class FakeRepo:
         return [copy.deepcopy(c) for c in self.components if c["model_id"] == model_id and c["owner_id"] == user.id][:limit]
 
     def get_profile(self, user):
-        return {"id": user.id, "plan": self.plans.get(user.id, "free"), "role": self.roles.get(user.id, "customer")}
+        return {"id": user.id, "plan": self.plans.get(user.id, "free"), "role": self.roles.get(user.id, "customer"), "allowances": self.allowances.get(user.id, {})}
 
     def create_rendered_image(self, user, record):
         self._owned_project(user, record["project_id"])

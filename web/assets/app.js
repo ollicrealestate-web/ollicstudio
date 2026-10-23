@@ -553,7 +553,8 @@ function setupTiers(out) {
   const was = chosenTier();
   more.replaceChildren(...Object.entries(tierInfo).filter(([k]) => k !== "standard" && k !== "premium").map(([k, t]) => {
     const on = t.available && t.allowed;
-    const note = t.soon ? "Coming soon" : !t.available ? "Not connected yet" : !t.allowed ? "Paid plans only" : t.price;
+    const note = t.soon ? "Coming soon" : !t.available ? "Not connected yet" : t.left === 0 ? "Your free ones are used" : !t.allowed ? "Paid plans only"
+      : t.left ? `${t.left} free for you` : t.price;
     const input = el("input", { type: "radio", name: "tier", value: k, ...(on ? {} : { disabled: "" }), ...(on && was === k ? { checked: "" } : {}) });
     input.addEventListener("change", tierChanged);
     return el("label", { class: `tier premium-tag${on ? "" : " off"}` }, input, el("span", {}, el("b", {}, t.name), el("small", {}, `${t.blurb} · ${note}`)));
@@ -1298,9 +1299,10 @@ function updateClipEngines(engines) {
   clipEngines = engines;
   for (const sel of clipEngineSelects) {
     const keep = sel.value;
-    sel.replaceChildren(...Object.entries(engines).map(([k, e]) => el("option", { value: k, ...(e.available ? {} : { disabled: "" }) },
-      `${e.name}${e.soon ? " (coming soon)" : !e.available ? " (not connected yet)" : ""}`)));
-    sel.value = engines[keep]?.available ? keep : (Object.keys(engines).find(k => engines[k].available) || "motion");
+    const usable = e => e.available && e.allowed !== false;
+    sel.replaceChildren(...Object.entries(engines).map(([k, e]) => el("option", { value: k, ...(usable(e) ? {} : { disabled: "" }) },
+      `${e.name}${e.soon ? " (coming soon)" : !e.available ? " (not connected yet)" : e.left === 0 ? " (your free clip is used)" : e.left ? ` (${e.left} free for you)` : e.allowed === false ? " (paid plans)" : ""}`)));
+    sel.value = usable(engines[keep] || {}) ? keep : (Object.keys(engines).find(k => usable(engines[k])) || "motion");
     sel.dispatchEvent(new Event("change"));
   }
 }

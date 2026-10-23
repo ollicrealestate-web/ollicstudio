@@ -115,13 +115,28 @@ def user_plan(request: Request, user: CurrentUser) -> str:
 
 
 UNLIMITED_ROLES = ("admin", "reviewer")
+FREE_UNLIMITED_ROLES = UNLIMITED_ROLES + ("tester",)   # testers: free features without daily limits
+EVER = "1970-01-01T00:00:00+00:00"
+# one-time allowances of paid options (profiles.allowances), and the job tier each is counted by
+ALLOWANCE_TIER = {"vs_image": "vs", "vs_video": "clip-vs"}
+
+
+def allowance_left(request: Request, user: CurrentUser, key: str, profile: dict | None = None) -> int | None:
+    """How many of a one-time paid allowance are left; None when the account has none.
+    Only queued, running and finished jobs count, so a failed attempt is not used up."""
+    profile = profile if profile is not None else (_repo(request).get_profile(user) or {})
+    total = (profile.get("allowances") or {}).get(key)
+    if not isinstance(total, int) or total <= 0:
+        return None
+    used = _repo(request).count_jobs_since(user, EVER, ("queued", "running", "succeeded"), ALLOWANCE_TIER[key])
+    return max(0, total - used)
 
 
 def daily_limit(request: Request, user: CurrentUser, tier: str) -> int:
     """Renders a day for this account and tier; 0 means no limit. Owner and test accounts
     (profiles.role 'admin' or 'reviewer') have none; customers have the configured allowance."""
     profile = _repo(request).get_profile(user) or {}
-    if profile.get("role") in UNLIMITED_ROLES:
+    if profile.get("role") in UNLIMITED_ROLES or (profile.get("role") == "tester" and tier == "standard"):
         return 0
     return request.app.state.settings.daily_limit_for(tier)
 
@@ -130,8 +145,13 @@ def _require_tier(request: Request, user: CurrentUser, tier: str) -> None:
     if request.app.state.image_clients.get(tier) is None:
         reason = f"{TIER_NAME[tier]} is not connected yet." if tier in IMAGE_ENGINES else f"{TIER_NAME[tier]} is not switched on for this site yet."
         raise HTTPException(503, {"code": "not_configured", "reason": reason})
-    if tier in IMAGE_ENGINES and user_plan(request, user) != "premium" and (_repo(request).get_profile(user) or {}).get("role") not in UNLIMITED_ROLES:
-        raise HTTPException(403, {"code": "premium_only", "reason": f"{TIER_NAME[tier]} is for paid plans. Standard renders are free."})
+    profile = _repo(request).get_profile(user) or {}
+    if tier in IMAGE_ENGINES and user_plan(request, user) != "premium" and profile.get("role") not in UNLIMITED_ROLES:
+        left = allowance_left(request, user, "vs_image", profile) if tier == "vs" else None
+        if left == 0:
+            raise HTTPException(403, {"code": "allowance_used", "reason": f"You have used your free {TIER_NAME[tier]} pictures. Standard renders stay free."})
+        if left is None:
+            raise HTTPException(403, {"code": "premium_only", "reason": f"{TIER_NAME[tier]} is for paid plans. Standard renders are free."})
     if tier == "premium" and user_plan(request, user) != "premium" and (_repo(request).get_profile(user) or {}).get("role") not in UNLIMITED_ROLES:
         raise HTTPException(403, {"code": "premium_only", "reason": "Premium render is for paid plans. Standard renders are free."})
 
@@ -261,14 +281,19 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
     jobs = [_settle_stale(request, user, j) for j in repo.list_jobs(user, str(project_id)) if j.get("owner_id") == user.id]
     plan = user_plan(request, user)
     clients = request.app.state.image_clients
-    unlimited = (repo.get_profile(user) or {}).get("role") in UNLIMITED_ROLES
+    profile = repo.get_profile(user) or {}
+    unlimited = profile.get("role") in UNLIMITED_ROLES
+    left = {k: allowance_left(request, user, k, profile) for k in ALLOWANCE_TIER} if not unlimited and plan != "premium" else {}
     tiers = {t: {"name": TIER_NAME[t], "available": clients.get(t) is not None, "allowed": t == "standard" or plan == "premium" or unlimited,
                  "daily_limit": daily_limit(request, user, t) or None} for t in ("standard", "premium")}
     # the added options, beside the two above; listed even when not connected
     for t, e in IMAGE_ENGINES.items():
-        tiers[t] = {"name": e["name"], "available": clients.get(t) is not None, "allowed": plan == "premium" or unlimited,
+        mine = left.get("vs_image") if t == "vs" else None
+        tiers[t] = {"name": e["name"], "available": clients.get(t) is not None, "allowed": plan == "premium" or unlimited or bool(mine), "left": mine,
                     "daily_limit": daily_limit(request, user, t) or None, "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon"))}
+    clip_left = left.get("vs_video")
     video_engines = {k: {"name": e["name"], "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon")),
+                         "allowed": plan == "premium" or unlimited or (k == "vs" and bool(clip_left)), "left": clip_left if k == "vs" else None,
                          "available": (getattr(request.app.state, "video_clients", None) or {}).get(k) is not None} for k, e in VIDEO_ENGINES.items()}
     return {"renders_enabled": any(v["available"] for v in tiers.values()), "plan": plan, "tiers": tiers, "video_engines": video_engines,
             "images": out, "jobs": [public_job(j) for j in jobs]}

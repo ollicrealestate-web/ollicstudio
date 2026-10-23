@@ -217,7 +217,10 @@ class SupabaseRepository:
         return self._call("GET", "/final_videos", user, params={"select": "*", "project_id": _eq(project_id), "owner_id": _eq(user.id), "order": "created_at.desc"})
 
     def get_profile(self, user):
-        rows = self._call("GET", "/profiles", user, params={"select": "id,plan,role", "id": _eq(user.id)})
+        try:
+            rows = self._call("GET", "/profiles", user, params={"select": "id,plan,role,allowances", "id": _eq(user.id)})
+        except BackendUnavailable:      # before migration 10 there is no allowances column
+            rows = self._call("GET", "/profiles", user, params={"select": "id,plan,role", "id": _eq(user.id)})
         return rows[0] if rows else None
 
     def create_rendered_image(self, user, record):
