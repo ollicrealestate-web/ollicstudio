@@ -173,7 +173,8 @@ def _settle_stale(request: Request, user: CurrentUser, job: dict) -> dict:
     if is_stale(job):
         updated = _repo(request).update_job(user, job["id"], {
             "status": "failed", "stage": None, "finished_at": now_iso(),
-            "error": "This render was interrupted before it finished, probably by a server restart. Start it again.",
+            "error": ("This model reading was interrupted before it finished, probably by a server restart. Choose the file again to retry." if job.get("type") == "ifc_import"
+                      else "This was interrupted before it finished, probably by a server restart. Start it again."),
         })
         return updated or job
     return job
