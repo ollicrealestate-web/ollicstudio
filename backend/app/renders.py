@@ -65,8 +65,6 @@ def build_prompt(opts: dict, *, with_reference: bool = False, roles: list[str] |
         parts.append(f"The ground floor is a {opts['ground_floor']}.")
     if opts.get("style"):
         parts.append(f"Style: {STYLES.get(opts['style'], opts['style'])}.")
-    if opts.get("shot_name"):
-        parts.append(f"This shot is: {opts['shot_name'].strip()}. Render it as a finished, furnished, lived-in space or view, true to the model.")
     parts.append(f"Architect's brief: {opts['prompt'].strip()}")
     if opts.get("materials"):
         parts.append(f"Materials and colours: {opts['materials'].strip()}.")
@@ -111,10 +109,7 @@ def _premium_prompt(state, user, job, tier, ask):
 
 
 def _as_image(data: bytes, kind: str) -> tuple[bytes, str]:
-    """Reference images go to the model as PNG or JPEG; a PDF drawing is sent as its first page."""
-    if kind == "pdf":
-        from .vision import image_png, load_image
-        return image_png(load_image(data, "pdf"), max_side=2000), "image/png"
+    """Reference images go to the model as they are (PNG or JPEG)."""
     return data, REF_MIME[kind]
 
 
@@ -162,7 +157,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             images, roles = [], []
             for r in refs:
                 src = repo.get_source_file(user, r["file_id"])
-                if not src or src.get("project_id") != job["project_id"] or src.get("detected_type") not in ("png", "jpeg", "pdf"):
+                if not src or src.get("project_id") != job["project_id"] or src.get("detected_type") not in ("png", "jpeg"):
                     return fail("One of the reference images is no longer available. Choose it again.")
                 images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"]))
                 roles.append(r["role"])
@@ -171,7 +166,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 prompt = inp["prompt"].strip() + "\n" + SAFE_TAIL
             writer_note = None if inp.get("prompt_ready") else _premium_prompt(state, user, job, tier, lambda w: w.write(
                 brief=inp["prompt"], images=images, roles=roles,
-                choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect", "shot_name")}))
+                choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect")}))
             if writer_note:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
             model = settings.model_for(tier, "create")
@@ -224,7 +219,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         options = {"size": size, "quality": quality, "operation": operation, "tier": tier, "final_prompt": prompt[:8000],
                    "prompt_notes": (writer_note or {}).get("notes"), "premium_prompting": bool(writer_note)}
         if job["type"] == "concept_render":
-            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line", "prompt_ready")})
+            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "anim_hero", "anim_line", "prompt_ready")})
         elif inp.get("anim_line"):
             options["anim_line"] = inp["anim_line"]
         try:

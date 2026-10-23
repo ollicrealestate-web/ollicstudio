@@ -1,6 +1,6 @@
 # Ollic Design Studio
 
-A web platform that turns sketches, PDF drawings and IFC models into renders, a staged construction animation, MEP views and walkthroughs. Built phase by phase from the *Master Development Brief, Rev. 2*.
+An image-based platform: architects upload PNG or JPEG images, say in plain words what they want, and Ollic drives image and video AI services through their APIs (with Claude writing the prompts) to make photoreal renders, a golden construction animation and cinematic video clips. Built phase by phase from the *Master Development Brief, Rev. 2*.
 
 **Current phase: 1, Foundation.** Accounts, projects and validated, private uploads. See [`docs/STATUS.md`](docs/STATUS.md).
 

@@ -42,7 +42,7 @@ def test_unknown_and_malformed_ids(client, alice):
 def test_deleting_a_project_removes_its_files_from_storage(client, alice, storage, repo):
     """Acceptance test 22."""
     p = _create(client, alice)
-    for name, data in (("plan.png", samples.png()), ("drawings.pdf", samples.pdf(3))):
+    for name, data in (("plan.png", samples.png()), ("photo.jpg", samples.jpeg())):
         assert client.post(f"/api/projects/{p['id']}/uploads", files={"file": (name, data)}, headers=alice["headers"]).status_code == 201
     assert len(storage.objects) == 2
     assert client.delete(f"/api/projects/{p['id']}", headers=alice["headers"]).status_code == 204
@@ -58,14 +58,13 @@ def test_website_config_is_served_from_settings_with_public_values_only(client, 
 
 
 # ---------------------------------------------------------------- deleting files, renders and videos
-def test_files_renders_and_videos_can_be_deleted(render_settings, repo, storage, alice, bob, sample_ifc_bytes):
+def test_files_renders_and_videos_can_be_deleted(render_settings, repo, storage, alice, bob):
     from fastapi.testclient import TestClient
     from app.auth import TokenVerifier
     from app.jobs import InlineRunner
     from app.main import create_app
     from .conftest import FakeImages
     from .test_studio import new_project, upload
-    from .test_walkthrough import save_shot
     from . import samples
     c = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner()))
     pid = new_project(c, alice)
@@ -88,15 +87,22 @@ def test_files_renders_and_videos_can_be_deleted(render_settings, repo, storage,
     path = repo.files[sketch["id"]]["storage_path"]
     assert c.delete(f"/api/projects/{pid}/files/{sketch['id']}", headers=alice["headers"]).status_code == 204
     assert sketch["id"] not in repo.files and path not in storage.objects and len(repo.images) == 1
-    # an IFC: its 3D model goes with it
-    ifc = upload(c, alice, pid, "house.ifc", sample_ifc_bytes)
-    c.post(f"/api/projects/{pid}/import-ifc", json={"source_file_id": ifc["id"]}, headers={**alice["headers"], "Idempotency-Key": "del-test-0003"})
-    (m,) = repo.models.values()
-    assert c.delete(f"/api/projects/{pid}/files/{ifc['id']}", headers=alice["headers"]).status_code == 204
-    assert repo.models == {} and m["glb_path"] not in storage.buckets["models"] and not repo.components
-    # a shot's picture: the shot goes too
-    s = save_shot(c, alice, pid)
-    assert c.delete(f"/api/projects/{pid}/files/{s['source_file_id']}", headers=alice["headers"]).status_code == 204
+    # an older project's IFC, with the 3D model made from it: both go
+    import uuid as _uuid
+    user = c.app.state.verifier.verify(alice["headers"]["Authorization"].split()[1])
+    fid, mid = str(_uuid.uuid4()), str(_uuid.uuid4())
+    ifc_path, glb = f"{alice['id']}/{pid}/{fid}.ifc", f"{alice['id']}/{pid}/{mid}.glb"
+    storage.upload(user, ifc_path, samples.ifc(), "application/x-step")
+    storage.upload(user, glb, b"glTF", "model/gltf-binary", bucket="models")
+    repo.create_source_file(user, {"id": fid, "project_id": pid, "original_name": "house.ifc", "storage_path": ifc_path, "detected_type": "ifc", "size_bytes": 10,
+                                   "checksum_sha256": "0" * 64, "validation": {"status": "valid", "details": {}}, "processing_status": "uploaded"})
+    repo.create_model(user, {"id": mid, "project_id": pid, "source_file_id": fid, "glb_path": glb})
+    assert c.delete(f"/api/projects/{pid}/files/{fid}", headers=alice["headers"]).status_code == 204
+    assert repo.models == {} and glb not in storage.buckets["models"] and fid not in repo.files
+    # an older project's walkthrough shot: it goes with its picture
+    pic = upload(c, alice, pid, "Shot - Kitchen.png", samples.png(32, 24))
+    repo.create_shot(user, {"project_id": pid, "source_file_id": pic["id"], "name": "Kitchen", "pose": {}})
+    assert c.delete(f"/api/projects/{pid}/files/{pic['id']}", headers=alice["headers"]).status_code == 204
     assert repo.shots == {}
     # a video
     vid = "11111111-2222-3333-4444-555555555555"

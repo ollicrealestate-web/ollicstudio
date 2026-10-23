@@ -1,4 +1,4 @@
-"""End-to-end: an architect without a model file animates 3D images: the AI makes one photoreal,
+"""End-to-end: an architect animates 3D images: the AI makes one photoreal,
 another is used as it is, the gold-line-to-photoreal animation previews, and a 1:1 MP4 is exported,
 checked, converted and saved. Supabase Auth and the image model are stand-ins; the browser's
 drawing and video encoder and FFmpeg are real."""
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from .test_construction_flow import stack  # noqa: F401  (same servers)
+from .servers import stack  # noqa: F401  (the test servers)
 
 playwright = pytest.importorskip("playwright.sync_api")
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is not installed")

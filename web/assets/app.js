@@ -1,4 +1,4 @@
-import { api, uploadFile, uploadAnimation, readSchedule, saveBrowserModel, ApiError, newKey } from "./api.js";
+import { api, uploadFile, uploadAnimation, ApiError, newKey } from "./api.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -12,7 +12,7 @@ function message(el, text, kind = "error") { el.textContent = text; el.className
 const fmtBytes = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const fmtDate = iso => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const TYPE = { png: "PNG", jpeg: "JPEG", pdf: "PDF", ifc: "IFC" };
-const INPUT = { unknown: "No files yet", sketch: "Drawings", ifc: "IFC model" };
+const INPUT = { unknown: "No files yet", sketch: "Images", ifc: "Images" };
 function el(tag, attrs = {}, ...kids) { const e = document.createElement(tag); Object.entries(attrs).forEach(([k, v]) => { if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v); }); kids.flat().forEach(k => e.append(k instanceof Node ? k : document.createTextNode(String(k)))); return e; }
 function details(f) { const d = f.validation?.details || {}; if (d.width) return `${d.width} × ${d.height} px`; if (d.pages) return `${d.pages} page${d.pages > 1 ? "s" : ""}`; if (d.schema) return d.schema; return ""; }
 
@@ -83,13 +83,12 @@ async function openProject(id) {
   show("projectView"); $("#uploads").replaceChildren(); resetDelete(); stopPolling();
   $("#gallery").replaceChildren(); $("#jobList").replaceChildren(); message($("#renderMsg"), "");
   $("#renderForm").hidden = true; $("#studioOff").hidden = true; $("#galleryEmpty").hidden = true;
-  resetModel(); resetWalk(); resetIA(); outputsLoadedOnce = false; seenDone = new Set();
+  images = []; videos = []; resetIA(); outputsLoadedOnce = false; seenDone = new Set();
   const q = new URLSearchParams(location.search), same = q.get("project") === id;
   service = same && SERVICES[q.get("service")] ? q.get("service") : null;
   step = service ? (q.get("step") === "start" && service !== "library" ? "start" : "work") : null;
-  chosenIfc = same ? q.get("model") : null;
   applyView();
-  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadShots(); loadVideos(); applyView(); }
+  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadVideos(); applyView(); }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
@@ -109,12 +108,12 @@ function renderProject() {
 
 /* the render box: the picture to render, reference images, the description, and the prompt the AI writes */
 let rPick = null, rRefSel = [], promptByAI = false;
-const renderPics = () => (current?.source_files || []).filter(f => ["png", "jpeg", "pdf"].includes(f.detected_type) && !/^(Photoreal view|Cinematic start view) \d/.test(f.original_name))
+const renderPics = () => (current?.source_files || []).filter(f => ["png", "jpeg"].includes(f.detected_type) && !/^(Photoreal view|Cinematic start view) \d/.test(f.original_name))
   .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-const picRole = f => (service === "plan" || f.detected_type === "pdf") ? "plan" : /^3D view/i.test(f.original_name) ? "model" : "base";
+const picRole = () => service === "plan" ? "plan" : "base";
 function picTile(f, on, onclick, kind) {
   const img = f.preview_url ? el("img", { src: f.preview_url, alt: "", loading: "lazy" }) : el("span", { class: "rpic-doc" }, f.detected_type.toUpperCase());
-  const tag = /^3D view/i.test(f.original_name) ? "Captured view" : f.detected_type === "pdf" ? "Drawing" : "Picture";
+  const tag = service === "plan" ? "Floor plan" : "Picture";
   return el("button", { type: "button", class: `rpic${on ? " on" : ""}`, role: kind === "radio" ? "radio" : "checkbox", "aria-checked": String(on), title: f.original_name, onclick },
     img, el("span", { class: "rpic-name" }, kind === "radio" ? tag : f.original_name));
 }
@@ -123,16 +122,15 @@ function drawRenderBox() {
   if (rPick && !pics.some(f => f.id === rPick)) rPick = null;
   rRefSel = rRefSel.filter(id => pics.some(f => f.id === id) && id !== rPick);
   $("#rPics").replaceChildren(...(pics.length ? pics.slice(0, 16).map(f => picTile(f, f.id === rPick, () => { rPick = rPick === f.id ? null : f.id; drawRenderBox(); }, "radio"))
-    : [el("span", { class: "hint" }, service === "model" || service === "walk" ? "Pan the 3D model to the view you want, then press Capture view." : "Upload a sketch, 3D image or plan.")]));
-  const refs = pics.filter(f => f.id !== rPick && f.detected_type !== "pdf");
+    : [el("span", { class: "hint" }, service === "plan" ? "Upload a picture of the floor plan." : "Upload a sketch, 3D image or photo.")]));
+  const refs = pics.filter(f => f.id !== rPick);
   $("#rRefs").replaceChildren(...(refs.length ? refs.slice(0, 16).map(f => picTile(f, rRefSel.includes(f.id), () => {
     if (rRefSel.includes(f.id)) rRefSel = rRefSel.filter(x => x !== f.id);
     else if (rRefSel.length >= 3) { toast("Use up to three reference images."); return; }
     else rRefSel = [...rRefSel, f.id];
     drawRenderBox();
   }, "check")) : [el("span", { class: "hint" }, "Upload photos of buildings or scenes you like.")]));
-  $("#rPicHint").textContent = rPick ? `Rendering: ${pics.find(f => f.id === rPick)?.original_name}` : service === "model" || service === "walk"
-    ? "Pan the 3D model to the view you want, then press Capture view." : "Choose the picture to render.";
+  $("#rPicHint").textContent = rPick ? `Rendering: ${pics.find(f => f.id === rPick)?.original_name}` : "Choose the picture to render.";
 }
 function renderRefs() {
   const refs = [];
@@ -154,12 +152,11 @@ $("#rRefUpload").onchange = async e => {
 };
 $("#writePromptBtn").onclick = async () => {
   const btn = $("#writePromptBtn");
-  if (!rPick && !$("#rDesc").value.trim()) { toast("Capture a view or choose a picture first."); return; }
+  if (!rPick && !$("#rDesc").value.trim()) { toast("Choose a picture first, or describe the building."); return; }
   btn.disabled = true; btn.textContent = "Studying the picture…";
-  $("#planNote").textContent = "The AI is studying the picture, your model and the references. This takes about 10–30 seconds.";
+  $("#planNote").textContent = "The AI is studying the picture and the references. This takes about 10–30 seconds.";
   try {
-    const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim(),
-      ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}) });
+    const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim() });
     $("#rPrompt").value = r.prompt; promptByAI = true;
     $("#planNote").textContent = r.notes ? `AI: ${r.notes} Check the prompt below, then render.` : "Prompt written. Check it below, then render.";
   } catch (err) { if (err.status === 401) return handle(err); $("#planNote").textContent = err.message; }
@@ -171,32 +168,22 @@ $("#backBtn").onclick = () => { stopPolling(); listProjects(); };
 /* ---------- services: pick one, give it a file, then only its screen is shown ---------- */
 const IMG = ["png", "jpeg"];
 const SERVICES = {
-  render: { name: "Photoreal render", short: "Photoreal render", accept: [...IMG, "pdf"], multi: 4, optional: true, needs: "a picture or a PDF drawing",
-    lead: "Turn a sketch, photo, 3D view or PDF drawing into a photoreal image, or just describe the building.",
-    hint: "Tick the pictures to use. The first keeps its shape and camera; the others give the look and materials. A PDF is used as the floor plan.",
+  render: { name: "Photoreal render", short: "Photoreal render", accept: IMG, multi: 4, optional: true, needs: "a picture (PNG or JPEG)",
+    lead: "Turn a sketch, photo or 3D view into a photoreal image, or just describe the building.",
+    hint: "Tick the pictures to use. The first keeps its shape and camera; the others give the look and materials.",
     sections: ["studio"], icon: "M4 20 10 4h4l6 16M7 13h10" },
-  plan: { name: "Floor plan to 3D", short: "Floor plan to 3D", accept: [...IMG, "pdf"], multi: 1, needs: "a floor plan (PDF or picture)",
-    lead: "Upload a floor plan. Ollic reads the rooms and makes photoreal 3D views of the building that follow the layout.",
+  plan: { name: "Floor plan to 3D", short: "Floor plan to 3D", accept: IMG, multi: 1, needs: "a floor plan picture (PNG or JPEG)",
+    lead: "Upload a picture of a floor plan. Ollic reads the rooms and makes photoreal 3D views of the building that follow the layout.",
     hint: "Choose the floor plan.", sections: ["studio"], icon: "M3 3h18v18H3zM3 12h8V3M11 12v9M15 12h6" },
-  model: { name: "Render your Revit model", short: "Revit model", accept: ["ifc"], multi: 1, needs: "an IFC model (Revit: File > Export > IFC)",
-    lead: "Upload your Revit model as IFC. See it in 3D inside and out, then turn any view into a photoreal render of your exact building.",
-    hint: "Choose the IFC model.", sections: ["modelSection", "studio"], modes: ["exterior", "interior"], icon: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10" },
-  walk: { name: "Walkthrough video", short: "Walkthrough", accept: ["ifc"], multi: 1, needs: "an IFC model",
-    lead: "Walk through your IFC model room by room, save the shots, render them all with one look, and make an MP4 walkthrough.",
-    hint: "Choose the IFC model.", sections: ["modelSection", "studio", "walkSection"], modes: ["walk", "exterior"], icon: "M13 4a2 2 0 1 0 0 .1M10 22l2-7 3 3v4M8 11l3-3 4 2 3 3M12 15l-3-4" },
-  build: { name: "Construction animation", short: "Construction", accept: ["ifc"], multi: 1, needs: "an IFC model",
-    lead: "Your IFC model builds itself on video: gold setting-out, a wireframe rising floor by floor, then a light sweep to the photoreal building. It can follow your construction programme, and make AI cinematic clips.",
-    hint: "Choose the IFC model.", sections: ["modelSection"], modes: ["build"], icon: "M3 21h18M5 21V10l7-5 7 5v11M9 21v-6h6v6" },
   imageanim: { name: "Animation from a 3D image", short: "3D image animation", accept: IMG, multi: 3, needs: "a 3D image (PNG or JPEG)",
-    lead: "No model file? Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). Gold lines rise from the ground, then a light sweep reveals the photoreal building.",
+    lead: "Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). Gold lines rise from the ground, then a light sweep reveals the photoreal building.",
     hint: "Tick up to three images, in order. Each becomes one shot of the video.", sections: ["imgAnimSection"], icon: "M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4" },
   library: { name: "Library", short: "Library", sections: ["libSection"], icon: "M4 4h6v16H4zM14 4h6v16h-6z" },
 };
-const SVC_ORDER = ["render", "plan", "model", "walk", "build", "imageanim"];
-const WORK = ["modelSection", "imgAnimSection", "studio", "walkSection", "libSection"];
-const MODE_BTN = { exterior: "#viewOutside", interior: "#viewInside", walk: "#viewWalk", build: "#viewBuild" };
-const EXT = { png: ".png", jpeg: ".jpg,.jpeg", pdf: ".pdf", ifc: ".ifc" };
-let service = null, step = null, chosenIfc = null, lastJobs = [], modelsNow = [], svcPicked = [];
+const SVC_ORDER = ["render", "plan", "imageanim"];
+const WORK = ["imgAnimSection", "studio", "libSection"];
+const EXT = { png: ".png", jpeg: ".jpg,.jpeg" };
+let service = null, step = null, svcPicked = [];
 function svcIcon(d) {   // SVG needs its own namespace, so it is built from markup
   const t = document.createElement("template");
   t.innerHTML = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
@@ -204,11 +191,9 @@ function svcIcon(d) {   // SVG needs its own namespace, so it is built from mark
 }
 
 function goTo(svc, st) {
-  if (svc !== service && service) leaveBuild();
   service = svc; step = svc ? st : null;
   const q = new URLSearchParams({ project: current?.id || new URLSearchParams(location.search).get("project") || "" });
   if (service) { q.set("service", service); q.set("step", step); }
-  if (chosenIfc && SERVICES[service]?.modes) q.set("model", chosenIfc);
   history.replaceState(null, "", `${location.pathname}?${q}`);
   applyView();
   if (!reduceMotion()) window.scrollTo({ top: 0 }); else window.scrollTo(0, 0);
@@ -227,20 +212,13 @@ function applyView() {
   const show = step === "work" && svc ? svc.sections : [];
   WORK.forEach(id => { $("#" + id).hidden = !show.includes(id); });
   $("#dangerZone").hidden = service !== "library";
-  // the 3D view offers only this service's views and buttons
-  Object.entries(MODE_BTN).forEach(([m, sel]) => { $(sel).hidden = !(svc?.modes || []).includes(m) || (svc?.modes || []).length < 2; });
-  $("#useView").hidden = !["model", "walk"].includes(service);
-  $("#saveShot").hidden = service !== "walk";
-  $("#viewPickWrap").hidden = service === "build";
   // the AI version choice sits in the screen that makes the pictures
-  const slot = service === "build" ? "#tierSlotBuild" : service === "imageanim" ? "#tierSlotIA" : "#tierHome";
+  const slot = service === "imageanim" ? "#tierSlotIA" : "#tierHome";
   if ($("#tierPick").parentElement !== $(slot)) $(slot).append($("#tierPick"));
   // renders: in the studio, or in the Library
   const gHome = service === "library" ? $("#libGallery") : $("#studio");
   if ($("#gallery").parentElement !== gHome) gHome.append($("#gallery"), $("#galleryEmpty"));
   if (step === "start") drawStart();
-  if (step === "work" && svc?.modes && viewer && !modelLoading && viewerModelId) setViewMode(svc.modes[0]);
-  if (step === "work" && !svc?.modes) leaveBuild();
 }
 
 /* step 1: upload a file for this service, or pick one already in the project */
@@ -260,7 +238,6 @@ function drawStart() {
   const files = current ? svcFiles() : [];
   svcPicked = svcPicked.filter(id => files.some(f => f.id === id));
   $("#svcLibHint").textContent = files.length ? svc.hint : "Nothing suitable in this project yet. Upload a file to start.";
-  const model = id => modelsNow.find(m => m.source_file_id === id);
   $("#svcFiles").replaceChildren(...files.map(f => {
     const on = svcPicked.includes(f.id);
     const box = el("input", { type: svc.multi > 1 ? "checkbox" : "radio", name: "svcFile", value: f.id, ...(on ? { checked: "" } : {}) });
@@ -272,7 +249,7 @@ function drawStart() {
       drawStart();
     };
     const order = svc.multi > 1 && on ? el("span", { class: "chip" }, String(svcPicked.indexOf(f.id) + 1)) : "";
-    const note = f.detected_type === "ifc" ? (model(f.id) ? "3D model ready" : "not read into 3D yet") : (TYPE[f.detected_type] || f.detected_type);
+    const note = TYPE[f.detected_type] || f.detected_type;
     return el("label", { class: `svc-file${on ? " on" : ""}` }, box, el("span", { class: "svc-file-name" }, f.original_name, el("small", { class: "muted" }, ` ${note} · ${fmtDate(f.created_at)}`)), order);
   }));
   $("#svcLib").classList.toggle("empty-lib", !files.length);
@@ -285,18 +262,9 @@ $("#svcSkip").onclick = () => useFiles([]);
 /* step 2: the service's own screen, with the chosen files already in place */
 function useFiles(ids) {
   const files = ids.map(id => current.source_files.find(f => f.id === id)).filter(Boolean);
-  if (SERVICES[service].modes) {
-    const f = files[0];
-    chosenIfc = f ? f.id : null;
-    viewerModelId = viewerModelId && modelsNow.find(m => m.id === viewerModelId)?.source_file_id === chosenIfc ? viewerModelId : null;
-    if (!viewerModelId && viewer) resetModel();
-    const busy = lastJobs.some(j => j.type === "ifc_import" && ["queued", "running"].includes(j.status) && (j.input || {}).source_file_id === chosenIfc);
-    if (f && !modelsNow.some(m => m.source_file_id === f.id) && !busy) readModel(f);
-    goTo(service, "work"); loadModels(); return;
-  }
   if (service === "imageanim") { iaSel = files.map(f => f.id).slice(0, 3); goTo(service, "work"); drawIA(); return; }
   // renders: the first chosen file is the picture to render; the others are references
-  rPick = files[0]?.id || null; rRefSel = files.slice(1, 4).filter(f => f.detected_type !== "pdf").map(f => f.id); promptByAI = false;
+  rPick = files[0]?.id || null; rRefSel = files.slice(1, 4).map(f => f.id); promptByAI = false;
   drawRenderBox();
   goTo(service, "work");
   $("#rDesc").focus({ preventScroll: true });
@@ -318,242 +286,13 @@ function deleteButton(what, onDelete, small = true) {
 function fileActions(f) {
   const del = deleteButton(f.original_name, async () => {
     await api.deleteFile(current.id, f.id);
-    toast(f.detected_type === "ifc" ? "File and its 3D model deleted." : "File deleted.");
-    current = await api.getProject(current.id); renderProject(); loadModels(); loadShots(); loadOutputs();
+    toast("File deleted.");
+    current = await api.getProject(current.id); renderProject(); loadOutputs();
   });
-  if (f.detected_type === "ifc" && f.origin !== "generated")
-    return [el("button", { class: "btn", type: "button", onclick: () => readModel(f) }, "Import 3D"), del];
   return [del];
 }
-/* IFC models are read on the architect's own computer (web-ifc, in a background worker): fast,
-   and no load on the server. The server reads small files itself if this computer cannot. */
-const reading = new Map();   // file id -> state, while this browser reads it
-function drawReading() {
-  $("#modelLocal").replaceChildren(...[...reading.values()].filter(r => r.project === current?.id).map(r => el("div", { class: `job${r.error ? " failed" : ""}` },
-    r.error ? "" : el("span", { class: "spinner", "aria-hidden": "true" }),
-    el("div", { class: "job-body" }, el("b", {}, `Reading ${r.name} on this computer`), el("span", { class: "hint" }, r.error || r.stage),
-      r.error ? "" : el("div", { class: "progress" }, el("i", { style: `width:${Math.round((r.k || 0) * 100)}%` }))))));
-}
-async function readModel(f, localFile) {
-  if (!current || reading.has(f.id) && !reading.get(f.id).error) return;
-  const pid = current.id, r = { project: pid, name: f.original_name, stage: "Starting…", k: 0.01 };
-  reading.set(f.id, r); drawReading();
-  $("#modelEmpty").textContent = "Your IFC model is being read on this computer. Large models take a minute or two.";
-  const say = (stage, k) => { r.stage = stage; r.k = k; drawReading(); };
-  const fallback = async why => {
-    console.warn("reading the IFC in the browser failed:", why);
-    reading.delete(f.id); drawReading();
-    if (current?.id === pid) startImport(f);
-  };
-  if (typeof WebAssembly === "undefined" || typeof Worker === "undefined") return fallback("no WebAssembly or workers");
-  let bytes;
-  try {
-    say("Opening the file…", 0.02);
-    if (localFile) bytes = await localFile.arrayBuffer();
-    else { const l = await api.fileLink(pid, f.id); const res = await fetch(l.url || l.download_url); if (!res.ok) throw new Error(`download ${res.status}`); bytes = await res.arrayBuffer(); }
-  } catch (err) { if (err.status === 401) return handle(err); return fallback(err); }
-  let out;
-  try {
-    out = await new Promise((resolve, reject) => {
-      const w = new Worker(new URL("./ifcread.js", import.meta.url), { type: "module" });
-      w.onmessage = e => {
-        if (e.data.progress) say(e.data.progress.stage, 0.05 + 0.75 * e.data.progress.k);
-        else { w.terminate(); e.data.done ? resolve(e.data.done) : reject(Object.assign(new Error(e.data.error), { told: e.data.error, detail: e.data.detail })); }
-      };
-      w.onerror = e => { w.terminate(); reject(new Error(e.message || "worker failed")); };
-      w.postMessage({ bytes }, [bytes]);
-    });
-  } catch (err) {
-    if (err.told && !/could not be read on this computer/.test(err.told)) {   // a real problem with the file: say what it is
-      r.error = err.told; drawReading(); $("#modelEmpty").textContent = err.told; return;
-    }
-    return fallback(err.detail || err);
-  }
-  try {
-    say("Saving the 3D model to your project… 0%", 0.82);
-    await saveBrowserModel(pid, out.glb, { source_file_id: f.id, report: out.report, components: out.components },
-      p => say(`Saving the 3D model to your project… ${Math.round(p * 100)}%`, 0.82 + 0.17 * p));
-    reading.delete(f.id); drawReading();
-    toast(`${f.original_name}: ${out.stats.with_geometry.toLocaleString()} elements read. Your 3D model is ready.`);
-    if (current?.id === pid) loadModels();
-  } catch (err) {
-    if (err.status === 401) return handle(err);
-    r.error = err.message; drawReading(); $("#modelEmpty").textContent = err.message;
-  }
-}
-async function startImport(f, btn) {
-  if (btn) btn.disabled = true;
-  try {
-    await api.importIfc(current.id, f.id, newKey());
-    $("#modelEmpty").textContent = "Your IFC model is being read into 3D. Small models take under a minute; large ones several minutes.";
-    toast("Reading the IFC model. Small models take under a minute; large ones several minutes."); loadOutputs();
-  }
-  catch (err) { if (err.status === 401) return handle(err); toast(err.message); $("#modelEmpty").textContent = err.message; }
-  finally { if (btn) btn.disabled = false; }
-}
-
-/* ---------- 3D models (Phase 3) ---------- */
-let viewer = null, viewerModelId = null, walkRoom = null, modelLoading = null;   // modelLoading: the model being downloaded into the viewer
-function resetModel() {
-  leaveBuild();
-  $("#walkPanel").hidden = true; walkRoom = null;
-  $("#viewerWrap").hidden = true; $("#modelEmpty").hidden = true; $("#modelJobs").replaceChildren();
-  $("#modelBadge").hidden = true; $("#modelDetails").hidden = true;
-  if (viewer) { viewer.dispose(); viewer = null; }
-  viewerModelId = null;
-  $("#viewer").replaceChildren(el("div", { class: "viewer-msg", id: "viewerMsg" }, "Loading the 3D model…"));
-}
-
-async function loadModels() {
-  if (!current) return;
-  const pid = current.id;
-  let models;
-  try { models = await api.models(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
-  if (current?.id !== pid) return;
-  modelsNow = models;
-  if (step === "start") drawStart();      // the Library list shows which IFCs are already in 3D
-  // the IFC chosen in this service's first step; while it is still being read, nothing else is shown
-  const m = chosenIfc ? models.find(x => x.source_file_id === chosenIfc) : models[0];
-  if (!m && viewerModelId) resetModel();
-  $("#viewerWrap").hidden = !m;
-  $("#modelEmpty").hidden = !!m;
-  if (!m || m.id === viewerModelId) return;
-  leaveBuild(); if (viewer) setViewMode("exterior");
-  viewerModelId = m.id;
-  drawReport(m);
-  $("#dlGlb").href = m.glb_url ? `${m.glb_url}&download=${encodeURIComponent(current.name)}-3d.glb` : "#";
-  const ifc = current.source_files.find(f => f.id === m.source_file_id);
-  $("#dlIfc").hidden = !ifc;
-  if (ifc) $("#dlIfc").onclick = async e => { e.preventDefault(); try { const l = await api.fileLink(pid, ifc.id); location.href = l.download_url; } catch (err) { toast(err.message); } };
-  try {
-    if (!viewer) {
-      const { createViewer } = await import("./viewer.js");
-      $("#viewer").querySelector(".viewer-msg")?.remove();
-      viewer = createViewer($("#viewer"), { onSelect: showElement });
-      setViewMode("exterior");
-    }
-    modelLoading = viewer.load(m.glb_url);
-    const info = await modelLoading.finally(() => { modelLoading = null; });
-    const pick = $("#storeySelect");
-    pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
-    $("#storeyPick").hidden = info.storeys.length < 2;
-    showElement(null);
-    if (step === "work" && SERVICES[service]?.modes) setViewMode(SERVICES[service].modes[0]);
-  } catch (err) {
-    $("#viewer").append(el("div", { class: "viewer-msg" }, "The 3D view could not start on this device. You can still download the model."));
-  }
-}
-
-function setViewMode(mode) {
-  if (!viewer) return;
-  if (mode !== "build") leaveBuild();
-  if (mode === "build") {
-    if (modelLoading) { toast("The 3D model is still loading. Try again in a moment."); modelLoading.then(() => {}, () => {}); return; }
-    if (!enterBuild()) return;
-  } else if (mode === "walk") {
-    if (viewer.mode !== "walk") walkRoom = viewer.walkTo(walkRoom) ?? walkRoom;
-    if (!viewer.rooms().length) toast("This model has no rooms (spaces), so you start in the middle of the ground floor. Walk, or use Floor up.");
-    drawRooms();
-    $("#viewer canvas")?.focus({ preventScroll: true });
-  } else viewer.setMode(mode);
-  $("#viewOutside").setAttribute("aria-pressed", String(mode === "exterior"));
-  $("#viewInside").setAttribute("aria-pressed", String(mode === "interior"));
-  $("#viewWalk").setAttribute("aria-pressed", String(mode === "walk"));
-  $("#viewBuild").setAttribute("aria-pressed", String(mode === "build"));
-  $("#walkPanel").hidden = mode !== "walk";
-  $("#animPanel").hidden = mode !== "build";
-  ["#viewReset", "#useView", "#saveShot", "#storeyPick"].forEach(sel => { const b = $(sel); if (b) b.classList.toggle("is-off", mode === "build"); });
-}
-$("#viewOutside").onclick = () => setViewMode("exterior");
-$("#viewInside").onclick = () => setViewMode("interior");
-$("#viewWalk").onclick = () => setViewMode("walk");
-$("#viewPick").onchange = e => { const v = e.target.value; e.target.value = ""; if (!v || !viewer) return; if (viewer.mode === "walk") setViewMode("exterior"); viewer.view(v); };
-const floorStep = k => { const s = viewer?.changeFloor(k); if (s) toast(s); else toast(k > 0 ? "This is the top floor." : "This is the lowest floor."); };
-$("#floorUp").onclick = () => floorStep(1);
-$("#floorDown").onclick = () => floorStep(-1);
-$("#viewBuild").onclick = () => setViewMode("build");
-
-/* walking through the rooms */
-function drawRooms() {
-  const rs = viewer?.rooms() || [], floors = new Set(rs.map(r => r.storey)).size;
-  $("#roomList").replaceChildren(...rs.map(r => el("button", { type: "button", class: "chip room", "aria-pressed": String(r.index === walkRoom),
-    onclick: () => { walkRoom = r.index; viewer.walkTo(r.index); drawRooms(); } }, floors > 1 && r.storey ? `${r.name} · ${r.storey}` : r.name)));
-}
-document.querySelectorAll("[data-hold]").forEach(b => {
-  const [f, t, u = 0] = b.dataset.hold.split(",").map(Number);
-  const stop = () => viewer?.hold(0, 0, 0);
-  b.addEventListener("pointerdown", e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* not a real pointer */ } viewer?.hold(f, t, u); });
-  ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => b.addEventListener(ev, stop));
-  b.addEventListener("contextmenu", e => e.preventDefault());
-});
-
-async function snapshotFile(name) {
-  const blob = await (await fetch(viewer.snapshot())).blob();
-  return uploadFile(current.id, new File([blob], name, { type: "image/png" }), () => {});
-}
-
-/* "Save shot": a picture of this view plus the camera position, for the walkthrough */
-$("#saveShot").onclick = async () => {
-  if (!viewer) return;
-  const btn = $("#saveShot"); btn.disabled = true;
-  try {
-    const walking = viewer.mode === "walk", room = walking ? viewer.room : null;
-    const base = room || (viewer.mode === "interior" ? "Inside view" : "Outside view");
-    const same = shots.filter(s => s.name === base || s.name.startsWith(base + " ")).length;
-    const name = same ? `${base} ${same + 1}` : base;
-    const saved = await snapshotFile(`Shot - ${name}.png`);
-    await api.saveShot(current.id, { source_file_id: saved.id, name, room, pose: viewer.pose(), model_id: viewerModelId });
-    current = await api.getProject(current.id); renderProject();
-    await loadShots();
-    toast(`Shot “${name}” saved. Find it under Walkthrough.`);
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; }
-};
-$("#viewReset").onclick = () => viewer?.reset();
-$("#storeySelect").onchange = e => { viewer?.setStorey(e.target.value); if (e.target.value) setViewMode("interior"); };
-
-const TYPE_NAME = { IfcWall: "Wall", IfcWallStandardCase: "Wall", IfcSlab: "Floor slab", IfcRoof: "Roof", IfcDoor: "Door", IfcWindow: "Window", IfcSpace: "Room", IfcColumn: "Column", IfcBeam: "Beam", IfcStair: "Stair", IfcCovering: "Covering", IfcRailing: "Railing" };
-/* a tapped part of the building: a small label over the 3D view, gone again with its close button */
-function showElement(x) {
-  const host = $("#viewer");
-  let tip = host.querySelector(".el-tip");
-  if (!x) { tip?.remove(); return; }
-  if (!tip) { tip = el("div", { class: "el-tip", role: "status", id: "elementCard" }); host.append(tip); }
-  tip.replaceChildren(el("b", {}, TYPE_NAME[x.ifcType] || (x.ifcType || "Element").replace(/^Ifc/, "")),
-    el("span", {}, [x.name, x.storey].filter(Boolean).join(" · ") || "No name"),
-    el("button", { type: "button", class: "el-close", "aria-label": "Close", onclick: () => tip.remove() }, "×"));
-}
-
-/* the model check: one small badge; the full list only when asked for */
-function drawReport(m) {
-  const r = m.report || {};
-  const verdict = { pass: "Model checked: ready to use", warn: "Model checked: usable, with notes", fail: "Model has problems" }[r.status] || "Model report";
-  $("#reportCard").replaceChildren(el("h3", {}, verdict),
-    el("ul", { class: "checks" }, ...(r.checks || []).map(c => el("li", { class: c.status }, c.message))));
-  const badge = $("#modelBadge"), n = (m.stats || {}).with_geometry || r.with_geometry;
-  badge.hidden = false; badge.className = `btn model-badge ${r.status || ""}`;
-  badge.textContent = `${r.status === "fail" ? "! Problems" : r.status === "warn" ? "✓ Ready, with notes" : "✓ Ready"}${n ? ` · ${n.toLocaleString()} parts` : ""}`;
-  badge.title = "Model check and downloads";
-  $("#modelDetails").hidden = r.status !== "fail"; badge.setAttribute("aria-expanded", String(r.status === "fail"));
-}
-$("#modelBadge").onclick = () => { const d = $("#modelDetails"); d.hidden = !d.hidden; $("#modelBadge").setAttribute("aria-expanded", String(!d.hidden)); };
-
-/* "Capture view": the current 3D view is saved and becomes the picture to render */
-$("#useView").onclick = async () => {
-  if (!viewer) return;
-  const btn = $("#useView"); btn.disabled = true; btn.textContent = "Capturing…";
-  try {
-    const stamp = new Date().toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).replace(/[/:]/g, "-");
-    const saved = await snapshotFile(`3D view ${stamp}.png`);
-    current = await api.getProject(current.id); rPick = saved.id; promptByAI = false; renderProject();
-    toast("View captured. Press “Read image and write prompt”.");
-    $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; btn.textContent = "Capture view"; }
-};
-
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading IFC model", video_export: "Walkthrough video", animation_export: "Construction video", cinematic_clip: "Cinematic clip" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", animation_export: "Animation video", cinematic_clip: "Cinematic clip" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
 let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
@@ -566,21 +305,15 @@ async function loadOutputs() {
   catch (err) { if (err.status === 401) return handle(err); pollTimer = setTimeout(loadOutputs, 8000); return; }
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
-  setupTiers(out); lastJobs = out.jobs;
-  const MODEL_JOBS = ["ifc_import"], VIDEO_JOBS = ["video_export", "animation_export", "cinematic_clip"];
-  drawJobs(out.jobs.filter(j => !MODEL_JOBS.includes(j.type) && !VIDEO_JOBS.includes(j.type)), "#jobList");
-  drawJobs(out.jobs.filter(j => MODEL_JOBS.includes(j.type)), "#modelJobs");
-  drawJobs(out.jobs.filter(j => j.type === "video_export"), "#walkJobs");
-  drawJobs(out.jobs.filter(j => j.type === "animation_export" || j.type === "cinematic_clip"), "#animJobs");
-  drawJobs(out.jobs.filter(j => j.type === "animation_export" || j.type === "cinematic_clip"), "#iaJobs");
+  setupTiers(out);
+  const IMAGE_JOBS = ["concept_render", "concept_edit"], VIDEO_JOBS = ["animation_export", "cinematic_clip"];
+  drawJobs(out.jobs.filter(j => IMAGE_JOBS.includes(j.type)), "#jobList");
+  drawJobs(out.jobs.filter(j => VIDEO_JOBS.includes(j.type)), "#iaJobs");
   drawGallery(out.images);
-  images = out.images; drawWalk(); if (seq) refreshHeroes(); drawIA();
+  images = out.images; drawIA();
   const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   vids.forEach(j => seenDone.add(j.id));
-  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "cinematic_clip") ? "Your cinematic clip is ready." : vids.some(j => j.type === "animation_export") ? "Your construction video is ready." : "Your walkthrough video is ready."); }
-  const done = out.jobs.filter(j => MODEL_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
-  done.forEach(j => seenDone.add(j.id));
-  if (done.length && outputsLoadedOnce) { loadModels(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
+  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "cinematic_clip") ? "Your cinematic clip is ready." : "Your animation video is ready."); }
   outputsLoadedOnce = true;
   stopPolling();
   if (out.jobs.some(j => j.status === "queued" || j.status === "running")) pollTimer = setTimeout(loadOutputs, 3000);
@@ -621,7 +354,7 @@ function drawGallery(images) {
         el("div", { class: "tags" }, el("span", { class: `chip ${i.tier === "premium" ? "premium" : ""}` }, i.tier_name || "Render"), ...tags.map(t => el("span", { class: "chip" }, t)), parent ? el("span", { class: "chip" }, "Revised") : ""),
         el("p", { class: "hint" }, fmtDate(i.created_at)),
         el("div", { class: "actions" }, i.download_url ? el("a", { class: "btn", href: i.download_url, download: "" }, "Download") : "",
-          deleteButton("this render", async () => { await api.deleteRender(i.id); toast("Render deleted."); loadOutputs(); loadShots(); }, false)),
+          deleteButton("this render", async () => { await api.deleteRender(i.id); toast("Render deleted."); loadOutputs(); }, false)),
         el("form", { class: "revise", onsubmit: e => { e.preventDefault(); revise(i.id, input, go); } }, input, go)));
   }));
 }
@@ -692,8 +425,6 @@ function briefFromForm() {
   return { prompt, prompt_ready: promptByAI && !!$("#rPrompt").value.trim(), references: renderRefs(), tier: chosenTier(), quality: $("#rQuality").value,
     aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
-function tickedLooks() { return rRefSel.slice(); }
-
 $("#renderForm").onsubmit = e => {
   e.preventDefault();
   const body = briefFromForm();
@@ -732,7 +463,6 @@ async function uploadAll(files) {
       const uploaded = uploadFile(current.id, file, f => { bar.style.width = `${Math.round(f * 100)}%`; status.textContent = `${Math.round(f * 100)}%`; });
       const saved = await uploaded;
       bar.style.width = "100%"; status.textContent = "Checked and saved";
-      if (saved?.detected_type === "ifc") readModel(saved, file);
       if (saved) done.push(saved);
       current = await api.getProject(current.id); renderProject();
       setTimeout(() => row.remove(), 2500);
@@ -776,19 +506,8 @@ function handle(err, box) {
   if (box) message(box, err.message); else toast(err.message);
 }
 
-/* ---------- walkthrough: shots, render all shots, video ---------- */
-let shots = [], images = [], videos = [], untickedShots = new Set(), stripKey = "", picksKey = "";
-function resetWalk() {
-  shots = []; images = []; videos = []; untickedShots = new Set(); stripKey = picksKey = "";
-  $("#shotStrip").replaceChildren(); $("#videoPicks").replaceChildren(); $("#videoList").replaceChildren(); $("#walkJobs").replaceChildren();
-  $("#shotsEmpty").hidden = false; $("#shotGo").hidden = true; $("#videoForm").hidden = true; message($("#videoMsg"), "");
-}
-async function loadShots() {
-  if (!current) return;
-  const pid = current.id;
-  try { const s = await api.shots(pid); if (current?.id !== pid) return; shots = s; drawWalk(); }
-  catch (err) { if (err.status === 401) return handle(err); }
-}
+/* ---------- videos ---------- */
+let images = [], videos = [];
 async function loadVideos() {
   if (!current) return;
   const pid = current.id;
@@ -796,113 +515,13 @@ async function loadVideos() {
   catch (err) { if (err.status === 401) return handle(err); }
 }
 const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-function shotRenders(id) { return images.filter(i => (i.options || {}).shot_id === id); }   // newest first
-
-function drawWalk() {
-  $("#shotsEmpty").hidden = shots.length > 0;
-  $("#shotGo").hidden = shots.length === 0;
-  const key = JSON.stringify(shots.map(s => [s.id, s.name, s.picture_url && s.picture_url.split("?")[0], shotRenders(s.id)[0]?.id]));
-  if (key !== stripKey) { stripKey = key; drawStrip(); }
-  const withRenders = shots.filter(s => shotRenders(s.id).length);
-  $("#videoForm").hidden = withRenders.length === 0;
-  const pkey = JSON.stringify(withRenders.map(s => [s.id, shotRenders(s.id).map(i => i.id)]));
-  if (pkey !== picksKey) { picksKey = pkey; drawPicks(withRenders); }
-  if (!$("#vTitle").value && current) $("#vTitle").placeholder = current.name;
-}
-
-function drawStrip() {
-  $("#shotStrip").replaceChildren(...shots.map((s, i) => {
-    const latest = shotRenders(s.id)[0];
-    const name = el("input", { type: "text", value: s.name, maxlength: "80", "aria-label": "Shot name" });
-    name.addEventListener("change", async () => {
-      const v = name.value.trim(); if (!v) { name.value = s.name; return; }
-      try { const r = await api.editShot(s.id, { name: v }); s.name = r.name; name.value = r.name; drawWalk(); } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-    });
-    const tick = el("input", { type: "checkbox", "aria-label": `Render ${s.name}`, ...(untickedShots.has(s.id) ? {} : { checked: "" }) });
-    tick.onchange = () => { if (tick.checked) untickedShots.delete(s.id); else untickedShots.add(s.id); };
-    const src = latest?.url || s.picture_url;
-    return el("li", { class: "shot-card" },
-      el("div", { class: "thumb" }, src ? el("img", { src, alt: latest ? `Render of ${s.name}` : `3D view of ${s.name}`, loading: "lazy" }) : "",
-        el("span", { class: "badge" }, latest ? "Rendered" : "3D view")),
-      el("div", { class: "shot-body" },
-        el("label", { class: "tick" }, tick, el("span", { class: "num" }, String(i + 1))), name,
-        el("div", { class: "shot-tools" },
-          el("button", { class: "btn", type: "button", title: "Show this view in the 3D model", onclick: () => goToShot(s) }, "View"),
-          el("button", { class: "btn", type: "button", "aria-label": `Move ${s.name} earlier`, ...(i === 0 ? { disabled: "" } : {}), onclick: () => moveShot(i, -1) }, "↑"),
-          el("button", { class: "btn", type: "button", "aria-label": `Move ${s.name} later`, ...(i === shots.length - 1 ? { disabled: "" } : {}), onclick: () => moveShot(i, 1) }, "↓"),
-          el("button", { class: "btn danger", type: "button", "aria-label": `Delete ${s.name}`, onclick: () => removeShot(s) }, "Delete"))));
-  }));
-}
-
-function goToShot(s) {
-  if (!viewer) { toast("Open the 3D model to see this view."); return; }
-  viewer.goTo(s.pose, s.room);
-  setViewMode(s.pose.mode === "walk" ? "walk" : "exterior");
-  $("#viewer").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
-}
-async function moveShot(i, d) {
-  const order = shots.slice(); [order[i], order[i + d]] = [order[i + d], order[i]];
-  try {
-    await Promise.all(order.map((s, k) => s.position !== k ? api.editShot(s.id, { position: k }) : null));
-    await loadShots();
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-}
-async function removeShot(s) {
-  try { await api.deleteShot(s.id); untickedShots.delete(s.id); toast(`Shot “${s.name}” deleted. Its renders stay in the gallery.`); await loadShots(); }
-  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-}
-
-$("#renderAllBtn").onclick = async () => {
-  const ids = shots.filter(s => !untickedShots.has(s.id)).map(s => s.id);
-  if (!ids.length) { toast("Tick at least one shot to render."); return; }
-  if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
-  const brief = briefFromForm();
-  delete brief.references; brief.prompt_ready = false;    // each shot gets its own prompt around the same look
-  if (brief.prompt.length < 3) {
-    message($("#renderMsg"), "Describe the look you want first (materials, finishes, furniture style) in “Describe the building”, then press Render all shots again.");
-    $("#rPrompt").focus(); $("#studio").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" }); return;
-  }
-  const btn = $("#renderAllBtn"); btn.disabled = true;
-  try {
-    const r = await api.renderShots(current.id, { shot_ids: ids, brief, look_file_ids: tickedLooks() });
-    toast(`Rendering ${r.jobs.length} shot${r.jobs.length === 1 ? "" : "s"}. Each takes about a minute.`);
-    loadOutputs();
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; }
-};
-
-function drawPicks(withRenders) {
-  $("#videoPicks").replaceChildren(...withRenders.map(s => {
-    const rs = shotRenders(s.id);
-    const use = el("input", { type: "checkbox", checked: "", "aria-label": `Use ${s.name} in the video` });
-    const pick = el("select", { "aria-label": `Render to use for ${s.name}` }, ...rs.map((r, k) => el("option", { value: r.id }, `${k === 0 ? "Newest" : `Earlier ${k}`} · ${r.tier_name || "Render"} · ${fmtDate(r.created_at)}`)));
-    const cap = el("input", { type: "text", value: s.name, maxlength: "80", "aria-label": `Title for ${s.name}` });
-    const thumb = el("img", { src: rs[0].url || "", alt: "", loading: "lazy" });
-    pick.onchange = () => { thumb.src = rs.find(r => r.id === pick.value)?.url || ""; };
-    return el("li", { class: "pick", "data-shot": s.id }, use, thumb, el("div", { class: "pick-body" }, cap, pick));
-  }));
-}
-
-$("#videoForm").onsubmit = e => {
-  e.preventDefault();
-  const rows = [...$("#videoPicks").querySelectorAll("li.pick")].filter(li => li.querySelector("input[type=checkbox]").checked);
-  if (!rows.length) { message($("#videoMsg"), "Tick at least one rendered shot."); return; }
-  const body = { render_ids: rows.map(li => li.querySelector("select").value), captions: rows.map(li => li.querySelector("input[type=text]").value.trim()),
-    format: $("#vFormat").value, seconds: Math.max(2.5, Math.min(12, parseFloat($("#vSeconds").value) || 5)),
-    title: $("#vTitle").value.trim(), subtitle: $("#vSubtitle").value.trim() };
-  busy(e.target, async () => {
-    message($("#videoMsg"), "");
-    try { await api.makeVideo(current.id, body); toast("Making your video. This takes a few minutes."); loadOutputs(); }
-    catch (err) { if (err.status === 401) return handle(err); message($("#videoMsg"), err.message); }
-  });
-};
 
 function drawVideos() {
   const card = v => {
     const ratio = `${v.width}/${v.height}`;
     return el("article", { class: "video-card" },
       el("div", { class: "frame", style: `aspect-ratio:${ratio}` },
-        v.url ? el("video", { src: v.url, controls: "", preload: "metadata", playsinline: "", "aria-label": `Walkthrough video: ${v.title || "untitled"}` }) : el("span", { class: "muted" }, "Video link unavailable")),
+        v.url ? el("video", { src: v.url, controls: "", preload: "metadata", playsinline: "", "aria-label": `Video: ${v.title || "untitled"}` }) : el("span", { class: "muted" }, "Video link unavailable")),
       el("div", { class: "body" },
         el("h3", {}, v.title || (v.kind === "cinematic" ? "Cinematic clip" : v.kind === "construction" ? "Construction sequence" : "Walkthrough")),
         el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, v.kind === "cinematic" ? "AI video" : v.kind === "construction" ? "Construction" : `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
@@ -910,299 +529,13 @@ function drawVideos() {
         el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "",
           deleteButton("this video", async () => { await api.deleteVideo(v.id); toast("Video deleted."); loadVideos(); }, false))));
   };
-  $("#videoList").replaceChildren(...videos.filter(v => v.kind !== "construction").map(card));
-  $("#animVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
   $("#iaVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
   $("#libVideos").replaceChildren(...videos.map(card));
   $("#libVideosEmpty").hidden = videos.length > 0;
 }
 
-/* ---------- construction animation ---------- */
-const PHASE_UI = { site: "Site", foundation: "Foundation", structure: "Structure (per floor)", walls: "Walls (per floor)", openings: "Doors and windows",
-  roof: "Roof", orbit: "Fly-around", furnish: "Furniture", interior: "Rooms (per room)" };
-const HIDE_UI = { furniture: "Furniture", stairs: "Stairs", beams: "Beams", columns: "Columns", footings: "Footings", doors: "Doors", windows: "Windows", railings: "Railings" };
-let C = null, LUX = null, heroImgs = [], heroPending = new Set(), seq = null, animScript = null, animT = 0, animPlaying = false, animRaf = 0, lastTick = 0, exporting = null;
 const fmtClock = x => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, "0")}`;
-const scriptKey = () => `ollic-anim-${current?.id}`;
-function saveScript() { try { localStorage.setItem(scriptKey(), JSON.stringify(animScript)); } catch { /* private mode: settings last until the page closes */ } }
-function loadScript() { try { const s = JSON.parse(localStorage.getItem(scriptKey()) || "null"); return s; } catch { return null; } }
-
-function enterBuild() {
-  if (!viewer || !C) { if (!C) toast("The animation is still loading. Try again in a moment."); return false; }
-  if (seq) return true;
-  viewer.takeOver(true);
-  animScript = C.normalise(loadScript() || { ...C.defaultScript(), title: current?.name || "" });
-  frameViewer(); buildSeq(); drawAnimSettings();
-  return true;
-}
-function leaveBuild() {
-  if (!seq) return;
-  if (exporting) exporting.abort();
-  stopAnim(); seq.dispose(); seq = null;
-  $("#viewer").classList.remove("framed"); $("#viewer").style.removeProperty("--ar");
-  viewer?.takeOver(false);
-  $("#animPanel").hidden = true;
-}
-function frameViewer() {
-  const [w, h] = { "16:9": [16, 9], "9:16": [9, 16], "1:1": [1, 1] }[animScript.format] || [16, 9];
-  const v = $("#viewer"); v.classList.add("framed"); v.style.setProperty("--ar", `${w} / ${h}`); v.style.setProperty("--arw", String(w / h));
-}
-function previewSize() { const e = viewer.engine(); e.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); e.resize(); }
-function buildSeq() {
-  if (seq) seq.dispose();
-  previewSize();
-  seq = C.createConstruction(viewer.engine(), animScript, { lux: LUX, heroImages: heroImgs });
-  animScript = seq.script;
-  refreshHeroes();
-  animT = Math.min(animT, seq.duration);
-  $("#animScrub").max = String(Math.round(seq.duration * 100));
-  $("#animChapters").replaceChildren(...seq.segments.filter((s, i, a) => i === 0 || s.phase !== a[i - 1].phase).map(s =>
-    el("button", { type: "button", class: "chip room", onclick: () => { stopAnim(); showAt(s.start + 0.01); } }, C.PHASE_LABEL[s.phase] || s.label)));
-  const stills = script => script.renders ? animStills().length : 0;
-  const total = 6 + seq.duration + stills(animScript) * animScript.render_seconds;
-  $("#animEst").textContent = `${fmtClock(total)} video, ${animScript.format}. Made on this device, then saved to your project.`;
-  showAt(animT);
-}
-function showAt(t) {
-  if (!seq) return;
-  animT = Math.max(0, Math.min(seq.duration, t));
-  seq.frameAt(animT); seq.draw();
-  $("#animScrub").value = String(Math.round(animT * 100));
-  $("#animTime").textContent = `${fmtClock(animT)} / ${fmtClock(seq.duration)} · ${seq.labelAt(animT)}`;
-}
-function stopAnim() { animPlaying = false; cancelAnimationFrame(animRaf); $("#animPlay").textContent = "Play"; }
-function stepAnim(now) {
-  if (!animPlaying) return;
-  const dt = Math.min(0.1, (now - lastTick) / 1000); lastTick = now;
-  showAt(animT + dt);
-  if (animT >= seq.duration) { stopAnim(); return; }
-  animRaf = requestAnimationFrame(stepAnim);
-}
-$("#animPlay").onclick = () => {
-  if (!seq) return;
-  if (animPlaying) { stopAnim(); return; }
-  if (animT >= seq.duration - 0.05) animT = 0;
-  animPlaying = true; $("#animPlay").textContent = "Pause"; lastTick = performance.now();
-  animRaf = requestAnimationFrame(stepAnim);
-};
-$("#animScrub").oninput = e => { stopAnim(); showAt(Number(e.target.value) / 100); };
-
-/* the contractor's programme: build in its order, on its dates */
-const PROG_GROUPS = [["site", "Site works"], ["foundation", "Foundation"], ["structure", "Structure"], ["walls", "Walls and facade"], ["openings", "Doors and windows"],
-  ["roof", "Roof"], ["mep", "MEP services"], ["finishes", "Finishes"], ["furnish", "Furniture and fittings"], ["none", "Not shown"]];
-const PROG_KINDS = [["", "all"], ["columns", "columns"], ["beams", "beams"], ["slabs", "slabs"], ["stairs", "stairs"]];
-const fmtDay = d => new Date(d + "T00:00:00Z").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-function progChanged() { saveScript(); buildSeq(); drawProgramme(); }
-function drawProgramme() {
-  const plan = animScript.schedule || [];
-  $("#progClear").hidden = $("#progOpts").hidden = $("#progWrap").hidden = !plan.length;
-  if (!plan.length) { $("#progNote").textContent = "Now using the usual order: site, foundation, each floor, doors and windows, roof."; return; }
-  $("#progSeconds").value = String(animScript.schedule_seconds); $("#progDates").checked = animScript.show_dates;
-  const prog = seq?.programme, parts = Object.fromEntries((prog?.tasks || []).map(t => [t.i, t.parts]));
-  const shown = plan.filter(t => t.group !== "none").length;
-  const left = Object.values(prog?.unscheduled || {}).reduce((a, b) => a + b, 0);
-  const d0 = plan.reduce((m, t) => t.start < m ? t.start : m, plan[0].start), d1 = plan.reduce((m, t) => t.finish > m ? t.finish : m, plan[0].finish);
-  $("#progNote").textContent = `Following your programme: ${plan.length} tasks, ${fmtDay(d0)} to ${fmtDay(d1)}, shown in ${animScript.schedule_seconds} s. ${shown} tasks build parts of the model.`
-    + (left ? ` ${left} parts of the model are in no task, so they appear at the end; give them a task below.` : "");
-  $("#progCount").textContent = `${shown} of ${plan.length} matched`;
-  const storeys = viewer?.engine().storeys || [];
-  $("#progRows").replaceChildren(...plan.map((t, i) => {
-    const grp = el("select", { "aria-label": `Building part for ${t.name}` }, ...PROG_GROUPS.map(([v, n]) => el("option", { value: v, ...(v === t.group ? { selected: "" } : {}) }, n)));
-    const kind = el("select", { "aria-label": `Which structure for ${t.name}`, ...(t.group === "structure" ? {} : { hidden: "" }) },
-      ...PROG_KINDS.map(([v, n]) => el("option", { value: v, ...(v === (t.kind || "") ? { selected: "" } : {}) }, n)));
-    const many = (t.floors || []).length > 1 ? (t.floors || []).join(", ") : null;
-    const floor = el("select", { "aria-label": `Floor for ${t.name}` }, el("option", { value: "" }, "All floors"),
-      ...(many ? [el("option", { value: "__many", selected: "" }, `${t.floors.length} floors`)] : []),
-      ...storeys.map(n => el("option", { value: n, ...(!many && (t.floors || [])[0] === n ? { selected: "" } : {}) }, n)));
-    grp.onchange = () => { t.group = grp.value; if (t.group !== "structure") t.kind = null; progChanged(); };
-    kind.onchange = () => { t.kind = kind.value || null; progChanged(); };
-    floor.onchange = () => { if (floor.value !== "__many") { t.floors = floor.value ? [floor.value] : []; progChanged(); } };
-    const n = t.group === "none" ? "—" : String(parts[i] ?? 0);
-    return el("tr", { class: t.group === "none" ? "unmatched" : "" }, el("td", {}, t.name, ...(many ? [el("br"), el("small", { class: "muted" }, many)] : [])),
-      el("td", { class: "mono" }, `${fmtDay(t.start)} – ${fmtDay(t.finish)}`), el("td", {}, grp, " ", kind), el("td", {}, floor), el("td", { class: "mono" }, n));
-  }));
-}
-$("#progFile").onchange = async e => {
-  const f = e.target.files[0]; e.target.value = "";
-  if (!f || !current) return;
-  if (modelLoading) { $("#progNote").textContent = "Waiting for the 3D model to finish loading…"; await modelLoading.catch(() => {}); }
-  if (!enterBuild()) return;
-  $("#progNote").textContent = `Reading ${f.name}…`;
-  try {
-    const out = await readSchedule(current.id, f, viewer.engine().storeys || []);
-    animScript.schedule = out.tasks.map(t => ({ name: t.name, start: t.start, finish: t.finish, group: t.group, kind: t.kind, floors: t.floors, milestone: t.milestone }));
-    progChanged();
-    $("#progWrap").open = out.matched < out.tasks.length;
-    toast(`${out.format} schedule read: ${out.tasks.length} tasks, ${out.matched} matched to the model. Check the matches below.`);
-  } catch (err) { if (err.status === 401) return handle(err); $("#progNote").textContent = err.message; }
-};
-$("#progClear").onclick = () => { animScript.schedule = []; progChanged(); };
-$("#progSeconds").onchange = e => { animScript.schedule_seconds = Math.min(180, Math.max(10, Number(e.target.value) || 40)); progChanged(); };
-$("#progDates").onchange = e => { animScript.show_dates = e.target.checked; progChanged(); };
-
-function drawAnimSettings() {
-  drawProgramme();
-  const s = animScript, lux = s.style === "luxury" && !!LUX;
-  $("#aStyle").value = s.style; $("#aHeroes").value = String(s.heroes); $("#aLook").value = s.look;
-  $("#aHeroesField").hidden = !lux; $("#aTimeField").hidden = lux; $("#animHeroes").hidden = !lux;
-  $("#animPhases").replaceChildren(...C.PHASES.map(p => {
-    const [lo, hi] = C.LIMITS[p];
-    const on = el("input", { type: "checkbox", ...(s.phases[p].on ? { checked: "" } : {}), "aria-label": `Show ${PHASE_UI[p]}` });
-    const sec = el("input", { type: "number", min: String(lo), max: String(hi), step: "0.5", value: String(s.phases[p].seconds), "aria-label": `Seconds for ${PHASE_UI[p]}` });
-    on.onchange = () => { s.phases[p].on = on.checked; changed(); };
-    sec.onchange = () => { s.phases[p].seconds = Number(sec.value); changed(); };
-    const off = lux && (p === "furnish" || p === "interior");
-    if (off) { on.disabled = true; sec.disabled = true; }
-    const name = lux && p === "orbit" ? "Photoreal reveal (per view)" : off ? `${PHASE_UI[p]}: shown as AI renders in this style` : PHASE_UI[p];
-    return el("div", { class: `phase-row${off ? " off" : ""}` }, el("label", { class: "check" }, on, name), el("span", { class: "sec" }, sec, "s"));
-  }));
-  $("#aTime").value = s.time_of_day; $("#aDir").value = s.direction; $("#aFormat").value = s.format;
-  $("#aTitle").value = s.title; $("#aSub").value = s.subtitle; $("#aCaptions").checked = s.captions;
-  $("#aRenders").checked = s.renders; $("#aRenderSec").value = String(s.render_seconds);
-  $("#aHide").replaceChildren(...Object.entries(HIDE_UI).map(([k, label]) => { const c = el("input", { type: "checkbox", value: k, ...(s.hide.includes(k) ? { checked: "" } : {}) });
-    c.onchange = () => { s.hide = c.checked ? [...s.hide, k] : s.hide.filter(x => x !== k); changed(); }; return el("label", { class: "check" }, c, label); }));
-  const rooms = seq?.rooms || [];
-  $("#aRooms").replaceChildren(...(rooms.length ? rooms.map(r => { const c = el("input", { type: "checkbox", value: r, ...(s.rooms.some(x => x.toLowerCase() === r.toLowerCase()) ? { checked: "" } : {}) });
-    c.onchange = () => { s.rooms = c.checked ? [...s.rooms, r] : s.rooms.filter(x => x.toLowerCase() !== r.toLowerCase()); changed(); }; return el("label", { class: "check" }, c, r); })
-    : [el("span", { class: "hint" }, "This model has no rooms. In Revit's IFC export settings, include rooms (spaces).")]));
-}
-function changed(redraw = false) {
-  animScript = C.normalise(animScript); saveScript(); frameViewer(); buildSeq();
-  if (redraw) drawAnimSettings();
-}
-$("#aStyle").onchange = e => { animScript.style = e.target.value; changed(true); };
-$("#aHeroes").onchange = e => { animScript.heroes = Number(e.target.value); changed(true); };
-$("#aLook").onchange = e => { animScript.look = e.target.value.trim(); saveScript(); };
-$("#aTime").onchange = e => { animScript.time_of_day = e.target.value; changed(); };
-$("#aDir").onchange = e => { animScript.direction = e.target.value; changed(); };
-$("#aFormat").onchange = e => { animScript.format = e.target.value; changed(); };
-$("#aTitle").onchange = e => { animScript.title = e.target.value.trim(); changed(); };
-$("#aSub").onchange = e => { animScript.subtitle = e.target.value.trim(); changed(); };
-$("#aCaptions").onchange = e => { animScript.captions = e.target.checked; changed(); };
-$("#aRenders").onchange = e => { animScript.renders = e.target.checked; changed(); };
-$("#aRenderSec").onchange = e => { animScript.render_seconds = Number(e.target.value); changed(); };
-
-$("#animDirect").onsubmit = async e => {
-  e.preventDefault();
-  const ask = $("#animAsk").value.trim();
-  if (ask.length < 3 || !seq) { $("#animAsk").focus(); return; }
-  const btn = $("#animAskBtn"); btn.disabled = true; btn.textContent = "Working…";
-  try {
-    const r = await api.directAnimation(current.id, { instruction: ask, script: animScript, context: seq.context() });
-    animScript = r.script; $("#animAsk").value = "";
-    $("#animNotes").textContent = r.notes;
-    changed(true); stopAnim(); showAt(0);
-  } catch (err) { if (err.status === 401) return handle(err); $("#animNotes").textContent = err.message; }
-  finally { btn.disabled = false; btn.textContent = "Apply"; }
-};
-
-function animStills() {
-  // the newest AI render of each walkthrough shot, in the shots' order
-  return shots.map(s => ({ s, r: shotRenders(s.id)[0] })).filter(x => x.r && x.r.url).map(x => ({ url: x.r.url, caption: x.s.name, render_id: x.r.id }));
-}
-
-let exportWarned = false;
-$("#animExport").onclick = async () => {
-  if (!seq || exporting) return;
-  const missing = seq.luxury ? Array.from({ length: animScript.heroes }, (_, k) => !heroImgs[k]).filter(Boolean).length : 0;
-  if (missing && !exportWarned) {
-    exportWarned = true;
-    message($("#animMsg"), `${missing} photoreal view${missing > 1 ? "s are" : " is"} not made yet, so the video will end on the gold wireframe instead of the photoreal building. Press “Make photoreal views” first, or press Export MP4 again to export anyway.`);
-    $("#animHeroes").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
-    return;
-  }
-  exportWarned = false;
-  const { canExport, exportVideo } = await import("./export.js");
-  if (!canExport()) { message($("#animMsg"), "This browser cannot make videos. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
-  stopAnim(); message($("#animMsg"), "");
-  const ctl = new AbortController(); exporting = ctl;
-  const btn = $("#animExport"); btn.disabled = true;
-  $("#animProgress").hidden = false; $("#animBar").style.width = "0%";
-  const say = (f, text) => { $("#animBar").style.width = `${Math.round(f * 100)}%`; $("#animProgText").textContent = text; };
-  try {
-    const out = await exportVideo({ seq, script: animScript, stills: animStills(), title: current.name, signal: ctl.signal,
-      onProgress: (f, text) => say(f * 0.85, `Making the video: ${text.toLowerCase()}. Keep this tab open.`) });
-    say(0.86, `Uploading ${(out.blob.size / 1048576).toFixed(1)} MB…`);
-    await uploadAnimation(current.id, out.blob, { script: animScript, model_id: viewerModelId, items: out.items }, f => say(0.86 + f * 0.14, `Uploading… ${Math.round(f * 100)}%`));
-    say(1, "Uploaded. Ollic is preparing it for phones; it appears below in a minute or two.");
-    toast("Video uploaded. It will appear below when it is ready.");
-    loadOutputs();
-  } catch (err) {
-    if (err.name === "AbortError") message($("#animMsg"), "Export cancelled.", "ok");
-    else if (err.status === 401) handle(err);
-    else message($("#animMsg"), err.message || "The video could not be made.");
-  } finally {
-    exporting = null; btn.disabled = false;
-    setTimeout(() => { $("#animProgress").hidden = true; }, 4000);
-    if (seq) { previewSize(); showAt(animT); }
-  }
-};
-$("#animCancel").onclick = () => exporting?.abort();
-
-import("./construction.js").then(m => { C = m; }).catch(() => { /* the button explains */ });
-import("./luxury.js").then(m => { LUX = m; }).catch(() => { /* without it, the technical style is used */ });
-
-/* photoreal views for the luxury style: the AI render of each hero view, matched by its key */
-function refreshHeroes() {
-  if (!seq) return;
-  const n = seq.luxury ? animScript.heroes : 0;
-  heroImgs.length = n;
-  for (let k = 0; k < n; k++) {
-    const key = seq.heroKey(k);
-    const r = images.find(i => (i.options || {}).anim_hero?.key === key && (i.base_url || i.url));
-    if (!r) { heroImgs[k] = null; continue; }
-    heroPending.delete(key);
-    if (heroImgs[k]?._rid === r.id) continue;
-    heroImgs[k] = null;
-    const img = new Image(); img.crossOrigin = "anonymous"; img._rid = r.id; img._url = r.url;
-    img.onload = () => { if (seq && seq.heroKey(k) === key) { heroImgs[k] = img; drawHeroes(); showAt(animT); } };
-    img.src = r.base_url || r.url;
-  }
-  drawHeroes();
-}
-function drawHeroes() {
-  if (!seq || !seq.luxury) return;
-  const n = animScript.heroes;
-  $("#heroList").replaceChildren(...Array.from({ length: n }, (_, k) => {
-    const img = heroImgs[k], key = seq.heroKey(k), waiting = heroPending.has(key);
-    return el("div", { class: "hero-card" },
-      el("div", { class: "thumb" }, img ? el("img", { src: img._url || img.src, alt: `Photoreal view ${k + 1}` }) : waiting ? "Rendering…" : "Not made yet"),
-      el("div", { class: "cap" }, el("span", {}, `View ${k + 1}`), el("span", { class: "hint" }, img ? "Ready" : waiting ? "About a minute" : "Wireframe only"),
-        img ? el("button", { class: "btn clip", type: "button", onclick: e => heroClip(k, e.currentTarget) }, "Cinematic clip") : ""));
-  }));
-  const missing = Array.from({ length: n }, (_, k) => !heroImgs[k] && !heroPending.has(seq.heroKey(k))).filter(Boolean).length;
-  $("#heroBtn").textContent = missing ? `Make photoreal view${missing > 1 ? "s" : ""} (${missing})` : "Remake photoreal views";
-}
-$("#heroBtn").onclick = async () => {
-  if (!seq || !seq.luxury) return;
-  if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
-  const n = animScript.heroes, keys = Array.from({ length: n }, (_, k) => seq.heroKey(k));
-  let todo = keys.map((key, k) => k).filter(k => !heroImgs[k] && !heroPending.has(keys[k]));
-  if (!todo.length) todo = keys.map((_, k) => k);
-  const [w, h, aspect] = { "16:9": [1536, 1024, "landscape"], "9:16": [1024, 1536, "portrait"], "1:1": [1024, 1024, "square"] }[animScript.format];
-  stopAnim();
-  const shots = [];
-  for (const k of todo) {
-    const canvas = seq.heroSnapshot(k, w, h);
-    shots.push({ k, blob: await new Promise(res => canvas.toBlob(res, "image/png")) });
-  }
-  previewSize(); showAt(animT);
-  const btn = $("#heroBtn"); btn.disabled = true;
-  const look = $("#aLook").value.trim() || animScript.look;
-  const prompt = `${look ? look + ". " : ""}Photorealistic luxury architectural visualisation of this exact building at night: blue hour sky with stars, warm light glowing from every window, `
-    + "subtle warm facade uplighting, refined landscaping, cinematic low-angle architectural photography. Keep the building's exact shape, floors, roof and window positions from the model view.";
-  try {
-    for (const { k, blob } of shots) {
-      const f = await uploadFile(current.id, new File([blob], `Photoreal view ${k + 1}.png`, { type: "image/png" }), () => {});
-      const looks = tickedLooks().filter(id => id !== f.id).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
-      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary",
-        tier: chosenTier(), quality: $("#rQuality").value, references: [{ file_id: f.id, role: "model" }, ...looks], anim_hero: { index: k, key: keys[k] } }, newKey());
-      heroPending.add(keys[k]); drawHeroes();
-    }
-    toast(`Making ${shots.length} photoreal view${shots.length > 1 ? "s" : ""}. Each takes about a minute.`);
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; current = await api.getProject(current.id).catch(() => current); renderProject(); loadOutputs(); }
-};
+function tickedLooks() { return rRefSel.slice(); }
 
 /* ---------- construction animation from 3D images ---------- */
 let IA = null, iaSel = [], iaAsIs = new Set(), iaPending = new Set(), iaAnim = null, iaT = 0, iaPlaying = false, iaRaf = 0, iaLast = 0, iaExporting = null, iaKey = "", iaBuildKey = "";
@@ -1373,9 +706,8 @@ $("#iaExport").onclick = async () => {
   const { canExport, exportVideo } = await import("./export.js");
   if (!canExport()) { message($("#iaMsg"), "This browser cannot make videos. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
   iaStop(); message($("#iaMsg"), "");
-  const base = C ? C.defaultScript() : {};
-  const script = C ? C.normalise({ ...base, format: $("#iaFormat").value, title: $("#iaTitle2").value.trim() || current.name, subtitle: $("#iaSub").value.trim(), renders: false, look: $("#iaLook").value.trim() })
-    : { format: $("#iaFormat").value, title: current.name, subtitle: "", renders: false, captions: true, render_seconds: 4 };
+  const script = { version: 1, format: $("#iaFormat").value, title: $("#iaTitle2").value.trim() || current.name, subtitle: $("#iaSub").value.trim(),
+    renders: false, captions: true, render_seconds: 4, look: $("#iaLook").value.trim().split(/\s+/).join(" ").slice(0, 400) };
   const ctl = new AbortController(); iaExporting = ctl;
   const btn = $("#iaExport"); btn.disabled = true; $("#iaProgress").hidden = false;
   const say = (f, text) => { $("#iaBar").style.width = `${Math.round(f * 100)}%`; $("#iaProgText").textContent = text; };
@@ -1436,7 +768,7 @@ function clipControls(host, prefix) {
     el("label", { class: "check engine-pick" }, "Video option ", engine), about,
     el("div", { class: "row" }, el("label", { class: "check" }, "Length ", secs), el("label", { class: "check" }, "Quality ", res), el("label", { class: "check" }, audio, "Sound"), est));
 }
-clipControls($("#animClipOpts"), "anim"); clipControls($("#iaClipOpts"), "ia");
+clipControls($("#iaClipOpts"), "ia");
 
 async function startClip(start, end, format, title, prefix, btn) {
   if (btn) btn.disabled = true;
@@ -1447,22 +779,6 @@ async function startClip(start, end, format, title, prefix, btn) {
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
   finally { if (btn) btn.disabled = false; }
 }
-async function heroClip(k, btn) {
-  if (!seq || !heroImgs[k]) return;
-  btn.disabled = true;
-  try {
-    const [w, h] = { "16:9": [1536, 1024], "9:16": [1024, 1536], "1:1": [1024, 1024] }[animScript.format];
-    stopAnim();
-    const canvas = seq.heroWireSnapshot(k, w, h);
-    const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
-    previewSize(); showAt(animT);
-    const f = await uploadFile(current.id, new File([blob], `Cinematic start view ${k + 1}.png`, { type: "image/png" }), () => {});
-    await startClip({ kind: "file", id: f.id }, { kind: "render", id: heroImgs[k]._rid }, animScript.format, animScript.title || current.name, "anim", null);
-    current = await api.getProject(current.id).catch(() => current); renderProject();
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; }
-}
-
 /* ---------- start ---------- */
 (async function start() {
   const c = window.OLLIC_CONFIG || {};

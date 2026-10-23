@@ -1,6 +1,6 @@
-"""The construction animation export job: the video the browser made -> a phone-friendly MP4, saved privately.
+"""The animation export job: the video the browser made -> a phone-friendly MP4, saved privately.
 
-The browser draws the animation from the IFC model and encodes it (H.264 where the browser can,
+The browser draws the golden animation from the architect's images and encodes it (H.264 where the browser can,
 otherwise VP9). The upload is checked in the request; this job re-packages or converts it with
 FFmpeg and saves it like any other video. The upload waits in a private temporary folder on
 this server; if the server restarts first, the job is reported as interrupted and the customer

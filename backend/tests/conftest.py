@@ -374,10 +374,3 @@ def alice():
 def bob():
     uid = str(uuid.uuid4())
     return {"id": uid, "headers": {"Authorization": f"Bearer {make_token(uid)}"}}
-
-
-@pytest.fixture(scope="session")
-def sample_ifc_bytes():
-    from tests.fixtures.builder import build_ifc
-    from tests.fixtures.layout import sample_house
-    return build_ifc(sample_house(), seed="fixture")

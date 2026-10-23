@@ -12,7 +12,7 @@ Phase 1 needs one Supabase project. The free plan is enough to build and test.
 
 1. Open **SQL Editor** > **New query**.
 2. Paste the whole of `supabase/migrations/20261022000001_foundation.sql` and choose **Run**.
-   Then do the same, in a new query, with `supabase/migrations/20261022000002_concept_renders.sql` (Phase 2: jobs, renders, usage records and the private `renders` bucket). Then `20261022000003_cloudflare_and_daily_limits.sql`, then `20261022000004_premium_plan.sql`, then `20261022000005_bim_models.sql` (3D models, components and the private `models` bucket), then `20261022000006_remove_plan_modelling.sql`, then `20261022000007_shots_and_videos.sql` (walkthrough shots, videos and the private `videos` bucket, 500 MB per file), then `20261022000008_construction_animation.sql` (construction videos and the animation director), then `20261022000009_cinematic_clips.sql` (cinematic clips; Kling and Google as providers). Run each migration once, in date order.
+   Then do the same, in a new query, with `supabase/migrations/20261022000002_concept_renders.sql` (Phase 2: jobs, renders, usage records and the private `renders` bucket). Then `20261022000003_cloudflare_and_daily_limits.sql`, then `20261022000004_premium_plan.sql`, then `20261022000005_bim_models.sql` (3D models, components and the private `models` bucket), then `20261022000006_remove_plan_modelling.sql`, then `20261022000007_shots_and_videos.sql` (walkthrough shots, videos and the private `videos` bucket, 500 MB per file), then `20261022000008_construction_animation.sql` (construction videos and the animation director), then `20261022000009_cinematic_clips.sql` (cinematic clips; Kling and Google as providers). Run each migration once, in date order. (Migrations 5 and 7 also create tables for 3D models and walkthrough shots; Ollic no longer uses them, but running them keeps the schema in step.)
 
 ### Giving a customer Premium render (until payments arrive in Phase 7)
 **Table Editor > profiles**, find the customer's row (its `id` matches their user id under **Authentication > Users**), set `plan` to `premium` and save. Set it back to `free` to remove it. Customers cannot change this themselves.
@@ -43,7 +43,7 @@ If you use the Supabase CLI, `supabase link` then `supabase db push` runs the sa
 
 ## 5. Storage size limit
 
-The migration sets a 50 MB limit per file on the bucket. On the free plan, Supabase also caps uploads at 50 MB project-wide (**Storage > Settings**). Large IFC files will need a paid plan, or Cloudflare R2/S3, in a later phase.
+The migration sets a 50 MB limit per file on the bucket. On the free plan, Supabase also caps uploads at 50 MB project-wide (**Storage > Settings**). Ollic takes PNG and JPEG images only, well under this limit.
 
 ## 6. Prove that customers are isolated
 

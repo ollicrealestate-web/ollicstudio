@@ -10,7 +10,6 @@
 <meta name="theme-color" content="#070707">
 <link rel="stylesheet" href="assets/styles.css">
 <script src="assets/config.js"></script>
-<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/"}}</script>
 </head>
 <body>
 <div class="blueprint" aria-hidden="true"></div>
@@ -52,7 +51,7 @@
         <label class="field">Email <input type="email" id="upEmail" autocomplete="email" required></label>
         <label class="field">Password <span class="hint">At least 8 characters.</span><input type="password" id="upPassword" autocomplete="new-password" minlength="8" required></label>
         <button class="btn primary" type="submit">Create account</button>
-        <p class="hint">Your plans and models are private to your account.</p>
+        <p class="hint">Your images, renders and videos are private to your account.</p>
       </form>
 
       <form id="resetForm" class="stack" hidden>
@@ -72,7 +71,7 @@
 
   <section id="projectsView" hidden>
     <div class="page-head">
-      <div><span class="eyebrow">Dashboard</span><h1 style="margin-top:10px">Projects</h1><p class="muted">Each project holds the drawings or model for one building.</p></div>
+      <div><span class="eyebrow">Dashboard</span><h1 style="margin-top:10px">Projects</h1><p class="muted">Each project holds the images, renders and videos for one building.</p></div>
       <form class="new-project" id="newProjectForm">
         <input type="text" id="newProjectName" placeholder="Project name, e.g. Lekki 4-bed duplex" maxlength="120" aria-label="New project name" required>
         <button class="btn primary" type="submit"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New project</button>
@@ -104,9 +103,9 @@
         <div>
         <div class="drop" id="dropZone">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
-          <h3>Add drawings or a model</h3>
-          <p class="muted">PNG or JPEG sketches, PDF drawings, or an IFC model (IFC2X3 or IFC4). Revit users: File &gt; Export &gt; IFC.</p>
-          <label class="btn primary" style="cursor:pointer">Choose files<input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.pdf,.ifc" multiple hidden></label>
+          <h3>Add images</h3>
+          <p class="muted">PNG or JPEG: a sketch, a 3D view, a render, a photo or a floor plan picture.</p>
+          <label class="btn primary" style="cursor:pointer">Choose images<input type="file" id="fileInput" accept=".png,.jpg,.jpeg" multiple hidden></label>
           <p class="hint">or drop them here</p>
         </div>
         <div class="uploads" id="uploads" aria-live="polite"></div>
@@ -123,131 +122,10 @@
       </div>
     </section>
 
-    <section class="model" id="modelSection" aria-labelledby="modelTitle">
-      <div class="studio-head">
-        <div><span class="eyebrow">3D model</span><h2 id="modelTitle" class="studio-title">Your Revit model in 3D</h2>
-          <p class="muted">Explore it inside and out, then render any view as a photoreal picture of your exact building.</p></div>
-      </div>
-      <div class="model-local" id="modelLocal" aria-live="polite"></div>
-      <div class="jobs" id="modelJobs" aria-live="polite"></div>
-      <div id="viewerWrap" hidden>
-        <div class="viewer-bar" role="toolbar" aria-label="3D view">
-          <div class="seg" role="group" aria-label="View">
-            <button type="button" class="seg-btn" id="viewOutside" aria-pressed="true">Outside</button>
-            <button type="button" class="seg-btn" id="viewInside" aria-pressed="false">Inside (roof off)</button>
-            <button type="button" class="seg-btn" id="viewWalk" aria-pressed="false">Walk through</button>
-            <button type="button" class="seg-btn" id="viewBuild" aria-pressed="false">Construction</button>
-          </div>
-          <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
-          <label class="storey-pick" id="viewPickWrap"><span>View</span><select id="viewPick" aria-label="Quick view">
-            <option value="">Choose…</option><option value="corner">Corner (3D)</option><option value="front">Front</option><option value="back">Back</option>
-            <option value="left">Left</option><option value="right">Right</option><option value="top">Top (plan)</option></select></label>
-          <button type="button" class="btn" id="viewReset">Reset view</button>
-          <button type="button" class="btn primary" id="useView">Capture view</button>
-          <button type="button" class="btn" id="saveShot">Save shot</button>
-          <span class="spacer"></span>
-          <button type="button" class="btn model-badge" id="modelBadge" aria-expanded="false" aria-controls="modelDetails" hidden></button>
-        </div>
-        <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
-        <div class="walk-panel" id="walkPanel" hidden>
-          <div class="room-list" id="roomList" role="group" aria-label="Rooms"></div>
-          <div class="walk-pad" role="group" aria-label="Move">
-            <button type="button" class="btn" data-hold="0,1" aria-label="Turn left">&#8630;</button>
-            <button type="button" class="btn" data-hold="1,0" aria-label="Walk forward">&#9650;</button>
-            <button type="button" class="btn" data-hold="-1,0" aria-label="Walk back">&#9660;</button>
-            <button type="button" class="btn" data-hold="0,-1" aria-label="Turn right">&#8631;</button>
-            <button type="button" class="btn" data-hold="0,0,1" aria-label="Rise">&#8679;</button>
-            <button type="button" class="btn" data-hold="0,0,-1" aria-label="Lower">&#8681;</button>
-          </div>
-          <div class="walk-floors" role="group" aria-label="Floors">
-            <button type="button" class="btn sm" id="floorUp">Floor up</button>
-            <button type="button" class="btn sm" id="floorDown">Floor down</button>
-            <span class="hint walk-keys">W A S D or arrows to walk, drag to look, Q / E down and up, Shift to go faster, double-click a floor to step there.</span>
-          </div>
-          <p class="hint" id="walkHint">Pick a room, then drag to look around. Hold the arrows to walk and turn, or on a keyboard use W and S to walk, A and D to step sideways, and the left and right arrows to turn. Frame a view you like and press <b>Save shot</b>.</p>
-        </div>
-        <div class="anim-panel card" id="animPanel" hidden aria-labelledby="animTitle">
-          <div class="anim-head"><h3 id="animTitle">Construction animation</h3><span class="hint">Built from your model: site, foundation, each floor, doors and windows, roof, a fly-around, furniture, then the rooms and your AI renders.</span></div>
-          <div class="anim-player">
-            <button type="button" class="btn primary" id="animPlay">Play</button>
-            <input type="range" id="animScrub" min="0" max="1000" value="0" step="1" aria-label="Position in the animation">
-            <span class="mono" id="animTime">0:00 / 0:00</span>
-          </div>
-          <div class="anim-chapters" id="animChapters" role="group" aria-label="Jump to a stage"></div>
-          <div class="tier-slot" id="tierSlotBuild"></div>
-          <div class="anim-heroes" id="animHeroes">
-            <div class="anim-heroes-head">
-              <div><b>Photoreal views</b> <span class="hint" id="heroNote">The gold wireframe turns into these AI renders as the line of light sweeps up. Each view uses one render from your daily allowance.</span></div>
-              <button type="button" class="btn primary" id="heroBtn">Make photoreal views</button>
-            </div>
-            <label class="field">Look of the finished building <span class="hint">Materials, colours, landscaping, mood. Look photos ticked under Concept renders are used too.</span>
-              <input type="text" id="aLook" maxlength="400" placeholder="e.g. white render, dark bronze glass, timber soffits, palm trees, warm uplights"></label>
-            <div class="hero-list" id="heroList"></div>
-            <div class="clip-opts" id="animClipOpts"></div>
-          </div>
-          <form class="anim-direct" id="animDirect">
-            <label class="field" for="animAsk">Tell the director what you want <span class="hint">In plain words, e.g. “slow down on the roof, show it at sunset, spend more time in the kitchen, skip the stairs”.</span></label>
-            <div class="row"><input type="text" id="animAsk" maxlength="600" placeholder="e.g. make it portrait for Instagram and visit the master bedroom first">
-              <button class="btn primary" type="submit" id="animAskBtn">Apply</button></div>
-            <p class="hint" id="animNotes" role="status"></p>
-          </form>
-          <section class="anim-programme" id="animProgramme" aria-labelledby="progTitle">
-            <div><b id="progTitle">Build order</b> <span class="hint" id="progLead">Follow the real construction programme: upload a Microsoft Project .xml, Primavera P6 .xer, .csv or Excel .xlsx schedule (SYNCHRO and Asta export these). Nothing is sent to an AI.</span></div>
-            <div class="row">
-              <label class="btn" style="cursor:pointer">Upload schedule<input type="file" id="progFile" accept=".xml,.xer,.csv,.xlsx,.mpp" hidden></label>
-              <button type="button" class="btn" id="progClear" hidden>Use the usual order</button>
-            </div>
-            <p class="hint" id="progNote" role="status"></p>
-            <div class="row" id="progOpts" hidden>
-              <label class="check">Build length <input type="number" id="progSeconds" min="10" max="180" step="5" style="width:5.5em"> s</label>
-              <label class="check"><input type="checkbox" id="progDates"> Show the dates</label>
-            </div>
-            <details id="progWrap" hidden><summary>Check the matches (<span id="progCount"></span>)</summary>
-              <div class="table-wrap"><table class="prog-table"><thead><tr><th>Task</th><th>Dates</th><th>Building part</th><th>Floor</th><th>Parts</th></tr></thead><tbody id="progRows"></tbody></table></div>
-            </details>
-          </section>
-          <details class="anim-settings" id="animSettings">
-            <summary>Settings</summary>
-            <div class="anim-grid">
-              <fieldset class="field phase-list"><legend>Stages and seconds</legend><div id="animPhases"></div></fieldset>
-              <div class="anim-side">
-                <label class="field">Style <select id="aStyle"><option value="luxury">Luxury: night, gold wireframe, photoreal reveal</option><option value="technical">Technical: daylight build of the model</option></select></label>
-                <label class="field" id="aHeroesField">Photoreal views <select id="aHeroes"><option value="1">1 view</option><option value="2">2 views</option><option value="3">3 views</option></select></label>
-                <label class="field" id="aTimeField">Light <select id="aTime"><option value="morning">Morning</option><option value="midday">Midday</option><option value="golden hour">Golden hour (sunset)</option><option value="dusk">Dusk</option></select></label>
-                <label class="field">Fly-around <select id="aDir"><option value="anticlockwise">Anticlockwise</option><option value="clockwise">Clockwise</option></select></label>
-                <label class="field">Format <select id="aFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
-                <label class="field">Title <input type="text" id="aTitle" maxlength="80"></label>
-                <label class="field">Subtitle <input type="text" id="aSub" maxlength="120" placeholder="e.g. your firm or the client"></label>
-                <label class="check"><input type="checkbox" id="aCaptions"> Show stage names</label>
-                <label class="check"><input type="checkbox" id="aRenders"> End with the AI renders of the rooms <input type="number" id="aRenderSec" min="2.5" max="10" step="0.5" aria-label="Seconds per render"> s each</label>
-                <fieldset class="field"><legend>Do not show</legend><div class="check-row" id="aHide"></div></fieldset>
-                <fieldset class="field"><legend>Rooms to visit <span class="hint">None ticked means all</span></legend><div class="check-row" id="aRooms"></div></fieldset>
-              </div>
-            </div>
-          </details>
-          <div class="render-go">
-            <button type="button" class="btn primary big" id="animExport">Export MP4</button>
-            <span class="hint" id="animEst"></span>
-          </div>
-          <div class="export-progress" id="animProgress" hidden>
-            <div class="progress"><i id="animBar"></i></div><span class="hint" id="animProgText"></span>
-            <button type="button" class="btn" id="animCancel">Cancel</button>
-          </div>
-          <div id="animMsg" class="notice" role="status" hidden></div>
-          <div class="jobs" id="animJobs" aria-live="polite"></div>
-          <div class="video-list" id="animVideos"></div>
-        </div>
-        <div class="card model-details" id="modelDetails" hidden>
-          <div id="reportCard"></div>
-          <div class="row"><a class="btn" id="dlGlb" download>Download 3D (GLB)</a><a class="btn" id="dlIfc" hidden>Download IFC</a></div>
-        </div>
-      </div>
-      <div class="empty" id="modelEmpty" hidden>Your IFC model is being read into 3D. Small models take under a minute; large ones several minutes.</div>
-    </section>
     <section class="img-anim" id="imgAnimSection" aria-labelledby="iaTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Construction animation</span><h2 id="iaTitle" class="studio-title">From a 3D image</h2>
-          <p class="muted">No model file? Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). The AI makes it photoreal at night, Ollic draws the building's lines in glowing gold from the ground up, then a line of light sweeps up and reveals the finished building. Up to three images become three shots of one video.</p></div>
+          <p class="muted">Upload a 3D image of the building (a Revit, SketchUp or Lumion view, or a render). The AI makes it photoreal at night, Ollic draws the building's lines in glowing gold from the ground up, then a line of light sweeps up and reveals the finished building. Up to three images become three shots of one video.</p></div>
       </div>
       <div class="card ia-card">
         <div class="tier-slot" id="tierSlotIA"></div>
@@ -302,8 +180,8 @@
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
         </fieldset></div>
         <div class="span2 rbox">
-          <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Capture a view of the 3D model, or upload a sketch, 3D image or plan.</span>
-            <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg,.pdf" hidden></label></div>
+          <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Upload a sketch, 3D image, photo or plan picture.</span>
+            <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg" hidden></label></div>
           <div class="rpics" id="rPics" role="radiogroup" aria-label="Picture to render"></div>
         </div>
         <div class="span2 rbox">
@@ -315,7 +193,7 @@
           <textarea id="rDesc" rows="2" maxlength="1500" placeholder="e.g. Luxury office complex in a well landscaped environment, bronze glass, white stone, evening light"></textarea></label>
         <div class="span2 rwrite">
           <button type="button" class="btn" id="writePromptBtn">Read image and write prompt</button>
-          <span class="hint" id="planNote">The AI studies the picture, your model and the references, and writes the rendering prompt.</span>
+          <span class="hint" id="planNote">The AI studies the picture and the references, and writes the rendering prompt.</span>
         </div>
         <label class="field span2">Rendering prompt <span class="hint">Written by the AI. Edit it if you like.</span>
           <textarea id="rPrompt" rows="7" maxlength="6000" required placeholder="Press “Read image and write prompt”, or write your own."></textarea></label>
@@ -330,40 +208,6 @@
       <div class="jobs" id="jobList" aria-live="polite"></div>
       <div class="gallery" id="gallery"></div>
       <div class="empty" id="galleryEmpty" hidden>No renders yet.</div>
-    </section>
-    <section class="walkthrough" id="walkSection" aria-labelledby="walkTitle">
-      <div class="studio-head">
-        <div><span class="eyebrow">Walkthrough</span><h2 id="walkTitle" class="studio-title">Room by room, then a video</h2>
-          <p class="muted">Save shots as you walk through the 3D model, render them all in one go with the same look, then turn the renders into an MP4 walkthrough with slow camera moves, room titles and your project name.</p></div>
-      </div>
-      <div class="empty" id="shotsEmpty">No shots yet. In the 3D model above, pick a room, frame the view and press <b>Save shot</b>. Outside views can be saved too.</div>
-      <ol class="shot-strip" id="shotStrip"></ol>
-      <div class="shot-go" id="shotGo" hidden>
-        <button type="button" class="btn primary" id="renderAllBtn">Render all shots</button>
-        <span class="hint" id="renderAllNote">Renders the ticked shots with the description, style, light and look set in Concept renders above, so the rooms match. Each shot is one render of your daily allowance.</span>
-      </div>
-      <div class="jobs" id="walkJobs" aria-live="polite"></div>
-      <form class="card video-form" id="videoForm" hidden>
-        <h3>Make the walkthrough video</h3>
-        <p class="muted">Each rendered shot becomes a clip, in the order above. Choose which render to use for each shot and edit the titles.</p>
-        <ol class="video-picks" id="videoPicks"></ol>
-        <div class="video-fields">
-          <label class="field">Format
-            <select id="vFormat"><option value="16:9">Landscape 16:9 (YouTube, presentations)</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1 (feeds)</option></select></label>
-          <label class="field">Seconds per shot
-            <input type="number" id="vSeconds" min="2.5" max="12" step="0.5" value="5"></label>
-          <label class="field">Title <span class="hint">Shown at the start</span>
-            <input type="text" id="vTitle" maxlength="80"></label>
-          <label class="field">Subtitle <span class="hint">Optional, e.g. your firm or the client</span>
-            <input type="text" id="vSubtitle" maxlength="120"></label>
-        </div>
-        <div class="render-go">
-          <button class="btn primary big" type="submit" id="videoBtn">Make video</button>
-          <span class="hint">Takes a few minutes. You can leave this page and come back.</span>
-          <div id="videoMsg" class="notice error" role="status" hidden></div>
-        </div>
-      </form>
-      <div class="video-list" id="videoList"></div>
     </section>
     <section class="library" id="libSection" hidden aria-labelledby="libTitle">
       <div class="studio-head">

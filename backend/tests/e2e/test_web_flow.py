@@ -111,13 +111,17 @@ def test_customer_journey_and_isolation(stack, tmp_path):
         page.wait_for_selector("#projectsView:not([hidden])")
         assert page.is_visible("#projectsEmpty") and page.inner_text("#userEmail") == "ada@example.com"
 
-        # create a project and upload a real PNG, then a PDF renamed to .png
+        # create a project and upload a real PNG, then a PDF named .png (Ollic takes images only)
         page.fill("#newProjectName", "Lekki duplex"); page.click("#newProjectForm button[type=submit]")
         page.wait_for_selector("#projectView:not([hidden])")
         assert page.inner_text("#projectName") == "Lekki duplex"
         # a new project asks what to make; one service at a time
-        assert page.is_visible("#svcPick") and page.locator(".svc-card").count() == 6
-        assert not any(page.is_visible(s) for s in ("#studio", "#modelSection", "#imgAnimSection", "#walkSection", "#svcStart"))
+        assert page.is_visible("#svcPick") and page.locator(".svc-card").count() == 3
+        cards = page.inner_text("#svcGrid")
+        assert "Photoreal render" in cards and "Floor plan to 3D" in cards and "Animation from a 3D image" in cards
+        assert "IFC" not in cards and "Revit model" not in cards and "Walkthrough" not in cards
+        assert page.locator("#modelSection, #walkSection, #viewer").count() == 0     # no 3D model screens any more
+        assert not any(page.is_visible(s) for s in ("#studio", "#imgAnimSection", "#svcStart"))
         page.screenshot(path=str(stack["dir"].parent / "e2e-services.png"), full_page=True)
         page.set_viewport_size({"width": 390, "height": 844}); page.screenshot(path=str(stack["dir"].parent / "e2e-services-phone.png"), full_page=True)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
@@ -137,7 +141,8 @@ def test_customer_journey_and_isolation(stack, tmp_path):
         page.check("#svcFiles input"); page.screenshot(path=str(stack["dir"].parent / "e2e-service-start.png"), full_page=True)
         page.set_input_files("#fileInput", str(fake))
         page.wait_for_selector(".upload-row.error .reason")
-        assert "contents are a PDF" in page.inner_text(".upload-row.error .reason")
+        assert "This is a PDF" in page.inner_text(".upload-row.error .reason") and "images only" in page.inner_text(".upload-row.error .reason")
+        assert page.get_attribute("#fileInput", "accept") == ".png,.jpg,.jpeg"
         project_url = page.url
         assert len(stack["storage"].objects) == 1
         page.screenshot(path=str(stack["dir"].parent / "e2e-project.png"), full_page=True)

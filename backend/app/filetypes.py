@@ -1,22 +1,22 @@
 """Works out what an uploaded file really is from its contents, never its name.
 
-Version 1 accepts PNG, JPEG, PDF and IFC (IFC2X3, IFC4, IFC4X3), as the brief's
-Module B lists. Anything else, anything renamed to look like an accepted type,
+Ollic works with images only: PNG and JPEG. A PDF or an IFC model is recognised so the
+reason it is refused is clear (export a PNG or JPEG instead). Anything else, anything renamed to look like an accepted type,
 and anything truncated or corrupt is rejected with a reason a person can act on.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 KINDS = {
     "png": {"mime": "image/png", "ext": "png", "label": "PNG image", "extensions": {"png"}},
     "jpeg": {"mime": "image/jpeg", "ext": "jpg", "label": "JPEG image", "extensions": {"jpg", "jpeg"}},
-    "pdf": {"mime": "application/pdf", "ext": "pdf", "label": "PDF document", "extensions": {"pdf"}},
-    "ifc": {"mime": "application/x-step", "ext": "ifc", "label": "IFC model", "extensions": {"ifc"}},
 }
-SUPPORTED_SCHEMAS = ("IFC2X3", "IFC4", "IFC4X3")
+NOT_IMAGES = {
+    "pdf": "This is a PDF. Ollic works with images only: export the page as a PNG or JPEG and upload that.",
+    "ifc": "This is an IFC model. Ollic works with images only: export a view of the model as a PNG or JPEG and upload that.",
+}
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ def _sniff(data: bytes) -> str | None:
 
 def _describe_unknown(data: bytes) -> str:
     if data.startswith(b"PK\x03\x04"):
-        return "a ZIP archive (zipped IFC and Office files are not accepted yet)"
+        return "a ZIP archive"
     if data.startswith(b"AC10"):
         return "an AutoCAD DWG drawing"
     if data[:4] in (b"RIFF",) and data[8:12] == b"WEBP":
@@ -84,29 +84,7 @@ def _check_jpeg(data: bytes) -> dict:
     return {}
 
 
-def _check_pdf(data: bytes) -> dict:
-    if b"%%EOF" not in data[-2048:]:
-        raise UploadRejected("This PDF is incomplete or damaged. Save or export it again.", "corrupt")
-    if b"/Encrypt" in data:
-        raise UploadRejected("This PDF is password-protected. Remove the password and upload it again.", "encrypted")
-    pages = len(re.findall(rb"/Type\s*/Page[^s]", data))
-    return {"pages": pages} if pages else {}
-
-
-def _check_ifc(data: bytes) -> dict:
-    header = data[:20000].decode("latin-1", errors="replace")
-    match = re.search(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'", header, re.IGNORECASE)
-    if not match:
-        raise UploadRejected("This IFC file has no schema in its header, so it cannot be read.", "corrupt")
-    schema = match.group(1).upper()
-    if not schema.startswith(SUPPORTED_SCHEMAS):
-        raise UploadRejected(f"This IFC uses the {schema} schema. Export it as IFC2X3 or IFC4 instead.", "unsupported_schema")
-    if b"END-ISO-10303-21;" not in data[-4096:].upper():
-        raise UploadRejected("This IFC file is incomplete: it does not end properly. Export it again.", "corrupt")
-    return {"schema": schema}
-
-
-CHECKS = {"png": _check_png, "jpeg": _check_jpeg, "pdf": _check_pdf, "ifc": _check_ifc}
+CHECKS = {"png": _check_png, "jpeg": _check_jpeg}
 
 
 def inspect_upload(data: bytes, filename: str) -> FileCheck:
@@ -114,11 +92,13 @@ def inspect_upload(data: bytes, filename: str) -> FileCheck:
         raise UploadRejected("The file is empty.", "empty")
     kind = _sniff(data)
     ext = _extension(filename)
+    if kind in NOT_IMAGES:
+        raise UploadRejected(NOT_IMAGES[kind], "unsupported")
     if kind is None:
         what = _describe_unknown(data)
         if ext == "rvt":
-            raise UploadRejected("Revit .rvt files cannot be read directly. In Revit, use File > Export > IFC and upload the .ifc file.", "unsupported")
-        raise UploadRejected(f"This looks like {what}. Upload a PNG, JPEG, PDF or IFC file.", "unsupported")
+            raise UploadRejected("Revit .rvt files cannot be read. Ollic works with images only: export a view as a PNG or JPEG and upload that.", "unsupported")
+        raise UploadRejected(f"This looks like {what}. Upload a PNG or JPEG image.", "unsupported")
     info = KINDS[kind]
     if ext and ext not in info["extensions"]:
         raise UploadRejected(

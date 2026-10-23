@@ -16,20 +16,19 @@ from .config import Settings
 from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
-from .animation import ClaudeDirector, CloudflareDirector
 from .gemini_images import GeminiImages
 from .fal import FalImages, FalVideo
 from .kling import KlingVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import animation, cinematic, models, projects, renders, walkthrough
+from .routes import animation, cinematic, projects, renders, videos
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
 
 
 def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None,
-               runner=None, vision="auto", prompt_writer="auto", directors="auto", kling="auto", gemini="auto", fal="auto") -> FastAPI:
+               runner=None, vision="auto", prompt_writer="auto", kling="auto", gemini="auto", fal="auto") -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
@@ -52,13 +51,6 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     if prompt_writer == "auto":
         prompt_writer = ClaudePromptWriter(settings.anthropic_api_key, settings.premium_prompt_model) if settings.anthropic_api_key else None
     app.state.prompt_writer = prompt_writer
-    # construction animation: plain words -> settings (free text model; Claude for paid plans)
-    if directors == "auto":
-        directors = {
-            "standard": CloudflareDirector(settings.cloudflare_account_id, settings.cloudflare_api_token) if settings.standard_available else None,
-            "premium": ClaudeDirector(settings.anthropic_api_key, settings.premium_prompt_model) if settings.anthropic_api_key else None,
-        }
-    app.state.directors = directors or {}
     # direct connections: Kling for cinematic clips, Google Gemini (Nano Banana) for line drawings
     if kling == "auto":
         kling = KlingVideo(settings.kling_api_key, settings.kling_base_url, settings.kling_model) if settings.kling_api_key else None
@@ -96,8 +88,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     app.include_router(projects.router, prefix="/api")
     app.include_router(renders.router, prefix="/api")
-    app.include_router(models.router, prefix="/api")
-    app.include_router(walkthrough.router, prefix="/api")
+    app.include_router(videos.router, prefix="/api")
     app.include_router(animation.router, prefix="/api")
     app.include_router(cinematic.router, prefix="/api")
 

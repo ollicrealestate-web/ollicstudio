@@ -91,8 +91,8 @@ def delete_project(project_id: uuid.UUID, request: Request, user: CurrentUser = 
 
 @router.delete("/projects/{project_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_source_file(project_id: uuid.UUID, file_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
-    """Deletes an uploaded file. A 3D model made from it goes too, and so do walkthrough shots
-    whose picture it is; renders made from it stay (they are finished work)."""
+    """Deletes an uploaded file; renders made from it stay (they are finished work). 3D models and
+    walkthrough shots made from it in older projects go too."""
     _owned_project(request, user, project_id)
     repo, storage, settings = _repo(request), _storage(request), request.app.state.settings
     f = repo.get_source_file(user, str(file_id))
@@ -153,7 +153,7 @@ def upload_source_file(project_id: uuid.UUID, request: Request, file: UploadFile
         storage.remove(user, [path])  # never leave a stored file without its record
         raise
     if project.get("input_type") in (None, "unknown"):
-        _repo(request).update_project(user, str(project_id), {"input_type": "ifc" if check.kind == "ifc" else "sketch"})
+        _repo(request).update_project(user, str(project_id), {"input_type": "sketch"})
     return saved
 
 

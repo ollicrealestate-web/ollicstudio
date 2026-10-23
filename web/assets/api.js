@@ -37,26 +37,14 @@ export const api = {
   editRender: (renderId, instruction, key, extra = {}) => request("POST", `/renders/${renderId}/edit`, { instruction, ...extra }, true, { "Idempotency-Key": key }),
   outputs: projectId => request("GET", `/projects/${projectId}/outputs`),
   cancelJob: id => request("POST", `/jobs/${id}/cancel`),
-  // Phases 3 and 3b: 3D models
-  importIfc: (projectId, fileId, key) => request("POST", `/projects/${projectId}/import-ifc`, { source_file_id: fileId }, true, { "Idempotency-Key": key }),
   writePrompt: (projectId, body) => request("POST", `/projects/${projectId}/render-prompt`, body),
   readPlan: (projectId, fileId) => request("POST", `/projects/${projectId}/plan/read`, { source_file_id: fileId }),
-  models: projectId => request("GET", `/projects/${projectId}/models`),
   fileLink: (projectId, fileId) => request("GET", `/projects/${projectId}/files/${fileId}/link`),
-  // Walkthrough: saved shots, render all shots, MP4 videos
-  shots: projectId => request("GET", `/projects/${projectId}/shots`),
-  saveShot: (projectId, body) => request("POST", `/projects/${projectId}/shots`, body),
-  editShot: (shotId, fields) => request("PATCH", `/shots/${shotId}`, fields),
-  deleteShot: shotId => request("DELETE", `/shots/${shotId}`),
-  renderShots: (projectId, body) => request("POST", `/projects/${projectId}/shots/render`, body),
-  makeVideo: (projectId, body) => request("POST", `/projects/${projectId}/videos`, body),
   videos: projectId => request("GET", `/projects/${projectId}/videos`),
   deleteFile: (projectId, fileId) => request("DELETE", `/projects/${projectId}/files/${fileId}`),
   deleteRender: renderId => request("DELETE", `/renders/${renderId}`),
   deleteVideo: videoId => request("DELETE", `/videos/${videoId}`),
   makeClip: (projectId, body) => request("POST", `/projects/${projectId}/cinematic`, body),
-  // Construction animation
-  directAnimation: (projectId, body) => request("POST", `/projects/${projectId}/animation/direct`, body),
 };
 
 export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -79,44 +67,6 @@ export async function uploadFile(projectId, file, onProgress) {
     };
     const form = new FormData();
     form.append("file", file, file.name);
-    xhr.send(form);
-  });
-}
-
-/** Reads a construction schedule and matches its tasks to the model's floors. */
-export async function readSchedule(projectId, file, storeys) {
-  const token = await accessToken();
-  if (!token) throw new ApiError(401, "Sign in to continue.");
-  const form = new FormData();
-  form.append("file", file, file.name);
-  form.append("storeys", JSON.stringify(storeys || []));
-  let res;
-  try { res = await fetch(`${base()}/projects/${projectId}/schedule/read`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }); }
-  catch { throw new ApiError(0, "Could not reach the Ollic server. Check your connection and try again."); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.detail || "The schedule could not be read.");
-  return data;
-}
-
-/** Saves a model this browser read from an IFC: the 3D file plus its report and parts. */
-export async function saveBrowserModel(projectId, glb, meta, onProgress) {
-  const token = await accessToken();
-  if (!token) throw new ApiError(401, "Sign in to continue.");
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${base()}/projects/${projectId}/models/from-browser`);
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
-    xhr.onerror = () => reject(new ApiError(0, "The 3D model could not be saved: the connection was interrupted. Try again."));
-    xhr.onload = () => {
-      let data = {};
-      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* not JSON */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new ApiError(xhr.status, data.detail || "The 3D model could not be saved."));
-    };
-    const form = new FormData();
-    form.append("file", new Blob([glb], { type: "model/gltf-binary" }), "model.glb");
-    form.append("meta", JSON.stringify(meta));
     xhr.send(form);
   });
 }
