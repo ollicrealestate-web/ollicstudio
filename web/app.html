@@ -139,6 +139,9 @@
             <button type="button" class="seg-btn" id="viewBuild" aria-pressed="false">Construction</button>
           </div>
           <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
+          <label class="storey-pick" id="viewPickWrap"><span>View</span><select id="viewPick" aria-label="Quick view">
+            <option value="">Choose…</option><option value="corner">Corner (3D)</option><option value="front">Front</option><option value="back">Back</option>
+            <option value="left">Left</option><option value="right">Right</option><option value="top">Top (plan)</option></select></label>
           <button type="button" class="btn" id="viewReset">Reset view</button>
           <button type="button" class="btn primary" id="useView">Capture view</button>
           <button type="button" class="btn" id="saveShot">Save shot</button>
@@ -153,6 +156,13 @@
             <button type="button" class="btn" data-hold="1,0" aria-label="Walk forward">&#9650;</button>
             <button type="button" class="btn" data-hold="-1,0" aria-label="Walk back">&#9660;</button>
             <button type="button" class="btn" data-hold="0,-1" aria-label="Turn right">&#8631;</button>
+            <button type="button" class="btn" data-hold="0,0,1" aria-label="Rise">&#8679;</button>
+            <button type="button" class="btn" data-hold="0,0,-1" aria-label="Lower">&#8681;</button>
+          </div>
+          <div class="walk-floors" role="group" aria-label="Floors">
+            <button type="button" class="btn sm" id="floorUp">Floor up</button>
+            <button type="button" class="btn sm" id="floorDown">Floor down</button>
+            <span class="hint walk-keys">W A S D or arrows to walk, drag to look, Q / E down and up, Shift to go faster, double-click a floor to step there.</span>
           </div>
           <p class="hint" id="walkHint">Pick a room, then drag to look around. Hold the arrows to walk and turn, or on a keyboard use W and S to walk, A and D to step sideways, and the left and right arrows to turn. Frame a view you like and press <b>Save shot</b>.</p>
         </div>

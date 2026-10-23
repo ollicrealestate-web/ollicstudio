@@ -23,6 +23,28 @@ const UNIT_NAMES = { 1: "metres", 0.001: "millimetres", 0.01: "centimetres", 0.3
 const PREFIX = { MILLI: 0.001, CENTI: 0.01, DECI: 0.1, KILO: 1000 };
 
 class ReadFailed extends Error {}
+
+/** What a part is made of, for the viewer's realistic look: from the architect's material names,
+ *  the part's colour (see-through: glass) and its IFC type. */
+const MATERIAL_WORDS = [
+  ["glass", /glass|glaz|vitr/i], ["metal", /alumin|steel|metal|iron|chrom|brass|zinc|copper|stainless|anodi/i], ["wood", /wood|timber|oak|walnut|teak|ply|veneer|mahogany|pine|bamboo/i],
+  ["brick", /brick|masonry unit|clay block/i], ["tile", /tile|ceramic|porcelain|mosaic/i], ["stone", /marble|granite|stone|travertine|slate|limestone|terrazzo/i],
+  ["grass", /grass|lawn|turf|soil|earth|planting|vegetation/i], ["asphalt", /asphalt|bitumen|tarmac/i], ["paving", /paving|paver|interlock|cobble/i],
+  ["concrete", /concrete|cement|screed|precast|cast.in/i], ["plaster", /plaster|render|stucco|paint|gypsum|drywall|emulsion|finish/i],
+];
+const TYPE_CLASS = { IfcWindow: "metal", IfcDoor: "wood", IfcRailing: "metal", IfcMember: "metal", IfcCurtainWall: "glass", IfcPlate: "glass", IfcRoof: "roof",
+  IfcSlab: "concrete", IfcColumn: "concrete", IfcBeam: "concrete", IfcFooting: "concrete", IfcPile: "concrete", IfcStair: "concrete", IfcStairFlight: "concrete",
+  IfcWall: "plaster", IfcWallStandardCase: "plaster", IfcCovering: "plaster", IfcFurnishingElement: "furniture", IfcFurniture: "furniture", IfcSpace: "space",
+  IfcFlowTerminal: "ceramic", IfcSanitaryTerminal: "ceramic" };
+function materialClass(type, names, rgba, parts) {
+  if (type === "IfcSpace") return "space";
+  if (rgba && rgba[3] < 0.95) return "glass";
+  const words = names.filter(n => !(parts > 1 && /glass|glaz/i.test(n)));   // a part that is not see-through is not the glass of a window
+  for (const [cls, re] of MATERIAL_WORDS) if (cls !== "glass" && words.some(n => re.test(n))) return cls;
+  if (parts === 1 && names.some(n => /glass|glaz/i.test(n))) return "glass";
+  if (type === "IfcPlate" || type === "IfcCurtainWall") return rgba && rgba[3] >= 0.95 ? "metal" : "glass";
+  return TYPE_CLASS[type] || "paint";
+}
 const v = x => (x && typeof x === "object" && "value" in x ? x.value : x);
 const ref = x => (x && typeof x === "object" && "value" in x ? x.value : x);
 
@@ -120,6 +142,27 @@ function build(api, id, progress) {
     for (const e of l.RelatedObjects || []) props.set(ref(e), { ...(props.get(ref(e)) || {}), ...vals });
   }
 
+  // the materials the architect set (IfcRelAssociatesMaterial): names like "Concrete - Cast In Situ", "Glass", "Aluminium"
+  const matNames = new Map();
+  const namesOf = (mid, depth = 0) => {
+    const m = line(api, id, mid); if (!m || depth > 3) return [];
+    if (v(m.Name) && !m.ForLayerSet && !m.MaterialLayers && !m.Materials && !m.MaterialConstituents && !m.MaterialProfiles) return [String(v(m.Name))];
+    const out = [];
+    if (m.ForLayerSet) out.push(...namesOf(ref(m.ForLayerSet), depth + 1));
+    if (m.ForProfileSet) out.push(...namesOf(ref(m.ForProfileSet), depth + 1));
+    for (const key of ["MaterialLayers", "Materials", "MaterialConstituents", "MaterialProfiles"])
+      for (const x of m[key] || []) { const xl = line(api, id, ref(x)); if (!xl) continue; if (xl.Material) out.push(...namesOf(ref(xl.Material), depth + 1)); else out.push(...namesOf(ref(x), depth + 1)); }
+    if (!out.length && v(m.Name)) out.push(String(v(m.Name)));
+    return out;
+  };
+  const matCache = new Map();
+  for (const r of idsOf(api, id, W.IFCRELASSOCIATESMATERIAL)) {
+    const l = line(api, id, r); if (!l) continue;
+    const mid = ref(l.RelatingMaterial);
+    if (!matCache.has(mid)) matCache.set(mid, [...new Set(namesOf(mid))].slice(0, 6));
+    for (const e of l.RelatedObjects || []) matNames.set(ref(e), matCache.get(mid));
+  }
+
   const comps = new Map();   // eid -> component
   const ids = [];
   for (const p of products) {
@@ -129,8 +172,11 @@ function build(api, id, progress) {
     let pre = v(l.PredefinedType) || null;
     if (pre === "USERDEFINED") pre = v(l.ObjectType) || pre;
     if (pre === "NOTDEFINED") pre = null;
+    const mats = matNames.get(p.eid) || [];
+    const pr = props.get(p.eid) || {};
+    if (mats.length) pr["Ollic.Materials"] = mats.join("; ").slice(0, 400);
     comps.set(p.eid, { global_id: gid, ifc_type: p.type, name: (v(l.Name) || "").slice(0, 200) || null, family: p.family, storey: storeyOf(p.eid),
-      has_geometry: false, properties: props.get(p.eid) || {}, predefined: pre });
+      has_geometry: false, properties: pr, predefined: pre, materials: mats });
   }
   const seen = new Map(); ids.forEach(g => seen.set(g, (seen.get(g) || 0) + 1));
   const dupes = [...seen].filter(([, n]) => n > 1).map(([g]) => g), bad = ids.filter(g => !GUID_RE.test(g || ""));
@@ -147,27 +193,29 @@ function build(api, id, progress) {
 
   // ---------------------------------------------------------------- geometry
   progress("Building the 3D geometry", 0.15);
-  const meshes = [];   // { eid, pos: Float32Array (unwelded, world, y-up), rgba }
+  const meshes = [];   // { eid, parts: [{ pos: Float32Array (unwelded, world, y-up), rgba, cls }] }
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   const all = products.map(p => p.eid);
   api.StreamMeshes(id, all, (mesh, index, total) => {
-    const parts = [], colours = new Map();
-    let n = 0;
+    // the element's parts, one per colour (a window: its frame and its glass), each with its material class
+    const groups = new Map();
     for (let i = 0; i < mesh.geometries.size(); i++) {
       const pg = mesh.geometries.get(i);
       const g = api.GetGeometry(id, pg.geometryExpressID);
       const vd = api.GetVertexArray(g.GetVertexData(), g.GetVertexDataSize());
       const ix = api.GetIndexArray(g.GetIndexData(), g.GetIndexDataSize());
-      parts.push({ vd: vd.slice(), ix: ix.slice(), m: pg.flatTransformation.slice() });
-      n += ix.length;
       const c = pg.color, key = [c.x, c.y, c.z, c.w].map(x => Math.round(x * 1000) / 1000).join(",");
-      colours.set(key, (colours.get(key) || 0) + ix.length);
+      if (!groups.has(key)) groups.set(key, { rgba: key.split(",").map(Number), list: [], n: 0 });
+      const gr = groups.get(key); gr.list.push({ vd: vd.slice(), ix: ix.slice(), m: pg.flatTransformation.slice() }); gr.n += ix.length;
       g.delete();
     }
-    if (n) {
-      const pos = new Float32Array(n * 3);
+    const comp = comps.get(mesh.expressID);
+    const out = [];
+    for (const gr of groups.values()) {
+      if (!gr.n) continue;
+      const pos = new Float32Array(gr.n * 3);
       let o = 0;
-      for (const { vd, ix, m } of parts) {
+      for (const { vd, ix, m } of gr.list) {
         for (let k = 0; k < ix.length; k++) {
           const b = ix[k] * 6, x = vd[b], y = vd[b + 1], z = vd[b + 2];
           const X = m[0] * x + m[4] * y + m[8] * z + m[12], Y = m[1] * x + m[5] * y + m[9] * z + m[13], Z = m[2] * x + m[6] * y + m[10] * z + m[14];
@@ -176,10 +224,9 @@ function build(api, id, progress) {
           if (X > hi[0]) hi[0] = X; if (Y > hi[1]) hi[1] = Y; if (Z > hi[2]) hi[2] = Z;
         }
       }
-      const main = [...colours].sort((a, b) => b[1] - a[1])[0][0].split(",").map(Number);
-      meshes.push({ eid: mesh.expressID, pos, rgba: main });
-      const c = comps.get(mesh.expressID); if (c) c.has_geometry = true;
+      out.push({ pos, rgba: gr.rgba, cls: materialClass(comp?.ifc_type, comp?.materials || [], gr.rgba, groups.size) });
     }
+    if (out.length) { meshes.push({ eid: mesh.expressID, parts: out }); if (comp) comp.has_geometry = true; }
     if (index % 50 === 0) progress(`Building the 3D geometry (${index + 1} of ${total})`, 0.15 + 0.7 * (index + 1) / Math.max(1, total));
   });
   if (!meshes.length) throw new ReadFailed("None of the elements have geometry Ollic can display. Check that the export includes 3D views (Revit: IFC export setup > Geometry).");
@@ -199,7 +246,7 @@ function build(api, id, progress) {
   progress("Writing the 3D model", 0.9);
   const centre = [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2];
   const glb = writeGlb(meshes, comps, centre);
-  const components = [...comps.values()].map(({ predefined, ...c }) => c);
+  const components = [...comps.values()].map(({ predefined, materials, ...c }) => c);
   const status = checks.some(c => c.status === "fail") ? "fail" : checks.some(c => c.status === "warn") ? "warn" : "pass";
   const report = { status, schema, units: UNIT_NAMES[scale] || `${scale} m per unit`, checks, counts, families, storeys: storeys.map(s => s.name),
     size_m: size.map(x => Math.round(x * 100) / 100), elements: products.length, with_geometry: meshes.length, read_on: "browser" };
@@ -210,32 +257,39 @@ function build(api, id, progress) {
 function writeGlb(meshes, comps, centre) {
   const views = [], accessors = [], glMeshes = [], nodes = [], materials = [], matIndex = new Map();
   let total = 0;
-  for (const m of meshes) total += m.pos.byteLength;
+  for (const m of meshes) for (const q of m.parts) total += q.pos.byteLength;
   const bin = new Uint8Array(total);
   let offset = 0;
   for (const m of meshes) {
     const c = comps.get(m.eid) || {};
-    let rgba = m.rgba && m.rgba.length === 4 ? m.rgba : DEFAULT_COLOURS[c.ifc_type] || [0.8, 0.8, 0.8, 1];
-    if (c.ifc_type === "IfcSpace") rgba = [rgba[0], rgba[1], rgba[2], Math.min(rgba[3], 0.15)];
-    rgba = rgba.map(x => Math.round(x * 1e4) / 1e4);
-    const key = rgba.join(",");
-    if (!matIndex.has(key)) {
-      matIndex.set(key, materials.length);
-      materials.push({ pbrMetallicRoughness: { baseColorFactor: rgba, metallicFactor: 0, roughnessFactor: 0.85 }, alphaMode: rgba[3] < 0.99 ? "BLEND" : "OPAQUE", doubleSided: true });
+    const prims = [];
+    for (const q of m.parts) {
+      let rgba = q.rgba && q.rgba.length === 4 ? q.rgba : DEFAULT_COLOURS[c.ifc_type] || [0.8, 0.8, 0.8, 1];
+      if (c.ifc_type === "IfcSpace") rgba = [rgba[0], rgba[1], rgba[2], Math.min(rgba[3], 0.15)];
+      rgba = rgba.map(x => Math.round(x * 1e4) / 1e4);
+      const key = `${q.cls}|${rgba.join(",")}`;
+      if (!matIndex.has(key)) {
+        matIndex.set(key, materials.length);
+        // the material's name carries its class (glass, metal, brick...) for the viewer's realistic look
+        materials.push({ name: `ollic:${q.cls}`, pbrMetallicRoughness: { baseColorFactor: rgba, metallicFactor: q.cls === "metal" ? 0.8 : 0, roughnessFactor: q.cls === "glass" ? 0.05 : 0.85 },
+          alphaMode: rgba[3] < 0.99 ? "BLEND" : "OPAQUE", doubleSided: true });
+      }
+      const p = q.pos, mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+      for (let k = 0; k < p.length; k += 3) {
+        p[k] -= centre[0]; p[k + 1] -= centre[1]; p[k + 2] -= centre[2];
+        for (let a = 0; a < 3; a++) { if (p[k + a] < mn[a]) mn[a] = p[k + a]; if (p[k + a] > mx[a]) mx[a] = p[k + a]; }
+      }
+      bin.set(new Uint8Array(p.buffer, p.byteOffset, p.byteLength), offset);
+      views.push({ buffer: 0, byteOffset: offset, byteLength: p.byteLength, target: 34962 });
+      offset += p.byteLength;   // float32 data: always a multiple of 4
+      accessors.push({ bufferView: views.length - 1, componentType: 5126, count: p.length / 3, type: "VEC3", min: mn, max: mx });
+      prims.push({ attributes: { POSITION: accessors.length - 1 }, material: matIndex.get(key) });
+      q.pos = null;
     }
-    const p = m.pos, mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
-    for (let k = 0; k < p.length; k += 3) {
-      p[k] -= centre[0]; p[k + 1] -= centre[1]; p[k + 2] -= centre[2];
-      for (let a = 0; a < 3; a++) { if (p[k + a] < mn[a]) mn[a] = p[k + a]; if (p[k + a] > mx[a]) mx[a] = p[k + a]; }
-    }
-    bin.set(new Uint8Array(p.buffer, p.byteOffset, p.byteLength), offset);
-    views.push({ buffer: 0, byteOffset: offset, byteLength: p.byteLength, target: 34962 });
-    offset += p.byteLength;   // float32 data: always a multiple of 4
-    accessors.push({ bufferView: views.length - 1, componentType: 5126, count: p.length / 3, type: "VEC3", min: mn, max: mx });
-    glMeshes.push({ name: c.global_id, primitives: [{ attributes: { POSITION: accessors.length - 1 }, material: matIndex.get(key) }] });
+    glMeshes.push({ name: c.global_id, primitives: prims });
     nodes.push({ name: c.global_id, mesh: glMeshes.length - 1,
-      extras: { globalId: c.global_id, ifcType: c.ifc_type, name: c.name, storey: c.storey, family: c.family, predefined: c.predefined ?? null } });
-    m.pos = null;
+      extras: { globalId: c.global_id, ifcType: c.ifc_type, name: c.name, storey: c.storey, family: c.family, predefined: c.predefined ?? null,
+        materials: (c.materials || []).slice(0, 4) } });
   }
   const doc = { asset: { version: "2.0", generator: "Ollic Design Studio (read in the browser)" }, scene: 0, scenes: [{ nodes: nodes.map((_, i) => i) }],
     nodes, meshes: glMeshes, materials, accessors, bufferViews: views, buffers: [{ byteLength: offset }] };

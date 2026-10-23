@@ -42,7 +42,7 @@ Last updated: 22 October 2026, session 2 (walkthrough added).
 | **Nano Banana line drawings** (Google direct) | Built and tested with a stand-in; **awaiting `GEMINI_API_KEY`** | `test_cinematic.py` |
 | **Animation director**: plain words change the settings (Standard: free text model; paid plans: Claude); 40 a day | Built and tested with stand-ins; live once migration 8 is run | `test_animation.py` |
 | **Construction video export**: made in the browser (H.264, or VP9 converted by the server), checked, made phone-friendly and saved; 16:9, 9:16, 1:1 | Built and tested (VP9 path end to end; H.264 path on the server) | e2e construction test, `test_animation.py` |
-| **3D viewer**: outside, inside with roof off and room names, floor picker, element details, GLB and IFC downloads; draws only on change; fits phones | Built and tested in a browser (WebGL) | e2e model test |
+| **3D viewer**: realistic materials from the IFC, sky, sun shadows and ambient occlusion; orbit, zoom to pointer, double-click fly-to, quick views, section-cut inside view with room names, floor picker, walk mode with collisions and floor up/down; element details, GLB and IFC downloads; draws only on change; fits phones | Built and tested in a browser (WebGL) | e2e model test |
 
 ### Live checks, 22 Oct 2026
 - Standard render (account B, free plan): description 29 s, sketch 13 s (kept the sketch's roof, windows and door), revision 10 s. Labels and download names correct; 4th render refused by the daily limit; Premium refused for a free plan; 3 costs recorded ($0.005 at list price, $0 actual).

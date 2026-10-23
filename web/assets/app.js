@@ -231,6 +231,7 @@ function applyView() {
   Object.entries(MODE_BTN).forEach(([m, sel]) => { $(sel).hidden = !(svc?.modes || []).includes(m) || (svc?.modes || []).length < 2; });
   $("#useView").hidden = !["model", "walk"].includes(service);
   $("#saveShot").hidden = service !== "walk";
+  $("#viewPickWrap").hidden = service === "build";
   // the AI version choice sits in the screen that makes the pictures
   const slot = service === "build" ? "#tierSlotBuild" : service === "imageanim" ? "#tierSlotIA" : "#tierHome";
   if ($("#tierPick").parentElement !== $(slot)) $(slot).append($("#tierPick"));
@@ -450,8 +451,8 @@ function setViewMode(mode) {
     if (modelLoading) { toast("The 3D model is still loading. Try again in a moment."); modelLoading.then(() => {}, () => {}); return; }
     if (!enterBuild()) return;
   } else if (mode === "walk") {
-    if (!viewer.rooms().length) { toast("This model has no rooms to walk into. In Revit's IFC export settings, include rooms (spaces) and export again."); return; }
     if (viewer.mode !== "walk") viewer.walkTo(walkRoom);
+    if (!viewer.rooms().length) toast("This model has no rooms (spaces), so you start in the middle of the ground floor. Walk, or use Floor up.");
     drawRooms();
     $("#viewer canvas")?.focus({ preventScroll: true });
   } else viewer.setMode(mode);
@@ -466,6 +467,10 @@ function setViewMode(mode) {
 $("#viewOutside").onclick = () => setViewMode("exterior");
 $("#viewInside").onclick = () => setViewMode("interior");
 $("#viewWalk").onclick = () => setViewMode("walk");
+$("#viewPick").onchange = e => { const v = e.target.value; e.target.value = ""; if (!v || !viewer) return; if (viewer.mode === "walk") setViewMode("exterior"); viewer.view(v); };
+const floorStep = k => { const s = viewer?.changeFloor(k); if (s) toast(s); else toast(k > 0 ? "This is the top floor." : "This is the lowest floor."); };
+$("#floorUp").onclick = () => floorStep(1);
+$("#floorDown").onclick = () => floorStep(-1);
 $("#viewBuild").onclick = () => setViewMode("build");
 
 /* walking through the rooms */
@@ -475,9 +480,9 @@ function drawRooms() {
     onclick: () => { walkRoom = r.index; viewer.walkTo(r.index); drawRooms(); } }, floors > 1 && r.storey ? `${r.name} · ${r.storey}` : r.name)));
 }
 document.querySelectorAll("[data-hold]").forEach(b => {
-  const [f, t] = b.dataset.hold.split(",").map(Number);
-  const stop = () => viewer?.hold(0, 0);
-  b.addEventListener("pointerdown", e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* not a real pointer */ } viewer?.hold(f, t); });
+  const [f, t, u = 0] = b.dataset.hold.split(",").map(Number);
+  const stop = () => viewer?.hold(0, 0, 0);
+  b.addEventListener("pointerdown", e => { e.preventDefault(); try { b.setPointerCapture(e.pointerId); } catch { /* not a real pointer */ } viewer?.hold(f, t, u); });
   ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => b.addEventListener(ev, stop));
   b.addEventListener("contextmenu", e => e.preventDefault());
 });
