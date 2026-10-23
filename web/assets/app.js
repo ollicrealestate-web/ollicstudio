@@ -393,6 +393,7 @@ async function loadModels() {
   try { models = await api.models(pid); } catch (err) { if (err.status === 401) return handle(err); return; }
   if (current?.id !== pid) return;
   modelsNow = models;
+  if (step === "start") drawStart();      // the Library list shows which IFCs are already in 3D
   // the IFC chosen in this service's first step; while it is still being read, nothing else is shown
   const m = chosenIfc ? models.find(x => x.source_file_id === chosenIfc) : models[0];
   if (!m && viewerModelId) resetModel();
