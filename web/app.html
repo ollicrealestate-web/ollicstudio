@@ -159,6 +159,21 @@
               <button class="btn primary" type="submit" id="animAskBtn">Apply</button></div>
             <p class="hint" id="animNotes" role="status"></p>
           </form>
+          <section class="anim-programme" id="animProgramme" aria-labelledby="progTitle">
+            <div><b id="progTitle">Build order</b> <span class="hint" id="progLead">Follow the real construction programme: upload a Microsoft Project .xml, Primavera P6 .xer, .csv or Excel .xlsx schedule (SYNCHRO and Asta export these). Nothing is sent to an AI.</span></div>
+            <div class="row">
+              <label class="btn" style="cursor:pointer">Upload schedule<input type="file" id="progFile" accept=".xml,.xer,.csv,.xlsx,.mpp" hidden></label>
+              <button type="button" class="btn" id="progClear" hidden>Use the usual order</button>
+            </div>
+            <p class="hint" id="progNote" role="status"></p>
+            <div class="row" id="progOpts" hidden>
+              <label class="check">Build length <input type="number" id="progSeconds" min="10" max="180" step="5" style="width:5.5em"> s</label>
+              <label class="check"><input type="checkbox" id="progDates"> Show the dates</label>
+            </div>
+            <details id="progWrap" hidden><summary>Check the matches (<span id="progCount"></span>)</summary>
+              <div class="table-wrap"><table class="prog-table"><thead><tr><th>Task</th><th>Dates</th><th>Building part</th><th>Floor</th><th>Parts</th></tr></thead><tbody id="progRows"></tbody></table></div>
+            </details>
+          </section>
           <details class="anim-settings" id="animSettings">
             <summary>Settings</summary>
             <div class="anim-grid">

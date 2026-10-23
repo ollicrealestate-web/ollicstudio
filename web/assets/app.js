@@ -1,4 +1,4 @@
-import { api, uploadFile, uploadAnimation, ApiError, newKey } from "./api.js";
+import { api, uploadFile, uploadAnimation, readSchedule, ApiError, newKey } from "./api.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -714,7 +714,60 @@ $("#animPlay").onclick = () => {
 };
 $("#animScrub").oninput = e => { stopAnim(); showAt(Number(e.target.value) / 100); };
 
+/* the contractor's programme: build in its order, on its dates */
+const PROG_GROUPS = [["site", "Site works"], ["foundation", "Foundation"], ["structure", "Structure"], ["walls", "Walls and facade"], ["openings", "Doors and windows"],
+  ["roof", "Roof"], ["mep", "MEP services"], ["finishes", "Finishes"], ["furnish", "Furniture and fittings"], ["none", "Not shown"]];
+const PROG_KINDS = [["", "all"], ["columns", "columns"], ["beams", "beams"], ["slabs", "slabs"], ["stairs", "stairs"]];
+const fmtDay = d => new Date(d + "T00:00:00Z").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+function progChanged() { saveScript(); buildSeq(); drawProgramme(); }
+function drawProgramme() {
+  const plan = animScript.schedule || [];
+  $("#progClear").hidden = $("#progOpts").hidden = $("#progWrap").hidden = !plan.length;
+  if (!plan.length) { $("#progNote").textContent = "Now using the usual order: site, foundation, each floor, doors and windows, roof."; return; }
+  $("#progSeconds").value = String(animScript.schedule_seconds); $("#progDates").checked = animScript.show_dates;
+  const prog = seq?.programme, parts = Object.fromEntries((prog?.tasks || []).map(t => [t.i, t.parts]));
+  const shown = plan.filter(t => t.group !== "none").length;
+  const left = Object.values(prog?.unscheduled || {}).reduce((a, b) => a + b, 0);
+  const d0 = plan.reduce((m, t) => t.start < m ? t.start : m, plan[0].start), d1 = plan.reduce((m, t) => t.finish > m ? t.finish : m, plan[0].finish);
+  $("#progNote").textContent = `Following your programme: ${plan.length} tasks, ${fmtDay(d0)} to ${fmtDay(d1)}, shown in ${animScript.schedule_seconds} s. ${shown} tasks build parts of the model.`
+    + (left ? ` ${left} parts of the model are in no task, so they appear at the end; give them a task below.` : "");
+  $("#progCount").textContent = `${shown} of ${plan.length} matched`;
+  const storeys = viewer?.engine().storeys || [];
+  $("#progRows").replaceChildren(...plan.map((t, i) => {
+    const grp = el("select", { "aria-label": `Building part for ${t.name}` }, ...PROG_GROUPS.map(([v, n]) => el("option", { value: v, ...(v === t.group ? { selected: "" } : {}) }, n)));
+    const kind = el("select", { "aria-label": `Which structure for ${t.name}`, ...(t.group === "structure" ? {} : { hidden: "" }) },
+      ...PROG_KINDS.map(([v, n]) => el("option", { value: v, ...(v === (t.kind || "") ? { selected: "" } : {}) }, n)));
+    const many = (t.floors || []).length > 1 ? (t.floors || []).join(", ") : null;
+    const floor = el("select", { "aria-label": `Floor for ${t.name}` }, el("option", { value: "" }, "All floors"),
+      ...(many ? [el("option", { value: "__many", selected: "" }, `${t.floors.length} floors`)] : []),
+      ...storeys.map(n => el("option", { value: n, ...(!many && (t.floors || [])[0] === n ? { selected: "" } : {}) }, n)));
+    grp.onchange = () => { t.group = grp.value; if (t.group !== "structure") t.kind = null; progChanged(); };
+    kind.onchange = () => { t.kind = kind.value || null; progChanged(); };
+    floor.onchange = () => { if (floor.value !== "__many") { t.floors = floor.value ? [floor.value] : []; progChanged(); } };
+    const n = t.group === "none" ? "—" : String(parts[i] ?? 0);
+    return el("tr", { class: t.group === "none" ? "unmatched" : "" }, el("td", {}, t.name, ...(many ? [el("br"), el("small", { class: "muted" }, many)] : [])),
+      el("td", { class: "mono" }, `${fmtDay(t.start)} – ${fmtDay(t.finish)}`), el("td", {}, grp, " ", kind), el("td", {}, floor), el("td", { class: "mono" }, n));
+  }));
+}
+$("#progFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f || !current) return;
+  if (!enterBuild()) return;
+  $("#progNote").textContent = `Reading ${f.name}…`;
+  try {
+    const out = await readSchedule(current.id, f, viewer.engine().storeys || []);
+    animScript.schedule = out.tasks.map(t => ({ name: t.name, start: t.start, finish: t.finish, group: t.group, kind: t.kind, floors: t.floors, milestone: t.milestone }));
+    progChanged();
+    $("#progWrap").open = out.matched < out.tasks.length;
+    toast(`${out.format} schedule read: ${out.tasks.length} tasks, ${out.matched} matched to the model. Check the matches below.`);
+  } catch (err) { if (err.status === 401) return handle(err); $("#progNote").textContent = err.message; }
+};
+$("#progClear").onclick = () => { animScript.schedule = []; progChanged(); };
+$("#progSeconds").onchange = e => { animScript.schedule_seconds = Math.min(180, Math.max(10, Number(e.target.value) || 40)); progChanged(); };
+$("#progDates").onchange = e => { animScript.show_dates = e.target.checked; progChanged(); };
+
 function drawAnimSettings() {
+  drawProgramme();
   const s = animScript, lux = s.style === "luxury" && !!LUX;
   $("#aStyle").value = s.style; $("#aHeroes").value = String(s.heroes); $("#aLook").value = s.look;
   $("#aHeroesField").hidden = !lux; $("#aTimeField").hidden = lux; $("#animHeroes").hidden = !lux;

@@ -484,3 +484,8 @@ input[type=number]:focus { border-color: var(--red); outline: none; box-shadow: 
 .engine-pick select, .clip-engine { width: 100%; min-width: 0; }
 .engine-note { margin: 0; }
 .more-tiers small { overflow-wrap: anywhere; }
+.anim-programme { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.anim-programme .table-wrap { margin-top: 8px; max-height: 420px; overflow: auto; }
+.prog-table td { font-size: 0.86rem; vertical-align: middle; }
+.prog-table select { max-width: 11em; }
+.prog-table tr.unmatched td:first-child { color: var(--muted); }

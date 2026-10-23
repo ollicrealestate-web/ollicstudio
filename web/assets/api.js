@@ -82,6 +82,21 @@ export async function uploadFile(projectId, file, onProgress) {
   });
 }
 
+/** Reads a construction schedule and matches its tasks to the model's floors. */
+export async function readSchedule(projectId, file, storeys) {
+  const token = await accessToken();
+  if (!token) throw new ApiError(401, "Sign in to continue.");
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("storeys", JSON.stringify(storeys || []));
+  let res;
+  try { res = await fetch(`${base()}/projects/${projectId}/schedule/read`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }); }
+  catch { throw new ApiError(0, "Could not reach the Ollic server. Check your connection and try again."); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.detail || "The schedule could not be read.");
+  return data;
+}
+
 /** Sends a finished animation video with its settings. Resolves with the export job. */
 export async function uploadAnimation(projectId, blob, meta, onProgress) {
   const token = await accessToken();

@@ -9,11 +9,12 @@ export const PHASES = ["site", "foundation", "structure", "walls", "openings", "
 export const DEFAULT_SECONDS = { site: 3, foundation: 4, structure: 4, walls: 3, openings: 3, roof: 4, orbit: 8, furnish: 4, interior: 4 };
 export const LIMITS = { site: [1, 12], foundation: [1, 15], structure: [1, 15], walls: [1, 15], openings: [1, 12], roof: [1, 15], orbit: [2, 30], furnish: [1, 15], interior: [2, 15] };
 export const PHASE_LABEL = { site: "Site", foundation: "Foundation", structure: "Structure", walls: "Walls", openings: "Doors and windows", roof: "Roof",
-  orbit: "Completed building", furnish: "Furniture", interior: "Inside" };
+  orbit: "Completed building", furnish: "Furniture", interior: "Inside", programme: "Programme" };
 
 export function defaultScript() {
   return { version: 1, style: "luxury", heroes: 2, look: "", phases: Object.fromEntries(PHASES.map(p => [p, { on: true, seconds: DEFAULT_SECONDS[p] }])), rooms: [], time_of_day: "midday",
-    direction: "anticlockwise", hide: [], renders: true, render_seconds: 4, captions: true, title: "", subtitle: "", format: "16:9" };
+    direction: "anticlockwise", hide: [], renders: true, render_seconds: 4, captions: true, title: "", subtitle: "", format: "16:9",
+    schedule: [], schedule_seconds: 40, show_dates: true };
 }
 
 /** Same rules as the server: unknown phases dropped, missing ones filled, numbers brought into range. */
@@ -31,6 +32,9 @@ export function normalise(s) {
   out.style = out.style === "technical" ? "technical" : "luxury";
   out.heroes = Math.min(3, Math.max(1, Math.round(Number(out.heroes) || 2)));
   out.look = String(out.look || "").split(/\s+/).join(" ").trim().slice(0, 400);
+  out.schedule = Array.isArray(out.schedule) ? out.schedule.filter(t => t && t.name && t.start && t.finish).slice(0, 400) : [];
+  out.schedule_seconds = Math.round(Math.min(180, Math.max(10, Number(out.schedule_seconds) || 40)) * 100) / 100;
+  out.show_dates = out.show_dates !== false;
   return out;
 }
 
@@ -38,6 +42,12 @@ const FOUNDATION = new Set(["IfcFooting", "IfcPile", "IfcFoundation"]);
 const STRUCTURE = new Set(["IfcColumn", "IfcBeam", "IfcMember", "IfcPlate", "IfcSlab", "IfcStair", "IfcStairFlight", "IfcRamp", "IfcRampFlight"]);
 const OPENINGS = new Set(["IfcDoor", "IfcWindow"]);
 const FURNITURE = new Set(["IfcFurniture", "IfcFurnishingElement", "IfcSystemFurnitureElement", "IfcSanitaryTerminal", "IfcLightFixture"]);
+const MEP = /^Ifc(Flow|Duct|Pipe|Cable|Energy|Distribution|Pump|Fan|Valve|Boiler|Chiller|Tank|Air|Unitary|Electric|Outlet|Junction|Switching|Protective|Fire|Alarm|Sensor|Actuator|Controller|Compressor|Coil|Cooling|Heat|Evaporat|Condenser|Humidifier|Filter|Damper|Burner|Transformer|Motor|Communications|Audio|SpaceHeater|StackTerminal|WasteTerminal|MedicalDevice)/;
+const KIND = { columns: t => t === "IfcColumn", beams: t => t === "IfcBeam" || t === "IfcMember", slabs: t => t === "IfcSlab" || t === "IfcPlate", stairs: t => /^IfcStair|^IfcRamp/.test(t) };
+const DAY = 86400000;
+const dayOf = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fmtDay = ms => { const d = new Date(ms); return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
 const RANK = { IfcColumn: 0, IfcMember: 1, IfcBeam: 1, IfcPlate: 2, IfcSlab: 2, IfcStair: 3, IfcStairFlight: 3, IfcRamp: 3, IfcRampFlight: 3 };
 const HIDE_GROUPS = {
   furniture: t => FURNITURE.has(t), stairs: t => /^IfcStair|^IfcRamp/.test(t), beams: t => t === "IfcBeam", columns: t => t === "IfcColumn",
@@ -141,33 +151,67 @@ export function createConstruction(ctx, script, extras = {}) {
   }
   const pick = (g, f) => items.filter(it => it.group === g && (!f || f(it)));
 
-  segment("site", P.site.seconds, "Site");
-  const fnd = segment("foundation", P.foundation.seconds, "Foundation");
-  schedule(pick("foundation").concat(pick("site")), fnd.start, fnd.end - fnd.start, () => "rise");
-  floorNames.forEach((name, k) => {
-    const st = pick("structure", it => it.floor === k), wl = pick("walls", it => it.floor === k);
-    if (st.length) {
-      const s = segment("structure", P.structure.seconds, `${name} · structure`, { floor: k });
-      schedule(st, s.start, s.end - s.start, it => (it.t === "IfcColumn" ? "grow" : /Stair|Ramp/.test(it.t) ? "grow" : "drop"),
-        (a, b) => ((RANK[a.t] ?? 2) - (RANK[b.t] ?? 2)) || sweep(a) - sweep(b));
+  const plan = script.schedule.length ? script.schedule : null;
+  let fnd, progTasks = [], progWindow = null, unscheduled = {};
+  if (!plan) {
+    segment("site", P.site.seconds, "Site");
+    fnd = segment("foundation", P.foundation.seconds, "Foundation");
+    schedule(pick("foundation").concat(pick("site")), fnd.start, fnd.end - fnd.start, () => "rise");
+    floorNames.forEach((name, k) => {
+      const st = pick("structure", it => it.floor === k), wl = pick("walls", it => it.floor === k);
+      if (st.length) {
+        const s = segment("structure", P.structure.seconds, `${name} · structure`, { floor: k });
+        schedule(st, s.start, s.end - s.start, it => (it.t === "IfcColumn" ? "grow" : /Stair|Ramp/.test(it.t) ? "grow" : "drop"),
+          (a, b) => ((RANK[a.t] ?? 2) - (RANK[b.t] ?? 2)) || sweep(a) - sweep(b));
+      }
+      if (wl.length) {
+        const s = segment("walls", P.walls.seconds, `${name} · walls`, { floor: k });
+        schedule(wl, s.start, s.end - s.start, () => "grow");
+      }
+    });
+    // anything on a floor the loop did not reach (no storeys in the file)
+    const unplaced = items.filter(it => (it.group === "structure" || it.group === "walls") && it.start === undefined);
+    if (unplaced.length) { const s = segment("walls", P.walls.seconds, "Walls"); schedule(unplaced, s.start, s.end - s.start, () => "grow"); }
+    const op = pick("openings");
+    if (op.length) { const s = segment("openings", P.openings.seconds, "Doors and windows"); schedule(op, s.start, s.end - s.start, () => "pop", (a, b) => (a.floor - b.floor) || sweep(a) - sweep(b)); }
+    const rf = pick("roof");
+    if (rf.length) { const s = segment("roof", P.roof.seconds, "Roof"); schedule(rf, s.start, s.end - s.start, () => "drop", (a, b) => (a.base - b.base) || sweep(a) - sweep(b)); }
+  } else {
+    // ---------------------------------------------------------------- the contractor's programme
+    segment("site", P.site.seconds, "Site");
+    const d0 = Math.min(...plan.map(t => dayOf(t.start))), d1 = Math.max(...plan.map(t => dayOf(t.finish))) + DAY;
+    const W0 = clock, Ls = script.schedule_seconds;
+    const at = ms => W0 + (ms - d0) / Math.max(DAY, d1 - d0) * Ls;
+    progWindow = { W0, Ls, d0, d1 };
+    const pool = it => (it.group === "walls" && MEP.test(it.t)) ? "mep" : (it.group === "walls" && it.t === "IfcCovering") ? "finishes" : it.group;
+    items.forEach(it => { it.pool = pool(it); });
+    const onFloor = (it, floors) => !floors.length || floors.includes(it.u.storey) || floors.includes(floorNames[it.floor]);
+    progTasks = plan.map((t, i) => ({ ...t, i, a: at(dayOf(t.start)), b: at(dayOf(t.finish) + DAY), floors: t.floors || [] })).sort((x, y) => x.a - y.a);
+    const styleOf = it => it.pool === "foundation" || it.pool === "site" ? "rise" : it.pool === "openings" ? "pop" : it.pool === "roof" || it.pool === "furnish" || it.t === "IfcSlab" || it.t === "IfcBeam" ? "drop" : "grow";
+    for (const task of progTasks) {
+      if (task.group === "none") continue;
+      task.items = items.filter(it => it.start === undefined && it.pool === task.group && (!task.kind || KIND[task.kind]?.(it.t)) && onFloor(it, task.floors));
+      if (task.items.length) schedule(task.items, task.a, Math.max(0.01, task.b - task.a), styleOf, (x, y) => (x.floor - y.floor) || ((RANK[x.t] ?? 2) - (RANK[y.t] ?? 2)) || sweep(x) - sweep(y));
     }
-    if (wl.length) {
-      const s = segment("walls", P.walls.seconds, `${name} · walls`, { floor: k });
-      schedule(wl, s.start, s.end - s.start, () => "grow");
+    // parts of the model no task names: with the last task of the same kind of work (same floor if one has it), else at the end
+    for (const it of items) {
+      if (it.start !== undefined || it.pool === "furnish") continue;
+      const same = progTasks.filter(t => t.group === it.pool);
+      const task = same.filter(t => onFloor(it, t.floors)).pop() || same.pop();
+      unscheduled[it.pool] = (unscheduled[it.pool] || 0) + (task ? 0 : 1);
+      const a = task ? task.a : W0 + Ls * 0.92, b = task ? task.b : W0 + Ls;
+      it.start = a + (b - a) * 0.6 * ((Math.sin(items.indexOf(it) * 12.9898) * 43758.5453) % 1 + 1) % 1; it.dur = Math.min(1, Math.max(0.3, (b - a) * 0.3)); it.style = styleOf(it);
     }
-  });
-  // anything on a floor the loop did not reach (no storeys in the file)
-  const unplaced = items.filter(it => (it.group === "structure" || it.group === "walls") && it.start === undefined);
-  if (unplaced.length) { const s = segment("walls", P.walls.seconds, "Walls"); schedule(unplaced, s.start, s.end - s.start, () => "grow"); }
-  const op = pick("openings");
-  if (op.length) { const s = segment("openings", P.openings.seconds, "Doors and windows"); schedule(op, s.start, s.end - s.start, () => "pop", (a, b) => (a.floor - b.floor) || sweep(a) - sweep(b)); }
-  const rf = pick("roof");
-  if (rf.length) { const s = segment("roof", P.roof.seconds, "Roof"); schedule(rf, s.start, s.end - s.start, () => "drop", (a, b) => (a.base - b.base) || sweep(a) - sweep(b)); }
+    const fTasks = progTasks.filter(t => t.group === "foundation");
+    fnd = fTasks.length ? { start: Math.min(...fTasks.map(t => t.a)), end: Math.max(...fTasks.map(t => t.b)) } : { start: W0, end: W0 };
+    segments.push({ phase: "programme", label: "", start: W0, end: W0 + Ls });
+    clock = W0 + Ls;
+  }
   const buildEnd = clock;
   const reveals = [];
   if (luxury) for (let k = 0; k < script.heroes; k++) reveals.push(segment("orbit", P.orbit.seconds, "Completed building", { hero: k }));
   const orbit = luxury ? (reveals[0] || segment("orbit", 0, "")) : segment("orbit", P.orbit.seconds, "Completed building");
-  const furn = pick("furnish").filter(it => !it.hidden);
+  const furn = pick("furnish").filter(it => !it.hidden && it.start === undefined);
   const furnFloors = [...new Set(furn.map(it => it.floor))].sort((a, b) => a - b);
   const furnSegs = [];
   if (luxury) {
@@ -407,7 +451,19 @@ export function createConstruction(ctx, script, extras = {}) {
     const sg = segmentAt(Math.min(t, duration - 1e-3));
     return luxury && sg && sg.hero !== undefined && heroImages[sg.hero] && t - sg.start > 0.15 * (sg.end - sg.start) ? "AI concept — not to scale" : "Indicative sequence — not to scale";
   }
-  function labelAt(t) { const s = segmentAt(Math.min(t, duration - 1e-3)); return s ? s.label : ""; }
+  function labelAt(t) {
+    const s = segmentAt(Math.min(t, duration - 1e-3));
+    if (s && s.phase === "programme") return programmeLabel(t);
+    return s ? s.label : "";
+  }
+  /** The date the build has reached, and the tasks under way then, from the contractor's programme. */
+  function programmeLabel(t) {
+    const { W0, Ls, d0, d1 } = progWindow;
+    const day = d0 + clamp01((t - W0) / Ls) * (d1 - d0 - DAY);
+    const now = progTasks.filter(x => x.a <= t && t < x.b && x.group !== "none").map(x => x.name);
+    const names = now.slice(0, 2).join(" · ") + (now.length > 2 ? ` +${now.length - 2}` : "");
+    return script.show_dates ? `${fmtDay(day)}${names ? " · " + names : ""}` : names;
+  }
 
   /** Draws time t at w x h for export, and returns the canvas. */
   function renderFrame(t, w, h) {
@@ -440,5 +496,6 @@ export function createConstruction(ctx, script, extras = {}) {
   }
 
   return { script, duration, segments: segments.filter(s => s.end > s.start), frameAt, labelAt, tagAt, renderFrame, draw, context, dispose, heroSnapshot, heroWireSnapshot, heroKey, luxury,
+    programme: progWindow ? { tasks: progTasks.map(x => ({ i: x.i, name: x.name, group: x.group, start: x.a, end: x.b, parts: (x.items || []).length })), unscheduled } : null,
     rooms: allRooms.map(r => r.name), visiting: visit.map(r => r.name), counts: Object.fromEntries(["foundation", "structure", "walls", "openings", "roof", "furnish"].map(g => [g, items.filter(i => i.group === g).length])) };
 }

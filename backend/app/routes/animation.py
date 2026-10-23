@@ -14,6 +14,7 @@ from ..animation import (DEFAULT_SECONDS, FORMATS, HIDEABLE, LIMITS, MAX_SECONDS
                          apply_reply, restrict_rooms)
 from ..animation_jobs import run_animation_job, upload_path
 from ..auth import CurrentUser, get_current_user
+from ..schedule import GROUP_NAMES, GROUPS, KINDS, ScheduleUnreadable, match_all, read_schedule
 from ..supabase import BackendUnavailable
 from ..video import FORMATS as SIZES, VideoFailed, probe
 from .projects import _owned_project, _repo
@@ -135,3 +136,31 @@ async def export_animation(project_id: uuid.UUID, request: Request, response: Re
         dest.unlink(missing_ok=True)
         raise
     return job
+
+
+MAX_SCHEDULE = 15 * 1024 * 1024
+
+
+@router.post("/projects/{project_id}/schedule/read")
+async def read_programme(project_id: uuid.UUID, request: Request, file: UploadFile = File(...), storeys: str = Form("[]"),
+                         user: CurrentUser = Depends(get_current_user)):
+    """Reads the contractor's programme and matches each task to a part of the model. Nothing is
+    stored and nothing is sent to an AI; the customer checks the matches, and they travel with the
+    animation settings."""
+    _owned_project(request, user, project_id)
+    data = await file.read(MAX_SCHEDULE + 1)
+    if len(data) > MAX_SCHEDULE:
+        raise HTTPException(413, {"code": "too_large", "reason": "The schedule is larger than 15 MB. Export only the tasks and try again."})
+    try:
+        names = json.loads(storeys or "[]")
+        names = [str(x) for x in names][:200] if isinstance(names, list) else []
+    except ValueError:
+        names = []
+    try:
+        fmt, tasks = read_schedule(data, file.filename or "")
+    except ScheduleUnreadable as exc:
+        raise HTTPException(422, {"code": "bad_schedule", "reason": exc.reason}) from exc
+    tasks = match_all(tasks, names)
+    shown = [t.public(i) for i, t in enumerate(tasks)]
+    return {"format": fmt, "tasks": shown, "start": min(t.start for t in tasks).isoformat(), "finish": max(t.finish for t in tasks).isoformat(),
+            "matched": sum(1 for t in tasks if t.group != "none"), "groups": [{"id": g, "name": GROUP_NAMES[g]} for g in GROUPS], "kinds": list(KINDS)}

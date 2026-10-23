@@ -84,3 +84,14 @@ views and line drawings, never on their own. Video options (`VIDEO_ENGINES`) app
 clips: Motion (Kling, `kling.py`), Cinema and Reel (coming soon) and VS (fal.ai Seedance 2.0). All video
 clients share create/status/download, and `app.state.video_clients` maps option to client. An option
 without a key is listed as "Not connected yet" and refused with 503.
+
+## Construction programme (4D)
+
+`backend/app/schedule.py` reads the contractor's programme (MS Project XML, Primavera XER, CSV, XLSX) and
+matches each task to a building part and floor by keywords in its name and WBS
+(`POST /api/projects/{id}/schedule/read`; nothing is stored and no AI is called). The browser keeps the
+checked matches in the animation settings (`schedule`, `schedule_seconds`, `show_dates`, validated by
+`animation.Script`). `construction.js` then maps the programme's dates onto `schedule_seconds` of
+animation: each task builds the model elements of its part and floor not taken by an earlier task;
+parts no task names are built with the last task of the same kind of work, or at the end. The director
+can change the length and the date display but never the programme.

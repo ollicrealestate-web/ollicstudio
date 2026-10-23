@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
 from typing import Literal
 
 import httpx
@@ -46,6 +47,33 @@ class Phase(BaseModel):
     seconds: float = 3
 
 
+class ScheduleTask(BaseModel):
+    """One task of the contractor's programme, matched to a part of the model (see schedule.py)."""
+    name: str = Field(max_length=200)
+    start: date
+    finish: date
+    group: Literal["site", "foundation", "structure", "walls", "openings", "roof", "mep", "finishes", "furnish", "none"] = "none"
+    kind: Literal["columns", "beams", "slabs", "stairs"] | None = None
+    floors: list[str] = Field(default_factory=list, max_length=60)
+    milestone: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def tidy(cls, v):
+        return " ".join(v.split())
+
+    @field_validator("floors")
+    @classmethod
+    def tidy_floors(cls, v):
+        return list(dict.fromkeys(" ".join(str(x).split())[:120] for x in v if str(x).strip()))
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.finish < self.start:
+            self.finish = self.start
+        return self
+
+
 class Script(BaseModel):
     """Everything the customer (or the director) can change. Out-of-range numbers are brought into range, not refused."""
     version: Literal[1] = 1
@@ -63,6 +91,10 @@ class Script(BaseModel):
     title: str = Field(default="", max_length=80)
     subtitle: str = Field(default="", max_length=120)
     format: Literal["16:9", "9:16", "1:1"] = "16:9"
+    # build in the order and on the dates of the contractor's programme (empty: the usual order)
+    schedule: list[ScheduleTask] = Field(default_factory=list, max_length=400)
+    schedule_seconds: float = 40
+    show_dates: bool = True
 
     @field_validator("phases", mode="before")
     @classmethod
@@ -107,6 +139,7 @@ class Script(BaseModel):
             self.phases[k] = Phase(on=p.on, seconds=round(_clamp(float(p.seconds), lo, hi), 2))
         self.phases = {k: self.phases[k] for k in PHASES}
         self.render_seconds = round(_clamp(float(self.render_seconds), 2.5, 10), 2)
+        self.schedule_seconds = round(_clamp(float(self.schedule_seconds), 10, 180), 2)
         return self
 
 
@@ -142,6 +175,8 @@ SYSTEM = (
     "time_of_day: one of " + ", ".join(TIMES) + " (sunset means golden hour; evening means dusk). "
     "direction: clockwise or anticlockwise (the fly-around). hide: groups not to show, from: " + ", ".join(HIDEABLE) + ". "
     "renders: true to end with the AI renders of the rooms; render_seconds 2.5-10 each. captions: true to show stage names. "
+    "When follows_schedule is yes, the build follows the contractor's programme instead of the phases above: schedule_seconds (10-180) is how long "
+    "the whole build lasts, show_dates true shows the programme dates on screen; you cannot change the programme itself. "
     "style: luxury or technical. heroes: 1-3. look: up to 400 characters. "
     "title, subtitle: text on the opening card. format: 16:9, 9:16 or 1:1 (portrait for Instagram Reels, TikTok and WhatsApp Status is 9:16). "
     "If the request asks for something these settings cannot do (people, cranes, weather, sound, changing the design), do what you can and say plainly in notes what is not possible. "
@@ -160,7 +195,8 @@ def _context_text(context: dict) -> str:
 
 
 def _user_text(instruction: str, script: Script, context: dict) -> str:
-    return f"Current settings: {script.model_dump_json()}\n{_context_text(context)}\nArchitect's request: {instruction}"
+    shown = script.model_dump(mode="json", exclude={"schedule"}) | {"follows_schedule": f"yes, {len(script.schedule)} tasks" if script.schedule else "no"}
+    return f"Current settings: {json.dumps(shown)}\n{_context_text(context)}\nArchitect's request: {instruction}"
 
 
 def parse_reply(text) -> tuple[dict, str]:
@@ -186,7 +222,7 @@ def apply_reply(current: Script, settings: dict) -> Script:
             for name, p in v.items():
                 if name in PHASES and isinstance(p, dict):
                     merged["phases"][name] = {**merged["phases"][name], **{x: y for x, y in p.items() if x in ("on", "seconds")}}
-        elif k in merged and k != "version":
+        elif k in merged and k not in ("version", "schedule"):     # the programme is the customer's; the director never edits it
             merged[k] = v
     try:
         return Script.model_validate(merged)
@@ -194,7 +230,7 @@ def apply_reply(current: Script, settings: dict) -> Script:
         # one bad field must not throw away the rest: apply field by field
         out = current
         for k, v in settings.items():
-            if k in ("phases", "version") or k not in merged:
+            if k in ("phases", "version", "schedule") or k not in merged:
                 continue
             try:
                 out = Script.model_validate({**out.model_dump(), k: v})
