@@ -406,6 +406,9 @@ def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, image
                 except BackendUnavailable:
                     facts = ""
             seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out), facts)
+            if seen and seen.get("error"):
+                check["claude_error"] = seen["error"]
+                seen = None
             if seen:
                 check["claude"] = {"ok": seen["ok"], "issues": seen["issues"]}
                 if not seen["ok"] and check["band"] == "good":

@@ -85,6 +85,9 @@ def video_check(guide: Path, result: Path, writer) -> dict:
     score = round(sum(scores) / len(scores), 3)
     check = {"score": score, "band": band(score), "frames": scores}
     seen = claude_check(writer, jpeg(pairs[len(pairs) // 2][0]), jpeg(pairs[len(pairs) // 2][1])) if writer is not None else None
+    if seen and seen.get("error"):
+        check["claude_error"] = seen["error"]
+        seen = None
     if seen:
         check["claude"] = {"ok": seen["ok"], "issues": seen["issues"]}
         if not seen["ok"] and check["band"] == "good":

@@ -159,10 +159,10 @@ def claude_check(writer, guide_jpg: bytes, result_jpg: bytes, facts: str = "") -
         content.append({"type": "text", "text": "Facts from the architect's model (use them to count floors and openings; the numbers cover the whole "
                                                 "building, not only the faces in view):\n" + facts})
     try:
-        out = writer.ask_json(CHECK_SYSTEM, content, max_tokens=600)
+        out = writer.ask_json(CHECK_SYSTEM, content, max_tokens=1500)
     except (PromptWriterFailed, KeyError, TypeError) as exc:
         log.warning("geometry check by Claude failed: %s", exc)
-        return None
+        return {"error": str(exc)[:200]}
     a = out["answer"]
     return {"ok": bool(a.get("ok")), "issues": [str(x)[:200] for x in (a.get("issues") or [])][:8],
             "usage": out.get("usage"), "cost_usd": str(out["cost_usd"]) if out.get("cost_usd") is not None else None}
