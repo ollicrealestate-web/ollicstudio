@@ -229,7 +229,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
     check = None
     if job["type"] == "concept_render" and inp.get("guide_file_id"):
         check, result = geometry_check(state, user, job, inp, result, images, roles, look_ctx)
-        if check and needs_another(check):
+        if check and needs_another(check, tier):
             try:
                 rule = fix_rule(check)
                 finisher = state.image_clients.get("vs") if tier == "exact" else None
@@ -334,8 +334,11 @@ def finish_prompt(check: dict, look_ctx: dict | None) -> str:
     return "\n".join(lines)
 
 
-def needs_another(check: dict) -> bool:
-    """Below the target on shape or materials, or Claude saw a floor, opening or element out of place."""
+def needs_another(check: dict, tier: str = "") -> bool:
+    """Below the target on shape or materials, or Claude saw a floor, opening or element out of place.
+    An Exact picture is corrected only when Claude has named what to fix: a vague correction does more harm."""
+    if tier == "exact":
+        return bool((check.get("claude") or {}).get("ok") is False and (check.get("claude") or {}).get("issues"))
     return overall(check) < GOOD_MATCH or (check.get("claude") or {}).get("ok") is False
 
 

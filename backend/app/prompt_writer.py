@@ -89,23 +89,30 @@ class ClaudePromptWriter:
 
     def ask_json(self, system: str, content: list, max_tokens: int = 1800, timeout: float = 180) -> dict:
         """Any question whose answer is one JSON object: returns {"answer": dict, "usage", "cost_usd", "model"}."""
-        body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": content}]}
+        # The answer comes back through a tool Claude must call, so it is always one clean JSON object
+        # (no prose around it, no cut-off fences); the text is read only as a fallback.
+        body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": content}],
+                "tools": [{"name": "answer", "description": "Give your complete answer as the JSON object described in the instructions.",
+                           "input_schema": {"type": "object", "additionalProperties": True}}],
+                "tool_choice": {"type": "tool", "name": "answer"}}
         try:
             res = self._http.post("/v1/messages", json=body, headers=self._headers, timeout=timeout)
         except httpx.HTTPError as exc:
             raise PromptWriterFailed(f"could not reach Claude: {exc.__class__.__name__}") from exc
         if res.status_code >= 400:
-            log.warning("Claude error %s", res.status_code)
+            log.warning("Claude error %s: %s", res.status_code, res.text[:300])
             raise PromptWriterFailed(f"Claude error {res.status_code}")
         payload = res.json()
-        text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
-        m = re.search(r"\{.*\}", text, re.S)
-        try:
-            out = json.loads(m.group(0)) if m else None
-        except ValueError:
-            out = None
-        if not isinstance(out, dict):
-            raise PromptWriterFailed("Claude returned no JSON")
+        out = next((b.get("input") for b in payload.get("content", []) if b.get("type") == "tool_use" and b.get("name") == "answer"), None)
+        if not isinstance(out, dict) or not out:
+            text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
+            m = re.search(r"\{.*\}", text, re.S)
+            try:
+                out = json.loads(m.group(0)) if m else None
+            except ValueError:
+                out = None
+            if not isinstance(out, dict):
+                raise PromptWriterFailed(f"Claude returned no JSON (stop: {payload.get('stop_reason')}; {text[:120]!r})")
         usage = payload.get("usage")
         return {"answer": out, "usage": usage, "cost_usd": cost_usd(self.model, usage), "model": self.model}
 

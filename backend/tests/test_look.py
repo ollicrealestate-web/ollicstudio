@@ -4,6 +4,7 @@ Ollic Exact (renders drawn on the model's own depth map)."""
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -60,10 +61,10 @@ def test_the_material_check_finds_a_wrong_colour_but_allows_light_and_shade():
 
 @pytest.fixture
 def look_app(render_settings, repo, storage):
-    def make(images=None, exact=None):
+    def make(images=None, exact=None, writer=None):
         images = images or FakeImages()
         app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
-                         fal={"images": images, "exact": exact} if exact else {}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=None)
+                         fal={"images": images, "exact": exact} if exact else {}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=writer)
         return TestClient(app), images
     return make
 
@@ -111,7 +112,7 @@ def test_a_model_render_uses_the_approved_materials_and_hero(look_app, alice, bo
 
 def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
     exact = FakeImages()
-    c, images = look_app(exact=exact)
+    c, images = look_app(exact=exact, writer=FakeChecker())        # Claude finds a floor missing in the Exact picture
     repo.roles[alice["id"]] = "admin"
     pid = new_project(c, alice)
     view, lines, depth, mats = captured(c, alice, pid)
@@ -127,6 +128,7 @@ def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
     (fix,) = [x for x in images.calls if x["prompt"].startswith("Image 1 is a photorealistic architectural render")]
     assert len(fix["images"]) == 3 and fix["images"][1][1] == "image/jpeg" and fix["images"][2][1] == "image/png"
     assert "Correct only these differences" in fix["prompt"] and "Image 3 is the MATERIAL MAP" in fix["prompt"]
+    assert "- the model has 7 floors above the ground floor; the result shows 6: add the missing floor" in fix["prompt"]
     assert len(call["images"]) == 1 and call["images"][0][1] == "image/png" and call["model"] == "fal-ai/flux-control-lora-depth"
     assert "Use exactly these approved materials" in call["prompt"] and "MATERIAL MAP" not in call["prompt"]
     (img,) = repo.images.values()
@@ -259,3 +261,30 @@ def test_claudes_check_looks_at_materials_when_there_is_a_map():
     assert "Ignore materials" in seen[0][0] and sum(b["type"] == "image" for b in seen[0][1]) == 2
     assert "Ignore materials" not in seen[1][0] and "glazing must be glass" in seen[1][0] and sum(b["type"] == "image" for b in seen[1][1]) == 3
     assert with_map["ok"] is False and "not timber" in with_map["issues"][0] and plain["ok"] is False
+
+
+def test_without_claudes_findings_an_exact_picture_is_kept_as_it_is(look_app, alice, repo):
+    exact = FakeImages()
+    c, images = look_app(exact=exact)
+    repo.roles[alice["id"]] = "admin"
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": "photoreal render", "prompt_ready": True, "tier": "exact", "references": [{"file_id": view["id"], "role": "model"}],
+                                                             "guide_file_id": lines["id"], "depth_file_id": depth["id"]}, headers=alice["headers"])
+    assert len(exact.calls) == 1 and images.calls == []            # no vague "make it match" pass
+
+
+def test_claude_answers_through_a_tool_so_the_json_is_clean():
+    import httpx
+    from app.prompt_writer import ClaudePromptWriter
+    sent = []
+
+    def handler(req):
+        sent.append(json.loads(req.content))
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "Here is my check."},
+                                                     {"type": "tool_use", "id": "t1", "name": "answer", "input": {"ok": False, "issues": ["make the bays glass"]}}],
+                                         "stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5}})
+    w = ClaudePromptWriter("k", client=httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)))
+    out = w.ask_json("system", [{"type": "text", "text": "q"}])
+    assert out["answer"] == {"ok": False, "issues": ["make the bays glass"]}
+    assert sent[0]["tool_choice"] == {"type": "tool", "name": "answer"} and sent[0]["tools"][0]["name"] == "answer"
