@@ -129,6 +129,8 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
 
         # the project look: the model's materials are listed; the architect names one and approves the render as the hero
         assert page.evaluate("document.querySelector('#lookCard').open")      # opened by itself after the capture
+        (pr0,) = stack["repo"].projects.values()
+        assert all(m["types"] for m in pr0["look"]["materials"]), [m["types"] for m in pr0["look"]["materials"]]   # what each is used on
         page.wait_for_function("document.querySelector('#lookMsg').textContent.includes('yourself')")   # no Claude in this test
         assert page.locator("#lookMats .look-mat").count() >= 2 and "to confirm" in page.inner_text("#lookSummary")
         page.fill("#lookMats .look-mat >> nth=0 >> input[aria-label='Material name']", "Sandtex white render")

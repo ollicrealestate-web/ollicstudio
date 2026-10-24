@@ -534,6 +534,7 @@ $("#useView").onclick = async () => {
   try {
     const name = `3D view ${stampNow()}`;
     const g = viewer.guides(1536, 1024, ["view", "lines", "depth", "materials"]);
+    if (g.coverage !== undefined && g.coverage < 0.03) { toast("Your building is not in view. Turn or zoom until you see it, then capture again."); return; }
     const saved = await uploadFile(current.id, new File([await dataBlob(g.view)], `${name}.jpg`, { type: "image/jpeg" }), () => {});
     for (const k of ["lines", "depth", "materials"])
       await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {});

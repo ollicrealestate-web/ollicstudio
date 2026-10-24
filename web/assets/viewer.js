@@ -649,7 +649,18 @@ export function createViewer(host, { onSelect } = {}) {
   /** Stills of the current view, every kind, as data URLs. */
   function guides(w, h, kinds = ["view", "clay", "lines", "depth"], at = null) {
     const out = {}, pose = at || currentPose();
-    for (const k of kinds) { beginGuide(k, w, h); out[k] = guideFrame(pose).toDataURL(k === "view" || k === "clay" ? "image/jpeg" : "image/png", 0.92); }
+    for (const k of kinds) {
+      beginGuide(k, w, h);
+      const cv = guideFrame(pose);
+      out[k] = cv.toDataURL(k === "view" || k === "clay" ? "image/jpeg" : "image/png", 0.92);
+      if (k === "materials") {   // how much of the picture is the building (the map's background is black)
+        const s = document.createElement("canvas"); s.width = 96; s.height = Math.max(1, Math.round(96 * h / w));
+        const g = s.getContext("2d", { willReadFrequently: true }); g.drawImage(cv, 0, 0, s.width, s.height);
+        const d = g.getImageData(0, 0, s.width, s.height).data; let on = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 30) on++;
+        out.coverage = on / (s.width * s.height);
+      }
+    }
     if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map, types }) => ({ key, cls, hex, map, types }));
     endGuide();
     return out;
