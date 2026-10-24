@@ -177,6 +177,7 @@ class FalImages(_Fal):
 
 class FalExact(FalImages):
     guide = "lines"     # "lines" (the model's line drawing) or "depth" (the model's depth map)
+    strength = 0.75     # how strictly the guide is followed: 1.0 copies the drawing's look; lower lets the photo through
 
     """Ollic Exact: the first picture given is the model's guide from the same camera: its line drawing
     (guide "lines", white on black) or its depth map (guide "depth", white near, black far); the picture is generated on that exact depth, so the geometry and the camera
@@ -187,7 +188,7 @@ class FalExact(FalImages):
             raise ProviderError("Ollic Exact needs a view of your model. Capture the view again.")
         w, h = EXACT_SIZES.get(size, (1536, 1024))
         depth = data_uri(images[0][0], images[0][1], max(w, h))
-        body = {"prompt": prompt[:4000], "control_lora_image_url": depth, "control_lora_strength": 1.0,
+        body = {"prompt": prompt[:4000], "control_lora_image_url": depth, "control_lora_strength": self.strength,
                 "image_size": {"width": w, "height": h}, "num_inference_steps": 28, "guidance_scale": 3.5, "num_images": 1,
                 "output_format": "jpeg", "enable_safety_checker": True}
         endpoint = EXACT_LINES_MODEL if self.guide == "lines" else EXACT_MODEL
