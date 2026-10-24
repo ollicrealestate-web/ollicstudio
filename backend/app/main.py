@@ -17,13 +17,13 @@ from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
 from .gemini_images import GeminiImages
-from .fal import FalImages, FalVideo
+from .fal import FalExact, FalImages, FalVideo
 from .kling import KlingVideo
 from .aps import AutodeskModels
 from .runway import RunwayVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import animation, cinematic, films, models, projects, renders, videos
+from .routes import animation, cinematic, films, look, models, projects, renders, videos
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
@@ -72,9 +72,10 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
         app.state.image_clients.setdefault(t, gemini)
     # Ollic VS (fal.ai): an image option and a video option; fal may be a dict {"images", "video"} in tests
     if fal == "auto":
-        fal = {"images": FalImages(settings.fal_key), "video": FalVideo(settings.fal_key)} if settings.fal_key else {}
+        fal = {"images": FalImages(settings.fal_key), "video": FalVideo(settings.fal_key), "exact": FalExact(settings.fal_key)} if settings.fal_key else {}
     fal = fal or {}
     app.state.image_clients.setdefault("vs", fal.get("images"))
+    app.state.image_clients.setdefault("exact", fal.get("exact"))
     # video options by id; an option with no client is listed as not connected
     app.state.video_clients = {"motion": kling, "vs": fal.get("video")}
 
@@ -99,6 +100,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.include_router(renders.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
     app.include_router(films.router, prefix="/api")
+    app.include_router(look.router, prefix="/api")
     app.include_router(videos.router, prefix="/api")
     app.include_router(animation.router, prefix="/api")
     app.include_router(cinematic.router, prefix="/api")

@@ -127,6 +127,7 @@ export function createViewer(host, { onSelect } = {}) {
       if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres);
       o.material = look;
       o.userData.cls = cls;
+      o.userData.srcHex = "#" + (src?.color || new THREE.Color("#cccccc")).getHexString();   // the colour the architect gave it
       o.castShadow = cls !== "glass" && cls !== "space";
       o.receiveShadow = cls !== "space";
       o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
@@ -552,6 +553,30 @@ export function createViewer(host, { onSelect } = {}) {
     vertexShader: "varying float vz;\n#include <clipping_planes_pars_vertex>\nvoid main(){ vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); vz = -mvPosition.z; gl_Position = projectionMatrix * mvPosition;\n#include <clipping_planes_vertex>\n}",
     fragmentShader: "uniform float near; uniform float far; varying float vz;\n#include <clipping_planes_pars_fragment>\nvoid main(){\n#include <clipping_planes_fragment>\n float d = clamp((vz - near) / (far - near), 0.0, 1.0); gl_FragColor = vec4(vec3(1.0 - d), 1.0); }",
   });
+  // The material map: each material of the model (its class and the colour the architect gave it)
+  // drawn in one flat, distinct colour, so the AI and the check know exactly where each material is.
+  const MAP_COLOURS = ["#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#46f0f0", "#f032e6", "#bcf60c", "#fabebe",
+    "#008080", "#e6beff", "#9a6324", "#fffac8", "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075", "#808080", "#ff7f7f", "#7fbfff", "#bf7fff", "#7fff7f"];
+  const mapMats = new Map();
+  function materialKey(e) {
+    return `${e.userData.cls || "paint"}|${e.userData.srcHex || "#cccccc"}`;
+  }
+  /** The model's materials, largest first: key, class, the model's colour and its map colour. */
+  function materialGroups() {
+    const area = new Map();
+    for (const e of elements) {
+      if (e.userData.ifcType === "IfcSpace" || e.userData.cls === "space") continue;
+      const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3();
+      area.set(k, (area.get(k) || 0) + sz.x * sz.y + sz.y * sz.z + sz.x * sz.z);
+    }
+    const keys = [...area.keys()].sort();      // the map colour depends only on the model, so it is the same in every view
+    const groups = keys.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i % MAP_COLOURS.length], area: area.get(k) }));
+    return groups.sort((a, b) => b.area - a.area);
+  }
+  function mapMatFor(colour) {
+    if (!mapMats.has(colour)) mapMats.set(colour, new THREE.MeshBasicMaterial({ color: colour, side: THREE.DoubleSide }));
+    return mapMats.get(colour);
+  }
   function edges() {
     if (edgesGroup) return edgesGroup;
     edgesGroup = new THREE.Group(); edgesGroup.visible = false;
@@ -565,7 +590,7 @@ export function createViewer(host, { onSelect } = {}) {
     scene.add(edgesGroup);
     return edgesGroup;
   }
-  /** Starts guide output of one kind ("view", "clay", "lines" or "depth") at w x h pixels. */
+  /** Starts guide output of one kind ("view", "clay", "lines", "materials" or "depth") at w x h pixels. */
   function beginGuide(kind, w, h) {
     if (guide) endGuide();
     if (mode === "walk") { keys.clear(); }
@@ -583,6 +608,10 @@ export function createViewer(host, { onSelect } = {}) {
       shown.forEach(e => { e.material = inkMat; });
       sky.visible = false; scene.background = new THREE.Color("#000000"); ground.visible = false; scene.environment = null; renderer.toneMapping = THREE.NoToneMapping;
       edges().children.forEach(l => { l.visible = l.userData.of.visible; }); edgesGroup.visible = true;
+    } else if (kind === "materials") {
+      const colour = new Map(materialGroups().map(g => [g.key, g.map]));
+      shown.forEach(e => { e.material = mapMatFor(colour.get(materialKey(e)) || "#808080"); });
+      sky.visible = false; scene.background = new THREE.Color("#000000"); ground.visible = false; scene.environment = null; renderer.toneMapping = THREE.NoToneMapping;
     } else if (kind === "depth") {
       scene.overrideMaterial = depthMat; sky.visible = false; scene.background = new THREE.Color("#000000"); renderer.toneMapping = THREE.NoToneMapping;
     }
@@ -614,6 +643,7 @@ export function createViewer(host, { onSelect } = {}) {
   function guides(w, h, kinds = ["view", "clay", "lines", "depth"], at = null) {
     const out = {}, pose = at || currentPose();
     for (const k of kinds) { beginGuide(k, w, h); out[k] = guideFrame(pose).toDataURL(k === "view" || k === "clay" ? "image/jpeg" : "image/png", 0.92); }
+    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map }) => ({ key, cls, hex, map }));
     endGuide();
     return out;
   }
@@ -690,7 +720,7 @@ export function createViewer(host, { onSelect } = {}) {
         camera.fov = 45; resize(); frameAll(); apply();
       }
     },
-    guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose,
+    guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
     get facts() {
       const b = frameBox, size = b.getSize(new THREE.Vector3());
       return { storeys: storeys.slice(), rooms: rooms().map(r => r.name), width_m: +size.x.toFixed(1), depth_m: +size.z.toFixed(1), height_m: +size.y.toFixed(1) };

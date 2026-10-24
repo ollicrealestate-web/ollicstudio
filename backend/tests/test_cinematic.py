@@ -228,11 +228,11 @@ def test_new_options_sit_beside_the_existing_renders(clip_app, alice, repo):
     photo, line = photo_and_lines(c, alice, pid)            # Standard, as before: the added option is not used on its own
     assert gem.calls == [] and photo["tier"] == "standard"
     tiers = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["tiers"]
-    assert set(tiers) == {"standard", "premium", "swift", "ultra", "studio", "vs"}
+    assert set(tiers) == {"standard", "premium", "swift", "ultra", "studio", "vs", "exact"} and tiers["exact"]["model_only"]
     assert tiers["vs"]["name"] == "Ollic VS" and tiers["vs"]["available"] is False      # listed, not connected here
     assert tiers["swift"]["name"] == "Ollic Swift" and tiers["swift"]["available"] and not tiers["swift"]["allowed"]   # paid plans
     assert tiers["studio"]["available"] is False and tiers["studio"]["soon"] is True
-    assert "gemini" not in json.dumps(tiers).lower() and "banana" not in json.dumps(tiers).lower()     # Ollic names only
+    assert "gemini" not in json.dumps(tiers).lower() and "banana" not in json.dumps(tiers).lower() and "flux" not in json.dumps(tiers).lower()     # Ollic names only
     body = {"prompt": "white render villa at night", "tier": "swift"}
     r = c.post(f"/api/projects/{pid}/architectural-render", json=body, headers={**alice["headers"], "Idempotency-Key": "swift-0001"})
     assert r.status_code == 403 and "Ollic Swift is for paid plans" in r.json()["detail"]["reason"]

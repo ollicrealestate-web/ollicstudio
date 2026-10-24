@@ -110,7 +110,9 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#renderBtn")
         page.wait_for_selector(".shot img", timeout=30000)
         first, retry = stack["images"].calls[-2:]
-        assert first["prompt"].startswith("Photorealistic render of the eight-storey block") and len(first["images"]) == 1
+        assert first["prompt"].startswith("Photorealistic render of the eight-storey block") and len(first["images"]) == 2
+        # the capture saved the model's material map too: it goes second, with what each colour stands for
+        assert "Image 2 is the MATERIAL MAP" in first["prompt"] and "in the map = " in first["prompt"]
         # the stand-in image service returns a picture unlike the model: the check finds the drift and renders once more, geometry first
         assert retry["prompt"].startswith("Most important: Image 1 is an exact view of the architect's model")
         # the capture saved the model's exact line drawing too, and the render was checked against it
@@ -122,6 +124,20 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.wait_for_selector(".shot .chip[class*=check-]")
         assert "model" in page.inner_text(".shot .chip[class*=check-]").lower()
         assert not page.locator("#rPics .rpic-name:has-text('Guide')").count()       # guides are not offered as pictures
+        names = {f["original_name"].rsplit(" - ", 1)[-1] for f in stack["repo"].files.values() if f["original_name"].startswith("Guide - ")}
+        assert names == {"lines.png", "depth.png", "materials.png"} and job["input"]["material_file_id"] and job["input"]["depth_file_id"]
+
+        # the project look: the model's materials are listed; the architect names one and approves the render as the hero
+        page.click("#lookCard summary")
+        assert page.locator("#lookMats .look-mat").count() >= 2
+        page.fill("#lookMats .look-mat >> nth=0 >> input[aria-label='Material name']", "Sandtex white render")
+        page.fill("#lookSetting", "Maitama avenue, palm trees, late afternoon sun")
+        page.click("#lookSave"); page.wait_for_function("document.querySelector('#lookMsg').textContent.includes('Saved')")
+        page.click(".shot button:has-text('Use as project look')")
+        page.wait_for_selector(".shot .chip:has-text('Project look')")
+        (pr,) = stack["repo"].projects.values()
+        assert pr["look"]["materials"][0]["name"] == "Sandtex white render" and pr["look"]["hero_render_id"] == img["id"]
+        assert page.is_visible(".shot .chip:has-text('Materials')")
 
         # 3. a reference image: uploaded in the render box, ticked, and sent second
         page.set_input_files("#rRefUpload", str(look))
@@ -134,7 +150,9 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#renderBtn")
         page.wait_for_function("document.querySelectorAll('.shot').length === 2", timeout=30000)
         call = stack["images"].calls[-1]
-        assert len(call["images"]) == 2 and len(stack["images"].calls) == 4
+        # the model view, its material map, the approved hero render and the reference
+        assert len(call["images"]) == 4 and len(stack["images"].calls) >= 4
+        assert "Image 3 is the APPROVED LOOK" in call["prompt"] and "Sandtex white render" in call["prompt"] and "Maitama avenue" in call["prompt"]
         card = page.inner_text(".shot >> nth=0").upper()
         assert "STANDARD RENDER" in card and "AI CONCEPT" in card
 

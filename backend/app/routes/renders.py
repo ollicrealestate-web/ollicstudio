@@ -58,11 +58,13 @@ class ConceptRenderIn(BaseModel):
     landscaping: str = Field(default="", max_length=400)
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
     quality: Literal["medium", "high", "max"] = "high"   # Premium render only; Standard has one level
-    tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs"] = "standard"
+    tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs", "exact"] = "standard"
     anim_hero: AnimHero | None = None
     anim_line: AnimHero | None = None     # the result is the line drawing of an animation view
     guide_file_id: uuid.UUID | None = None   # the model's line drawing from the same camera: the result is checked against it
     film_shot: str | None = Field(default=None, max_length=80)   # the first frame of this walkthrough shot
+    depth_file_id: uuid.UUID | None = None      # the model's depth map from the same camera (Ollic Exact draws on it)
+    material_file_id: uuid.UUID | None = None   # the model's material map from the same camera (see the project look)
 
     @field_validator("prompt")
     @classmethod
@@ -95,7 +97,7 @@ class ConceptRenderIn(BaseModel):
 
 class EditIn(BaseModel):
     instruction: str = Field(min_length=3, max_length=1000)
-    tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs"] | None = None  # default: the same option as the render being revised
+    tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs", "exact"] | None = None  # default: the same option as the render being revised
     anim_line: "AnimHero | None" = None   # marks the result as the line drawing of an animation view
 
     @field_validator("instruction")
@@ -232,10 +234,13 @@ def start_concept_render(project_id: uuid.UUID, body: ConceptRenderIn, request: 
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Reference image not found in this project.")
         if src.get("detected_type") not in ("png", "jpeg", "pdf") or (src["detected_type"] == "pdf" and r.role != "plan"):
             raise HTTPException(422, {"code": "unsupported_reference", "reason": "References must be PNG or JPEG images (a PDF can be used as the floor plan). For an IFC model, take a 3D view shot instead."})
-    if body.guide_file_id:
-        g = _repo(request).get_source_file(user, str(body.guide_file_id))
-        if not g or g.get("owner_id") != user.id or g.get("project_id") != str(project_id) or g.get("detected_type") not in ("png", "jpeg"):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "The model guide is not in this project.")
+    for gid in (body.guide_file_id, body.depth_file_id, body.material_file_id):
+        if gid:
+            g = _repo(request).get_source_file(user, str(gid))
+            if not g or g.get("owner_id") != user.id or g.get("project_id") != str(project_id) or g.get("detected_type") not in ("png", "jpeg"):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "The model guide is not in this project.")
+    if body.tier == "exact" and not (body.depth_file_id and any(r.role == "model" for r in refs)):
+        raise HTTPException(422, {"code": "exact_needs_model", "reason": "Ollic Exact renders from your model. Open your model, frame the view and press Capture view."})
     job_input = body.model_dump(mode="json")
     job_input["references"] = [{"file_id": str(r.file_id), "role": r.role} for r in refs]
     job_input.pop("reference_file_id", None)
@@ -250,6 +255,8 @@ def edit_render(render_id: uuid.UUID, body: EditIn, request: Request, response: 
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Render not found.")
     _owned_project(request, user, uuid.UUID(image["project_id"]))
     tier = body.tier or (image.get("options") or {}).get("tier") or "standard"
+    if tier == "exact":   # a revision changes a finished picture; Exact draws only from the model's depth
+        tier = "vs" if request.app.state.image_clients.get("vs") is not None else "standard"
     _require_tier(request, user, tier)
     _require_token_life(user)
     if image.get("kind") != "concept":
@@ -300,7 +307,8 @@ def list_outputs(project_id: uuid.UUID, request: Request, user: CurrentUser = De
     for t, e in IMAGE_ENGINES.items():
         mine = left.get("vs_image") if t == "vs" else None
         tiers[t] = {"name": e["name"], "available": clients.get(t) is not None, "allowed": plan == "premium" or unlimited or bool(mine), "left": mine,
-                    "daily_limit": daily_limit(request, user, t) or None, "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon"))}
+                    "daily_limit": daily_limit(request, user, t) or None, "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon")),
+                    "model_only": bool(e.get("model_only"))}
     clip_left = left.get("vs_video")
     video_engines = {k: {"name": e["name"], "blurb": e["blurb"], "price": e["price"], "soon": bool(e.get("soon")),
                          "allowed": plan == "premium" or unlimited or (k == "vs" and bool(clip_left)), "left": clip_left if k == "vs" else None,

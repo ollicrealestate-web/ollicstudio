@@ -15,6 +15,9 @@ Last updated: 24 October 2026 (models back; AI walkthroughs; Revit).
 | Service | Status | Evidence |
 | --- | --- | --- |
 | **Render your model**: IFC read into 3D in the browser; outside, inside and walk views; "Capture view" saves the view and its line drawing; the render is checked against the lines and redone once if it drifts | Built and tested in a browser | `e2e/test_model_flow.py`, `test_bim.py`, `test_renders.py` |
+| **Project look**: the model's materials (class and the model's colour) are listed from every captured view; the architect names each, sets its finish and approved colour, a setting for every view, and approves one render as the hero. Each model render is sent with the view's material map (one flat colour per material) and the hero, told what each colour stands for, and checked material by material (approved colour vs. the median colour of its region, light and shade allowed); below 80% it is made once more, materials first | Built and tested in a browser; live needs migration 12 | `test_look.py`, `e2e/test_model_flow.py` |
+| **Ollic Exact**: model renders drawn on the model's own depth map (fal FLUX depth control LoRA, `preprocess_depth` off), so walls, floors, openings and camera come from the model; offered only where a model view is rendered; revisions of an Exact render use Ollic VS | Built and tested with a stand-in; live uses `FAL_KEY` (already set). Price about $0.04 an image is an estimate: no list price was published | `test_look.py` |
+| **Geometry check**: finds the AI's zoom and shift against the model view, crops a reframed render back to the model's camera, then scores the shape (good ≥ 0.8); below that, one more render, geometry first. Counting floors and openings is Claude's part of the check (needs `ANTHROPIC_API_KEY`) | Built and tested; calibrated on a real 7-storey render (59% before, 82% after correction; wrong building 49%) | `test_film.py` |
 | **AI walkthrough**: Claude plans the shots (a ready-made three-shot plan without a key); camera moves approach, orbit, aerial, rise, slow move in; the browser records each shot's exact clay guide (24 fps, 16:9, 9:16 or 1:1; VP9 converted to H.264); Ollic Path (Runway Aleph) or Path Plus (Kling O3 via Runway) films it photoreal, optional people and cars; checked against the model | Built and tested with a stand-in video service; live needs `RUNWAY_API_KEY` and migration 11 | `test_film.py`, `e2e/test_film_flow.py` |
 | **Revit (.rvt)**: recognised from its contents; converted to IFC through Autodesk Platform Services (paid plans and owner accounts), then opened in 3D like any IFC | Built and tested with a stand-in that follows Autodesk's documented requests; live needs `APS_CLIENT_ID`, `APS_CLIENT_SECRET` | `test_revit.py`, `e2e/test_film_flow.py` |
 | **Photoreal render**: pick the picture to render (or describe the building), up to 3 reference images for the scene, a plain-words description; "Read image and write prompt" has Claude (free Cloudflare vision as a fallback) study the pictures and write the prompt, which the architect can edit; the render uses it as written | Verified live | `test_renders.py`, `test_prompting.py`, `test_studio.py`, `e2e/test_render_flow.py` |
@@ -31,7 +34,7 @@ Last updated: 24 October 2026 (models back; AI walkthroughs; Revit).
 
 ## Test run (24 Oct 2026)
 
-`cd backend && python -m pytest --ignore=tests/e2e`: 163 unit tests pass. Browser tests `test_model_flow.py` and `test_film_flow.py` (walkthrough and Revit) pass.
+`cd backend && python -m pytest`: all unit tests and all browser tests (`test_web_flow`, `test_render_flow`, `test_image_animation_flow`, `test_model_flow`, `test_film_flow`) pass.
 
 ## Known limits
 
@@ -44,6 +47,6 @@ Last updated: 24 October 2026 (models back; AI walkthroughs; Revit).
 
 ## Next
 
-1. **Owner:** run migration `20261024000011_ai_walkthroughs.sql` in Supabase; add `RUNWAY_API_KEY` in Render (walkthroughs); `APS_CLIENT_ID` and `APS_CLIENT_SECRET` for Revit; `ANTHROPIC_API_KEY` for Claude's shot plans, prompts and checks. Supabase's free plan takes uploads up to 50 MB.
-2. Construction sequences and MEP views from the model (guides per building stage, then the same AI pipeline).
+1. **Owner:** run migrations `20261024000011_ai_walkthroughs.sql` (done 24 Oct) and `20261024000012_project_look.sql` in Supabase; add `RUNWAY_API_KEY` in Render (walkthroughs); `APS_CLIENT_ID` and `APS_CLIENT_SECRET` for Revit; `ANTHROPIC_API_KEY` for Claude's shot plans, prompts and checks. Supabase's free plan takes uploads up to 50 MB.
+2. Next for consistency: material map and hero for walkthrough shots and construction stages; Claude counts floors and openings against the model; per-frame video checks; then construction sequences and MEP views from the model (guides per building stage, then the same AI pipeline).
 3. Payments (Paystack) so paid options can be sold.

@@ -168,6 +168,15 @@
         </div>
       </div>
       <div class="empty" id="modelEmpty" hidden>Your model is being read into 3D. Small models take under a minute; large ones a few minutes.</div>
+      <details class="card look" id="lookCard">
+        <summary><span><b>Project look</b> <span class="hint" id="lookSummary">Approve the materials once; every view, shot and stage uses them.</span></span></summary>
+        <p class="hint">These are the materials in your model, by the colour they have there. Name each one and set its finish and colour. Ollic sends a material map of every view with them, and checks each render material by material.</p>
+        <ul class="look-mats" id="lookMats"></ul>
+        <label class="span2">Setting for every view <span class="hint">Surroundings, light and mood, e.g. “Lekki street, palm trees, late afternoon sun”</span>
+          <textarea id="lookSetting" rows="2" maxlength="500"></textarea></label>
+        <div class="look-hero" id="lookHero"></div>
+        <div class="row"><button type="button" class="btn primary" id="lookSave">Save the look</button><span class="hint" id="lookMsg" role="status"></span></div>
+      </details>
     </section>
     <section class="film" id="filmSection" aria-labelledby="filmTitle">
       <div class="studio-head">

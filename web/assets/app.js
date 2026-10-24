@@ -207,7 +207,7 @@ function goTo(svc, st) {
   if (service) { q.set("service", service); q.set("step", step); }
   if (chosenIfc && SERVICES[service]?.modes) q.set("model", chosenIfc);
   history.replaceState(null, "", `${location.pathname}?${q}`);
-  applyView();
+  applyView(); syncModelOnly(); if (SERVICES[service]?.modes) loadLook();
   if (!reduceMotion()) window.scrollTo({ top: 0 }); else window.scrollTo(0, 0);
 }
 function chooseService(k) { svcPicked = []; goTo(k, k === "library" ? "work" : "start"); }
@@ -533,21 +533,72 @@ $("#useView").onclick = async () => {
   const btn = $("#useView"); btn.disabled = true; btn.textContent = "Capturing…";
   try {
     const name = `3D view ${stampNow()}`;
-    const g = viewer.guides(1536, 1024, ["view", "lines"]);
+    const g = viewer.guides(1536, 1024, ["view", "lines", "depth", "materials"]);
     const saved = await uploadFile(current.id, new File([await dataBlob(g.view)], `${name}.jpg`, { type: "image/jpeg" }), () => {});
-    await uploadFile(current.id, new File([await dataBlob(g.lines)], `Guide - ${name} - lines.png`, { type: "image/png" }), () => {});
+    for (const k of ["lines", "depth", "materials"])
+      await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {});
+    await syncLook(g.legend);
     current = await api.getProject(current.id); rPick = saved.id; promptByAI = false; renderProject();
     toast("View captured. Press “Read image and write prompt”.");
     $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
   finally { btn.disabled = false; btn.textContent = "Capture view"; }
 };
+/* ---------- the project look: approved materials (from the model) and the hero render ---------- */
+let look = null, lookFor = null;
+async function loadLook() {
+  if (!current) return;
+  const pid = current.id;
+  try { const l = await api.look(pid); if (current?.id !== pid) return; look = l; lookFor = pid; drawLook(); }
+  catch (err) { if (err.status === 401) return handle(err); }
+}
+async function syncLook(legend) {
+  if (!legend?.length || !current) return;
+  try { look = await api.addModelMaterials(current.id, legend.map(({ key, cls, hex, map }) => ({ key, cls, hex, map }))); lookFor = current.id; drawLook(); }
+  catch (err) { console.warn("look", err); }
+}
+function drawLook() {
+  if (!look) return;
+  const mats = look.materials || [];
+  $("#lookSummary").textContent = mats.length ? `${mats.length} material${mats.length > 1 ? "s" : ""}${look.hero_render_id ? " · hero render set" : ""}. Every view, shot and stage uses them.`
+    : "Capture a view of your model to list its materials.";
+  $("#lookMats").replaceChildren(...mats.map(m => {
+    const name = el("input", { type: "text", value: m.name, maxlength: "80", "aria-label": "Material name" });
+    const finish = el("input", { type: "text", value: m.finish || "", maxlength: "300", placeholder: "Finish, e.g. smooth render, matt", "aria-label": `Finish of ${m.name}` });
+    const colour = el("input", { type: "color", value: m.hex, "aria-label": `Approved colour of ${m.name}` });
+    name.oninput = () => { m.name = name.value; }; finish.oninput = () => { m.finish = finish.value; }; colour.oninput = () => { m.hex = colour.value; };
+    return el("li", { class: "look-mat" },
+      el("span", { class: "swatch map", style: `background:${m.map}`, title: "Its colour in the material map" }),
+      el("span", { class: "swatch", style: `background:${m.model_hex}`, title: `In the model: ${m.model_hex}` }),
+      name, finish, colour, el("small", { class: "hint" }, m.cls));
+  }));
+  $("#lookSetting").value = look.setting || "";
+  const hero = look.hero_render_id ? (images || []).find(i => i.id === look.hero_render_id) : null;
+  $("#lookHero").replaceChildren(...(look.hero_render_id ? [
+    hero?.url ? el("img", { src: hero.url, alt: "The approved hero render", width: "160", height: "107" }) : "",
+    el("span", {}, el("b", {}, "Hero render"), el("small", { class: "hint" }, " Every new view copies its materials, light and mood.")),
+    el("button", { class: "btn sm", type: "button", onclick: () => setHero(null) }, "Clear")]
+    : [el("span", { class: "hint" }, "Tip: when a render looks right, press “Use as project look” on it. Every new view will match it.")]));
+}
+async function saveLook(msg = "Saved. New renders and shots use this look.") {
+  look.setting = $("#lookSetting").value.trim();
+  try { look = await api.saveLook(current.id, look); drawLook(); $("#lookMsg").textContent = msg; toast(msg); }
+  catch (err) { if (err.status === 401) return handle(err); $("#lookMsg").textContent = err.message; }
+}
+async function setHero(id) {
+  if (!look || lookFor !== current?.id) { try { look = await api.look(current.id); lookFor = current.id; } catch (err) { return toast(err.message); } }
+  look.hero_render_id = id;
+  await saveLook(id ? "This render is now the project look. New views will match it." : "Hero render cleared.");
+  drawGallery(images);
+}
+$("#lookSave").onclick = () => saveLook();
+
 /** The line drawing captured with a view of the model, if there is one. */
-function guideFor(fileId) {
+function guideFor(fileId, kind = "lines") {
   const f = (current?.source_files || []).find(x => x.id === fileId);
   if (!f) return null;
   const base = f.original_name.replace(/\.(jpe?g|png)$/i, "");
-  return (current.source_files || []).find(x => x.original_name === `Guide - ${base} - lines.png`)?.id || null;
+  return (current.source_files || []).find(x => x.original_name === `Guide - ${base} - ${kind}.png`)?.id || null;
 }
 
 /* ---------- AI walkthrough: Claude plans the shots, the model gives the exact camera moves ---------- */
@@ -656,9 +707,15 @@ function checkChip(v) {
   const word = { good: "Matches the model", fair: "Mostly matches the model", poor: "Drifted from the model" }[c.band] || "Checked";
   const why = [c.framing === "corrected" ? "The AI reframed the building; Ollic put it back in your model's camera." : "",
     c.claude ? (c.claude.ok ? "Claude checked floors and openings: no differences found." : "Claude found: " + c.claude.issues.join("; ")) : "",
-    c.retried ? "Rendered twice, geometry first; the better one is kept." : ""].filter(Boolean).join(" ");
-  return el("span", { class: `chip check-${c.band}`, title: why || `Shape and camera match ${Math.round(c.score * 100)}%` },
+    c.retried ? "Rendered twice, model first; the better one is kept." : "",
+    c.materials ? "Materials: " + c.materials.materials.map(m => `${m.name} ${m.ok ? "as approved" : `off (looks ${m.seen})`}`).join("; ") + "." : ""].filter(Boolean).join(" ");
+  const chip = el("span", { class: `chip check-${c.band}`, title: why || `Shape and camera match ${Math.round(c.score * 100)}%` },
     `${word} · ${Math.round(c.score * 100)}%${c.framing === "corrected" ? " · framing fixed" : ""}`);
+  if (!c.materials) return chip;
+  const mb = c.materials.score >= 0.8 ? "good" : c.materials.score >= 0.65 ? "fair" : "poor";
+  const off = c.materials.materials.filter(m => !m.ok).map(m => m.name);
+  return el("span", { class: "chips" }, chip, el("span", { class: `chip check-${mb}`, title: off.length ? `Not as approved: ${off.join(", ")}` : "Every checked material is as approved" },
+    `Materials ${Math.round(c.materials.score * 100)}%`));
 }
 
 /* ---------- concept renders (Phase 2) ---------- */
@@ -739,6 +796,8 @@ function drawGallery(images) {
           o.check ? checkChip({ script: { check: o.check } }) : ""),
         el("p", { class: "hint" }, fmtDate(i.created_at)),
         el("div", { class: "actions" }, i.download_url ? el("a", { class: "btn", href: i.download_url, download: "" }, "Download") : "",
+          o.guide_file_id ? (look?.hero_render_id === i.id ? el("span", { class: "chip check-good" }, "Project look")
+            : el("button", { class: "btn", type: "button", onclick: () => setHero(i.id) }, "Use as project look")) : "",
           deleteButton("this render", async () => { await api.deleteRender(i.id); toast("Render deleted."); loadOutputs(); }, false)),
         el("form", { class: "revise", onsubmit: e => { e.preventDefault(); revise(i.id, input, go); } }, input, go)));
   }));
@@ -767,11 +826,20 @@ function setupTiers(out) {
       : t.left ? `${t.left} free for you` : t.price;
     const input = el("input", { type: "radio", name: "tier", value: k, ...(on ? {} : { disabled: "" }), ...(on && was === k ? { checked: "" } : {}) });
     input.addEventListener("change", tierChanged);
-    return el("label", { class: `tier premium-tag${on ? "" : " off"}` }, input, el("span", {}, el("b", {}, t.name), el("small", {}, `${t.blurb} · ${note}`)));
+    return el("label", { class: `tier premium-tag${on ? "" : " off"}`, ...(t.model_only ? { "data-model-only": "" } : {}) }, input, el("span", {}, el("b", {}, t.name), el("small", {}, `${t.blurb} · ${note}`)));
   }));
+  syncModelOnly();
   if (!$("#tierPick input[name=tier]:checked")) stdInput.checked = true;
   tierChanged();
   updateClipEngines(out.video_engines || {});
+}
+/** Options that draw on the model (Ollic Exact) are offered only where a model view is rendered. */
+function syncModelOnly() {
+  const onModel = !!SERVICES[service]?.modes;
+  document.querySelectorAll("#tierPick [data-model-only]").forEach(l => {
+    l.hidden = !onModel;
+    const i = l.querySelector("input"); if (!onModel && i.checked) { $("#tierPick input[value=standard]").checked = true; tierChanged(); }
+  });
 }
 function chosenTier() { return $("#tierPick input[name=tier]:checked")?.value || "standard"; }
 /* AI version: a dropdown. Closed, it shows only the chosen one; open, the list; picking one closes it. */
@@ -807,9 +875,9 @@ function briefFromForm() {
   const f = (current?.source_files || []).find(x => x.id === rPick), d = f?.details || {};
   const ratio = d.width && d.height ? d.width / d.height : 1.5;
   const prompt = $("#rPrompt").value.trim() || $("#rDesc").value.trim();
-  const guide = rPick ? guideFor(rPick) : null;
+  const guide = rPick ? guideFor(rPick) : null, depth = rPick ? guideFor(rPick, "depth") : null, mats = rPick ? guideFor(rPick, "materials") : null;
   return { prompt, prompt_ready: promptByAI && !!$("#rPrompt").value.trim(), references: renderRefs(), tier: chosenTier(), quality: $("#rQuality").value,
-    ...(guide ? { guide_file_id: guide } : {}),
+    ...(guide ? { guide_file_id: guide } : {}), ...(depth ? { depth_file_id: depth } : {}), ...(mats ? { material_file_id: mats } : {}),
     aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
 $("#renderForm").onsubmit = e => {

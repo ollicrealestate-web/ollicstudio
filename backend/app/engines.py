@@ -12,6 +12,9 @@ IMAGE_ENGINES = {
                "price": "about $0.05 an image", "model": "flux-3", "soon": True},
     "vs": {"name": "Ollic VS", "blurb": "Precise edits that keep the building exactly as it is; quick style, material and lighting changes.",
            "price": "about $0.04 an image", "model": "fal-ai/flux-pro/kontext"},
+    # renders only from the architect's model: the model's exact depth drives the picture
+    "exact": {"name": "Ollic Exact", "blurb": "Drawn on your model's exact depth: walls, floors, openings and camera stay where the model has them. For renders from your model.",
+              "price": "about $0.04 an image", "model": "fal-ai/flux-control-lora-depth", "model_only": True},
 }
 VIDEO_ENGINES = {
     "motion": {"name": "Ollic Motion", "blurb": "One shot from the gold wireframe to the finished building: start and end frame, 3 to 15 s, optional sound.",
@@ -28,4 +31,4 @@ FILM_ENGINES = {
     "path_plus": {"name": "Ollic Path Plus", "blurb": "Richer light and life (people, cars); slightly freer with fine detail. Up to 10 s a shot.",
                   "price": "about $0.17 a second"},
 }
-PAID_TIERS = {"premium", "swift", "ultra", "studio", "vs"}
+PAID_TIERS = {"premium", "swift", "ultra", "studio", "vs", "exact"}

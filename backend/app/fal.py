@@ -36,6 +36,12 @@ IMAGE_EDIT = "fal-ai/flux-pro/kontext"
 IMAGE_MULTI = "fal-ai/flux-pro/kontext/multi"
 IMAGE_TEXT = "fal-ai/flux-pro/kontext/text-to-image"
 IMAGE_PRICE = Decimal("0.04")
+# Ollic Exact: FLUX with the depth control LoRA; the depth map is the model's own (preprocess_depth false).
+# Input per fal's published client types (fal-ai/fal-js endpoints.ts, DepthLoraInput), read 2026-10-24:
+# prompt, control_lora_image_url, control_lora_strength, preprocess_depth, image_size {width, height},
+# num_inference_steps, guidance_scale, output_format. No list price was found: about $0.04 is an estimate.
+EXACT_MODEL = "fal-ai/flux-control-lora-depth"
+EXACT_SIZES = {"1536x1024": (1536, 1024), "1024x1536": (1024, 1536), "1024x1024": (1024, 1024)}
 VIDEO_MODEL = "bytedance/seedance-2.0/image-to-video"
 VIDEO_PRICES = {"720p": Decimal("0.3034"), "1080p": Decimal("0.682")}
 PRICE_SOURCE = "fal.ai model pages (Flux Kontext Pro $0.04 an image; Seedance 2.0 per second), read 2026-10-23"
@@ -129,6 +135,9 @@ class FalImages(_Fal):
             endpoint, body["image_urls"] = IMAGE_MULTI, [data_uri(d, m, 1536) for d, m in images[:4]]
         else:
             endpoint = IMAGE_TEXT
+        return self._image(endpoint, body)
+
+    def _image(self, endpoint: str, body: dict) -> ImageResult:
         try:
             sub = self.submit(endpoint, body)
             started = time.monotonic()
@@ -161,6 +170,27 @@ class FalImages(_Fal):
 
     def generate(self, *, model: str, prompt: str, size: str = "1536x1024", quality: str | None = None, user_id: str | None = None) -> ImageResult:
         return self._run(prompt, [], size)
+
+
+class FalExact(FalImages):
+    """Ollic Exact: the first picture given must be the model's depth map (white near, black far), drawn
+    from the same camera; the picture is generated on that exact depth, so the geometry and the camera
+    come from the model and the AI only adds materials, light and setting."""
+
+    def edit(self, *, model: str, prompt: str, images: list[tuple[bytes, str]], size: str = "1536x1024", quality: str | None = None, user_id: str | None = None) -> ImageResult:
+        if not images:
+            raise ProviderError("Ollic Exact needs a view of your model. Capture the view again.")
+        w, h = EXACT_SIZES.get(size, (1536, 1024))
+        depth = data_uri(images[0][0], images[0][1], max(w, h))
+        body = {"prompt": prompt[:4000], "control_lora_image_url": depth, "preprocess_depth": False, "control_lora_strength": 1.0,
+                "image_size": {"width": w, "height": h}, "num_inference_steps": 28, "guidance_scale": 3.5, "num_images": 1,
+                "output_format": "jpeg", "enable_safety_checker": True}
+        out = self._image(EXACT_MODEL, body)
+        out.model = EXACT_MODEL
+        return out
+
+    def generate(self, *, model: str, prompt: str, size: str = "1536x1024", quality: str | None = None, user_id: str | None = None) -> ImageResult:
+        raise ProviderError("Ollic Exact renders from your model. Capture a view of the model first.")
 
 
 class FalVideo(_Fal):

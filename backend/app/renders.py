@@ -177,10 +177,22 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect", "shot_name")}))
             if writer_note:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
+            # the project's approved look (materials by the model's material map, the hero render) for model views
+            send, look_ctx = images, None
+            if "model" in roles:
+                images, roles, block, look_ctx = apply_look(state, user, job, inp, images, roles, exact=(tier == "exact"))
+                if block:
+                    prompt = (prompt[: -len(SAFE_TAIL)].rstrip() if prompt.endswith(SAFE_TAIL) else prompt) + "\n" + block + "\n" + SAFE_TAIL
+                send = images
+                if tier == "exact":   # Ollic Exact draws on the model's depth map from the same camera
+                    d = repo.get_source_file(user, inp.get("depth_file_id") or "")
+                    if not d or d.get("project_id") != job["project_id"]:
+                        return fail("The depth view of your model is missing. Capture the view again.")
+                    send = [(storage.download(user, d["storage_path"]), "image/png")]
             model = settings.model_for(tier, "create")
             if images:
                 operation = "image_edit"
-                result = client.edit(model=model, prompt=prompt, images=images, size=size, quality=quality, user_id=user.id)
+                result = client.edit(model=model, prompt=prompt, images=send, size=size, quality=quality, user_id=user.id)
             else:
                 operation = "image_generate"
                 result = client.generate(model=model, prompt=prompt, size=size, quality=quality, user_id=user.id)
@@ -216,15 +228,17 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
     # the geometry rule first and keep the better one.
     check = None
     if job["type"] == "concept_render" and inp.get("guide_file_id"):
-        check, result = geometry_check(state, user, job, inp, result, images, roles)
-        if check and check["score"] < GOOD_MATCH:
+        check, result = geometry_check(state, user, job, inp, result, images, roles, look_ctx)
+        if check and overall(check) < GOOD_MATCH:
             try:
-                repo.update_job(user, job_id, {"stage": f"The first try matched the model {round(check['score'] * 100)}%; rendering again, geometry first"})
-                again = client.edit(model=model, prompt=GEOMETRY_FIRST + prompt, images=images, size=size, quality=quality, user_id=user.id)
+                what = "materials" if check["score"] >= GOOD_MATCH else "geometry"
+                repo.update_job(user, job_id, {"stage": f"The first try matched the model {round(overall(check) * 100)}%; rendering again, {what} first"})
+                first_rule = (MATERIALS_FIRST if what == "materials" else GEOMETRY_FIRST)
+                again = client.edit(model=model, prompt=first_rule + prompt, images=send, size=size, quality=quality, user_id=user.id)
                 record_usage(repo, user, job, model, operation, again)
-                check2, again = geometry_check(state, user, job, inp, again, images, roles)
-                if check2 and check2["score"] > check["score"]:
-                    result, check, prompt = again, check2, GEOMETRY_FIRST + prompt
+                check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
+                if check2 and overall(check2) > overall(check):
+                    result, check, prompt = again, check2, first_rule + prompt
                 check["retried"] = True
             except (ProviderError, BackendUnavailable):
                 check["retried"] = False
@@ -274,13 +288,61 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
 
 from .geometry import GOOD as GOOD_MATCH  # noqa: E402
 
+MATERIALS_FIRST = ("Most important: use exactly the approved materials and colours listed below, in exactly the places the material map "
+                   "shows, and keep the building's geometry and camera exactly as in Image 1.\n")
+
+
+def overall(check: dict) -> float:
+    """The lower of the shape score and, when the project has approved materials, the materials score."""
+    m = (check.get("materials") or {}).get("score")
+    return min(check["score"], m) if m is not None else check["score"]
+
+
+def apply_look(state, user: CurrentUser, job: dict, inp: dict, images: list, roles: list, exact: bool = False):
+    """Adds the project's material map and hero render to the pictures sent, and says what they are.
+    Returns (images, roles, text for the prompt, context for the check)."""
+    from .look import look_block
+    from .routes.look import current_look
+    repo, storage, settings = state.repo, state.storage, state.settings
+    try:
+        project = repo.get_project(user, job["project_id"]) or {}
+    except BackendUnavailable:
+        return images, roles, "", None
+    look = current_look(project)
+    mats = [m for m in look.materials if m.name]
+    ctx = {"look": look, "map": None}
+    if inp.get("material_file_id") and mats:
+        f = repo.get_source_file(user, inp["material_file_id"])
+        if f and f.get("project_id") == job["project_id"]:
+            ctx["map"] = storage.download(user, f["storage_path"])
+    hero = None
+    if look.hero_render_id and not exact:
+        r = repo.get_rendered_image(user, str(look.hero_render_id))
+        if r and r.get("project_id") == job["project_id"]:
+            try:
+                hero = storage.download(user, r.get("base_path") or r["storage_path"], bucket=settings.renders_bucket)
+            except BackendUnavailable:
+                hero = None
+    if exact:      # the depth model sees only the prompt: the materials go in as words
+        return images, roles, look_block(look, None, None), ctx
+    at = roles.index("model") + 1
+    add = ([(ctx["map"], "image/png", "materials")] if ctx["map"] else []) + ([(hero, "image/jpeg", "hero")] if hero else [])
+    images = images[:at] + [(d, m) for d, m, _ in add] + images[at:]
+    roles = roles[:at] + [r for _, _, r in add] + roles[at:]
+    while len(images) > 4 and "style" in roles:          # image models take up to four pictures: references go first
+        i = len(roles) - 1 - roles[::-1].index("style"); images.pop(i); roles.pop(i)
+    map_i = roles.index("materials") + 1 if "materials" in roles else None
+    hero_i = roles.index("hero") + 1 if "hero" in roles else None
+    return images, roles, look_block(look, map_i, hero_i, roles.index("model") + 1), ctx
+
+
 GEOMETRY_FIRST = ("Most important: Image 1 is an exact view of the architect's model. Keep its geometry exactly: the same number of floors, "
                   "every window and door opening in the same place, the same roof line, balconies, columns, setbacks and camera. "
                   "Keep the same framing: the building at exactly the same size and position in the picture as in Image 1. "
                   "Do not add, remove or move any part of the building.\n")
 
 
-def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, images, roles):
+def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, images, roles, look_ctx=None):
     """(check, result): how well the result kept the model's geometry (see geometry.py), with the
     result put back in the model's camera when the AI only reframed it; Claude's view too when connected."""
     from dataclasses import replace
@@ -296,6 +358,11 @@ def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, image
         if fixed is not None:
             out = fixed
             result = replace(result, data=gjpeg(fixed, 93), output_format="jpeg")
+        if look_ctx and look_ctx.get("map"):
+            from .look import material_check
+            mc = material_check(Image.open(io.BytesIO(look_ctx["map"])), out, [m for m in look_ctx["look"].materials if m.name])
+            if mc:
+                check["materials"] = mc
         writer = getattr(state, "prompt_writer", None)
         if writer is not None:
             seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out))

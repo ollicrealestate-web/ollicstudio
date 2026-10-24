@@ -46,6 +46,9 @@ export const api = {
   deleteVideo: videoId => request("DELETE", `/videos/${videoId}`),
   makeClip: (projectId, body) => request("POST", `/projects/${projectId}/cinematic`, body),
   // the architect's model
+  look: projectId => request("GET", `/projects/${projectId}/look`),
+  saveLook: (projectId, look) => request("PUT", `/projects/${projectId}/look`, look),
+  addModelMaterials: (projectId, groups) => request("POST", `/projects/${projectId}/look/materials`, { groups }),
   revitToIfc: (projectId, fileId) => request("POST", `/projects/${projectId}/revit-to-ifc`, { source_file_id: fileId }),
   importIfc: (projectId, fileId, key) => request("POST", `/projects/${projectId}/import-ifc`, { source_file_id: fileId }, true, { "Idempotency-Key": key }),
   models: projectId => request("GET", `/projects/${projectId}/models`),
