@@ -215,7 +215,7 @@ class FakePlanner:
     def __init__(self, answer):
         self.answer, self.calls = answer, []
 
-    def ask_json(self, system, content, max_tokens=1800):
+    def ask_json(self, system, content, max_tokens=1800, **kw):
         self.calls.append((system, content))
         return {"answer": self.answer, "usage": {"input_tokens": 10, "output_tokens": 20}, "cost_usd": None, "model": self.model}
 

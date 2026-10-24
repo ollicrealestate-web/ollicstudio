@@ -139,7 +139,7 @@ class FakeChecker:
     def __init__(self):
         self.calls = []
 
-    def ask_json(self, system, content, max_tokens=1800):
+    def ask_json(self, system, content, max_tokens=1800, **kw):
         self.calls.append(content)
         first = len(self.calls) == 1
         answer = {"ok": not first, "issues": ["the model has 7 floors above the ground floor; the result shows 6: add the missing floor"] if first else []}
@@ -179,7 +179,7 @@ class FakeReader:
     def __init__(self):
         self.calls = []
 
-    def ask_json(self, system, content, max_tokens=1800):
+    def ask_json(self, system, content, max_tokens=1800, **kw):
         self.calls.append((system, content))
         return {"answer": {"materials": [
                     {"key": "paint|#f2f2f2", "name": "White render", "finish": "smooth acrylic render, matt", "hex": "#f4f2ec"},
@@ -199,8 +199,11 @@ def test_claude_reads_the_materials_and_the_architect_confirms(render_settings, 
     view, lines, depth, mats = captured(c, alice, pid)
     groups = [g | {"types": ["IfcWall", "IfcSlab"] if g["cls"] == "paint" else ["IfcWindow"]} for g in GROUPS]
     c.post(f"/api/projects/{pid}/look/materials", json={"groups": groups}, headers=alice["headers"])
-    out = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"], "description": "luxury flats"},
-                 headers=alice["headers"]).json()
+    r = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"], "description": "luxury flats"},
+               headers=alice["headers"])
+    assert r.status_code == 202 and r.json()["reading"]          # it runs in the background; the look says when it is done
+    out = c.get(f"/api/projects/{pid}/look", headers=alice["headers"]).json()
+    assert out["reading"] is None
     system, content = reader.calls[0]
     text = content[-1]["text"]
     assert sum(1 for b in content if b["type"] == "image") == 2 and "used on Wall, Slab" in text and "luxury flats" in text
@@ -209,14 +212,14 @@ def test_claude_reads_the_materials_and_the_architect_confirms(render_settings, 
     assert not by["paint|#d9c39a"]["confirmed"] and by["glass|#9fb4c4"]["source"] == "model"
     deck = next(m for m in out["materials"] if m["extra"])
     assert deck["name"] == "Roof terrace decking" and deck["note"] == "roof terrace under the pergola"
-    assert out["setting"] == "Lekki street, palm trees, late afternoon" and out["notes"].startswith("Three materials")
+    assert out["setting"] == "Lekki street, palm trees, late afternoon" and out["read_notes"].startswith("Three materials")
     # the architect changes one and confirms all; reading again keeps what the architect wrote
     by["paint|#f2f2f2"] |= {"name": "Sandtex white", "source": "architect", "confirmed": True}
     for m in out["materials"]:
         m["confirmed"] = True
-    out.pop("notes")
     c.put(f"/api/projects/{pid}/look", json=out, headers=alice["headers"])
-    again = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"]}, headers=alice["headers"]).json()
+    c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"]}, headers=alice["headers"])
+    again = c.get(f"/api/projects/{pid}/look", headers=alice["headers"]).json()
     names = [m["name"] for m in again["materials"]]
     assert "Sandtex white" in names and names.count("Roof terrace decking") == 1      # confirmed extras stay, once
     # the render is told about the extras too

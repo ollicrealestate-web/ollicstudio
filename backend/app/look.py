@@ -76,6 +76,8 @@ class Look(BaseModel):
     materials: list[Material] = Field(default_factory=list, max_length=40)
     hero_render_id: uuid.UUID | None = None
     setting: str = Field(default="", max_length=500)   # surroundings, light and mood for every view
+    reading: str | None = None      # set while Claude reads the materials (when it started, ISO time)
+    read_notes: str = Field(default="", max_length=400)   # what Claude said, or why it could not read them
 
     @field_validator("setting")
     @classmethod

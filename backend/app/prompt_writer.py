@@ -87,11 +87,11 @@ class ClaudePromptWriter:
                    {"type": "text", "text": f"The architect asks: {instruction}"}]
         return self._call(EDIT_SYSTEM, content)
 
-    def ask_json(self, system: str, content: list, max_tokens: int = 1800) -> dict:
+    def ask_json(self, system: str, content: list, max_tokens: int = 1800, timeout: float = 180) -> dict:
         """Any question whose answer is one JSON object: returns {"answer": dict, "usage", "cost_usd", "model"}."""
         body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": content}]}
         try:
-            res = self._http.post("/v1/messages", json=body, headers=self._headers)
+            res = self._http.post("/v1/messages", json=body, headers=self._headers, timeout=timeout)
         except httpx.HTTPError as exc:
             raise PromptWriterFailed(f"could not reach Claude: {exc.__class__.__name__}") from exc
         if res.status_code >= 400:

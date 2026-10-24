@@ -564,12 +564,20 @@ let lastCapture = null;
 /** Claude studies the captured view and its material map and fills in the list; the architect confirms or edits. */
 async function readMaterials(viewId, matsId) {
   lastCapture = { viewId, matsId };
+  const pid = current.id;
   $("#lookCard").open = true;
-  $("#lookMsg").textContent = "Claude is studying your model's materials…"; $("#lookAsk").disabled = true;
+  $("#lookMsg").textContent = "Claude is studying your model's materials. This takes about a minute…"; $("#lookAsk").disabled = true;
   try {
-    const out = await api.suggestLook(current.id, { view_file_id: viewId, material_file_id: matsId, description: $("#rDesc")?.value.trim() || "" });
-    look = out; lookFor = current.id; drawLook();
-    $("#lookMsg").textContent = (out.notes ? out.notes + " " : "") + "Check each material, change anything, then press Confirm all.";
+    look = await api.suggestLook(pid, { view_file_id: viewId, material_file_id: matsId, description: $("#rDesc")?.value.trim() || "" }); lookFor = pid; drawLook();
+    const t0 = Date.now();
+    while (look?.reading && Date.now() - t0 < 300000 && current?.id === pid) {      // it runs in the background
+      await new Promise(r => setTimeout(r, 4000));
+      look = await api.look(pid);
+      if (!look.reading) drawLook();
+    }
+    if (current?.id !== pid) return;
+    if (look?.reading) { $("#lookMsg").textContent = "Claude is taking longer than usual. The list will update when you reopen the project."; return; }
+    $("#lookMsg").textContent = (look.read_notes ? look.read_notes + " " : "") + "Check each material, change anything, then press Confirm all.";
   } catch (err) {
     if (err.status === 401) return handle(err);
     $("#lookMsg").textContent = err.status === 503 ? "Name the materials yourself for now (Claude is not connected)." : err.message;
