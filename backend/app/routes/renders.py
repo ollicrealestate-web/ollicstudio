@@ -61,6 +61,8 @@ class ConceptRenderIn(BaseModel):
     tier: Literal["standard", "premium", "swift", "ultra", "studio", "vs"] = "standard"
     anim_hero: AnimHero | None = None
     anim_line: AnimHero | None = None     # the result is the line drawing of an animation view
+    guide_file_id: uuid.UUID | None = None   # the model's line drawing from the same camera: the result is checked against it
+    film_shot: str | None = Field(default=None, max_length=80)   # the first frame of this walkthrough shot
 
     @field_validator("prompt")
     @classmethod
@@ -121,7 +123,7 @@ UNLIMITED_ROLES = ("admin", "reviewer")
 FREE_UNLIMITED_ROLES = UNLIMITED_ROLES + ("tester",)   # testers: free features without daily limits
 EVER = "1970-01-01T00:00:00+00:00"
 # one-time allowances of paid options (profiles.allowances), and the job tier each is counted by
-ALLOWANCE_TIER = {"vs_image": "vs", "vs_video": "clip-vs"}
+ALLOWANCE_TIER = {"vs_image": "vs", "vs_video": "clip-vs", "film": "film"}
 
 
 def allowance_left(request: Request, user: CurrentUser, key: str, profile: dict | None = None) -> int | None:
@@ -176,7 +178,8 @@ def _settle_stale(request: Request, user: CurrentUser, job: dict) -> dict:
     if is_stale(job):
         updated = _repo(request).update_job(user, job["id"], {
             "status": "failed", "stage": None, "finished_at": now_iso(),
-            "error": "This was interrupted before it finished, probably by a server restart. Start it again.",
+            "error": ("This model reading was interrupted before it finished, probably by a server restart. Choose the file again to retry." if job.get("type") == "ifc_import"
+                      else "This was interrupted before it finished, probably by a server restart. Start it again."),
         })
         return updated or job
     return job
@@ -227,8 +230,12 @@ def start_concept_render(project_id: uuid.UUID, body: ConceptRenderIn, request: 
         src = _repo(request).get_source_file(user, str(r.file_id))
         if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Reference image not found in this project.")
-        if src.get("detected_type") not in ("png", "jpeg"):
-            raise HTTPException(422, {"code": "unsupported_reference", "reason": "Pictures must be PNG or JPEG images."})
+        if src.get("detected_type") not in ("png", "jpeg", "pdf") or (src["detected_type"] == "pdf" and r.role != "plan"):
+            raise HTTPException(422, {"code": "unsupported_reference", "reason": "References must be PNG or JPEG images (a PDF can be used as the floor plan). For an IFC model, take a 3D view shot instead."})
+    if body.guide_file_id:
+        g = _repo(request).get_source_file(user, str(body.guide_file_id))
+        if not g or g.get("owner_id") != user.id or g.get("project_id") != str(project_id) or g.get("detected_type") not in ("png", "jpeg"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "The model guide is not in this project.")
     job_input = body.model_dump(mode="json")
     job_input["references"] = [{"file_id": str(r.file_id), "role": r.role} for r in refs]
     job_input.pop("reference_file_id", None)
@@ -351,6 +358,7 @@ DAILY_PROMPTS = 60
 class RenderPromptIn(BaseModel):
     references: list[Reference] = Field(default_factory=list, max_length=4)
     description: str = Field(default="", max_length=1500)
+    model_id: uuid.UUID | None = None
 
     @field_validator("references")
     @classmethod
@@ -363,12 +371,12 @@ class RenderPromptIn(BaseModel):
 
 @router.post("/projects/{project_id}/render-prompt")
 def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Request, user: CurrentUser = Depends(get_current_user)):
-    """Studies the pictures and writes the rendering prompt; nothing is rendered or charged to the customer."""
-    from ..render_prompt import PromptUnavailable, write_with_claude, write_with_cloudflare
+    """Studies the pictures (and the model's facts) and writes the rendering prompt; nothing is rendered or charged to the customer."""
+    from ..render_prompt import PromptUnavailable, facts_text, write_with_claude, write_with_cloudflare
     from ..renders import ROLE_ORDER, _as_image
     _owned_project(request, user, project_id)
     if not body.references and len(body.description.strip()) < 3:
-        raise HTTPException(422, {"code": "nothing_to_read", "reason": "Choose a picture first, or describe the building."})
+        raise HTTPException(422, {"code": "nothing_to_read", "reason": "Capture a view or choose a picture first, or describe the building."})
     repo, storage = _repo(request), _storage(request)
     profile = repo.get_profile(user) or {}
     if profile.get("role") not in FREE_UNLIMITED_ROLES:
@@ -379,19 +387,25 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
     images, roles = [], []
     for r in refs:
         src = repo.get_source_file(user, str(r.file_id))
-        if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id) or src.get("detected_type") not in ("png", "jpeg"):
+        if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id) or src.get("detected_type") not in ("png", "jpeg", "pdf"):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Picture not found in this project.")
         images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"])); roles.append(r.role)
+    model = None
+    if body.model_id:
+        model = repo.get_model(user, str(body.model_id))
+        if not model or model.get("project_id") != str(project_id):
+            model = None
+    facts = facts_text(model)
     claude, vision = getattr(request.app.state, "prompt_writer", None), getattr(request.app.state, "vision", None)
     if claude is None and (vision is None or not images):
         raise HTTPException(503, {"code": "not_configured", "reason": "AI prompt writing is not switched on for this site yet. Write the prompt yourself."})
     try:
-        out = write_with_claude(claude, images, roles, body.description) if claude is not None else write_with_cloudflare(vision, images, roles, body.description)
+        out = write_with_claude(claude, images, roles, body.description, facts) if claude is not None else write_with_cloudflare(vision, images, roles, body.description, facts)
     except PromptUnavailable as exc:
         log.warning("OWNER: render prompt failed: %s", exc)
         if claude is not None and vision is not None and images:
             try:
-                out = write_with_cloudflare(vision, images, roles, body.description)
+                out = write_with_cloudflare(vision, images, roles, body.description, facts)
             except PromptUnavailable:
                 raise HTTPException(502, {"code": "prompt_failed", "reason": "The AI could not write the prompt this time. Try again, or write it yourself."}) from exc
         else:
@@ -420,8 +434,8 @@ def read_plan(project_id: uuid.UUID, body: PlanReadIn, request: Request, user: C
     src = _repo(request).get_source_file(user, str(body.source_file_id))
     if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found in this project.")
-    if src.get("detected_type") not in ("png", "jpeg"):
-        raise HTTPException(422, {"code": "not_a_plan", "reason": "Choose a floor plan image (PNG or JPEG)."})
+    if src.get("detected_type") not in ("png", "jpeg", "pdf"):
+        raise HTTPException(422, {"code": "not_a_plan", "reason": "Choose a floor plan image (PNG or JPEG) or a PDF drawing."})
     reader = getattr(request.app.state, "vision", None)
     if reader is None:
         raise HTTPException(503, {"code": "not_configured", "reason": "Plan reading is not switched on for this site yet."})

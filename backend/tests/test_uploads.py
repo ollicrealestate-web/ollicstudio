@@ -19,6 +19,8 @@ def _up(client, user, project, name, data):
 @pytest.mark.parametrize("name,data,kind", [
     ("plan.png", samples.png(), "png"),
     ("photo.JPG", samples.jpeg(), "jpeg"),
+    ("drawings.pdf", samples.pdf(2), "pdf"),
+    ("house.ifc", samples.ifc("IFC2X3"), "ifc"),
 ])
 def test_supported_files_are_stored_privately_and_unmodified(client, alice, project, storage, name, data, kind):
     res = _up(client, alice, project, name, data)
@@ -33,22 +35,25 @@ def test_supported_files_are_stored_privately_and_unmodified(client, alice, proj
 
 def test_details_are_read_from_the_file(project):
     assert inspect_upload(samples.png(640, 480), "a.png").details == {"width": 640, "height": 480}
+    assert inspect_upload(samples.pdf(3), "a.pdf").details == {"pages": 3}
+    assert inspect_upload(samples.ifc("IFC4"), "a.ifc").details == {"schema": "IFC4"}
 
 
-def test_project_input_type_is_set_by_the_first_image(client, alice, project):
-    _up(client, alice, project, "sketch.png", samples.png())
-    assert client.get(f"/api/projects/{project['id']}", headers=alice["headers"]).json()["input_type"] == "sketch"
+def test_project_input_type_follows_the_first_upload(client, alice, project):
+    _up(client, alice, project, "house.ifc", samples.ifc())
+    assert client.get(f"/api/projects/{project['id']}", headers=alice["headers"]).json()["input_type"] == "ifc"
 
 
 @pytest.mark.parametrize("name,data,code,words", [
     ("plan.png", b"just some text pretending to be a picture", "unsupported", "text file"),
-    ("drawings.pdf", samples.pdf(), "unsupported", "images only"),
-    ("plan.png", samples.pdf(), "unsupported", "This is a PDF"),
-    ("house.ifc", samples.ifc("IFC2X3"), "unsupported", "This is an IFC model"),
-    ("photo.png", samples.jpeg(), "renamed", "contents are a JPEG"),
+    ("plan.png", samples.pdf(), "renamed", "contents are a PDF"),
+    ("drawings.pdf", samples.png(), "renamed", "contents are a PNG"),
     ("plan.png", samples.png()[:-12], "corrupt", "incomplete"),
     ("photo.jpg", samples.jpeg()[:-2], "corrupt", "incomplete"),
-    ("house.rvt", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64, "unsupported", "PNG or JPEG"),
+    ("drawings.pdf", samples.pdf().replace(b"%%EOF", b""), "corrupt", "incomplete"),
+    ("house.ifc", samples.ifc("IFC2X2"), "unsupported_schema", "IFC2X3 or IFC4"),
+    ("house.ifc", samples.ifc()[:-30], "corrupt", "does not end"),
+    ("house.rvt", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64, "corrupt", "export IFC"),   # not a real Revit file
     ("plans.zip", b"PK\x03\x04" + b"\x00" * 40, "unsupported", "ZIP"),
     ("empty.png", b"", "empty", "empty"),
 ])
@@ -80,6 +85,6 @@ def test_a_failed_database_write_does_not_leave_a_stored_file(client, alice, pro
 
 def test_inspect_upload_never_trusts_the_extension():
     with pytest.raises(UploadRejected) as e:
-        inspect_upload(samples.png(), "house.jpg")
+        inspect_upload(samples.ifc(), "house.pdf")
     assert e.value.code == "renamed"
-    assert inspect_upload(samples.jpeg(), "house").kind == "jpeg"  # no extension: the contents decide
+    assert inspect_upload(samples.ifc(), "house").kind == "ifc"  # no extension: the contents decide

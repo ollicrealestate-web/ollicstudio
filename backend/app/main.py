@@ -19,16 +19,18 @@ from .openai_images import OpenAIImages
 from .gemini_images import GeminiImages
 from .fal import FalImages, FalVideo
 from .kling import KlingVideo
+from .aps import AutodeskModels
+from .runway import RunwayVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import animation, cinematic, projects, renders, videos
+from .routes import animation, cinematic, films, models, projects, renders, videos
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
 
 
 def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None,
-               runner=None, vision="auto", prompt_writer="auto", kling="auto", gemini="auto", fal="auto") -> FastAPI:
+               runner=None, vision="auto", prompt_writer="auto", kling="auto", gemini="auto", fal="auto", runway="auto", aps="auto") -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
@@ -58,6 +60,13 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     if gemini == "auto":
         gemini = GeminiImages(settings.gemini_api_key) if settings.gemini_api_key else None
     app.state.gemini = gemini
+    # Runway (direct): AI walkthroughs, the model's exact guide video turned photoreal
+    if runway == "auto":
+        runway = RunwayVideo(settings.runway_api_key) if settings.runway_api_key else None
+    app.state.runway = runway
+    if aps == "auto":
+        aps = AutodeskModels(settings.aps_client_id, settings.aps_client_secret) if settings.aps_client_id and settings.aps_client_secret else None
+    app.state.aps = aps
     # the added options sit beside Standard and Premium (which are unchanged): Ollic Swift and Ultra
     for t in ("swift", "ultra"):
         app.state.image_clients.setdefault(t, gemini)
@@ -88,6 +97,8 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     app.include_router(projects.router, prefix="/api")
     app.include_router(renders.router, prefix="/api")
+    app.include_router(models.router, prefix="/api")
+    app.include_router(films.router, prefix="/api")
     app.include_router(videos.router, prefix="/api")
     app.include_router(animation.router, prefix="/api")
     app.include_router(cinematic.router, prefix="/api")

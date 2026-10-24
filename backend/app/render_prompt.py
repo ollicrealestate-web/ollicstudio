@@ -1,6 +1,6 @@
 """Writes the rendering prompt from what the architect gives: the picture to render (a captured view
 of their 3D model, a sketch, a 3D image or a floor plan), up to three reference pictures whose scene
-to copy and a plain-words description.
+to copy, the model's own facts (floors, openings, facade parts) and a plain-words description.
 
 Claude writes it when it is set up (it sees every picture); otherwise the free Cloudflare vision
 model writes it from the main picture. The architect can edit the prompt before rendering, and the
@@ -22,7 +22,7 @@ from .vision import VISION_MODEL, image_png, load_image
 log = logging.getLogger("ollic.render_prompt")
 
 ROLE_INTRO = {
-    "model": "Image {n} is the VIEW TO RENDER: a plain, untextured 3D view of the architect's building (a Revit, SketchUp or Lumion export).",
+    "model": "Image {n} is the VIEW TO RENDER: a plain, untextured view captured from the architect's BIM model.",
     "base": "Image {n} is the VIEW TO RENDER: the architect's design (a sketch, 3D image or photo).",
     "plan": "Image {n} is the architect's FLOOR PLAN of a typical floor.",
     "style": "Image {n} is a REFERENCE: copy its scene (setting, landscaping, sky, light, mood and material palette), never its building.",
@@ -35,7 +35,7 @@ SYSTEM = (
     "Study the pictures closely before writing. On the view to render, count and describe exactly what is there: the massing and "
     "setbacks, the number of floors, the roof and parapets, every band of windows and how it is divided, balconies, louvres, fins, "
     "cladding panels, columns, canopies, the entrance, terraces and roof plant, and the camera position, height, angle and framing. "
-    "On a floor plan, read the footprint, units, core and balconies. On a "
+    "Use the model facts (floors, element counts) only to understand the building; never copy element counts or IFC words into the prompt, describe what is seen instead. On a floor plan, read the footprint, units, core and balconies. On a "
     "reference, note only its scene: surroundings, landscaping, sky, time of day, light, mood and materials palette.\n"
     "Then write ONE prompt that: (1) tells the image model to keep the view to render exactly: same building form, same number of "
     "floors, same openings and facade elements in the same places, same camera and framing; it may only add realistic materials, "
@@ -52,8 +52,34 @@ class PromptUnavailable(Exception):
     pass
 
 
-def _user_text(description: str, roles: list[str]) -> str:
+def facts_text(model: dict | None) -> str:
+    """The model's own facts, from its check report, in a few lines."""
+    if not model:
+        return ""
+    r = model.get("report") or {}
+    lines = []
+    if r.get("storeys"):
+        lines.append("(These facts are for understanding the building; do not quote the numbers in the prompt.)")
+        lines.append(f"Storeys in the model ({len(r['storeys'])}, bottom to top): " + ", ".join(r["storeys"][:20]))
+    counts = r.get("counts") or {}
+    if counts:
+        nice = {"IfcWindow": "windows", "IfcDoor": "doors", "IfcWall": "walls", "IfcWallStandardCase": "walls", "IfcSlab": "slabs",
+                "IfcColumn": "columns", "IfcBeam": "beams", "IfcRailing": "railings", "IfcCurtainWall": "curtain walls", "IfcMember": "facade members (mullions, fins, louvres)",
+                "IfcPlate": "facade panels / glazing plates", "IfcRoof": "roofs", "IfcStair": "stairs", "IfcStairFlight": "stair flights", "IfcCovering": "coverings",
+                "IfcFurnishingElement": "furniture", "IfcFurniture": "furniture", "IfcBuildingElementProxy": "other modelled parts"}
+        merged: dict[str, int] = {}
+        for t, n in counts.items():
+            if t in nice:
+                merged[nice[t]] = merged.get(nice[t], 0) + int(n)
+        if merged:
+            lines.append("Modelled elements: " + ", ".join(f"{n} {k}" for k, n in sorted(merged.items(), key=lambda x: -x[1])))
+    return "\n".join(lines)
+
+
+def _user_text(description: str, facts: str, roles: list[str]) -> str:
     parts = [ROLE_INTRO[r].format(n=i) for i, r in enumerate(roles, 1)]
+    if facts:
+        parts.append("Facts from the architect's model:\n" + facts)
     parts.append("Architect's description: " + (description.strip() or "(none given: choose tasteful, realistic materials and a natural setting that suit the design)"))
     return "\n".join(parts)
 
@@ -70,14 +96,14 @@ def _parse(text: str | None) -> dict:
     return {"prompt": prompt[:6000], "notes": str(out.get("notes") or "")[:300]}
 
 
-def write_with_claude(writer, images: list[tuple[bytes, str]], roles: list[str], description: str) -> dict:
+def write_with_claude(writer, images: list[tuple[bytes, str]], roles: list[str], description: str, facts: str) -> dict:
     """writer: prompt_writer.ClaudePromptWriter (sees every picture)."""
     from .prompt_writer import PromptWriterFailed, _image_block
     content = []
     for i, ((data, _), role) in enumerate(zip(images, roles), 1):
         content.append({"type": "text", "text": ROLE_INTRO[role].format(n=i)})
         content.append(_image_block(data))
-    content.append({"type": "text", "text": _user_text(description, [])})
+    content.append({"type": "text", "text": _user_text(description, facts, [])})
     try:
         out = writer._call(SYSTEM, content)
     except PromptWriterFailed as exc:
@@ -85,12 +111,14 @@ def write_with_claude(writer, images: list[tuple[bytes, str]], roles: list[str],
     return out | {"provider": "anthropic"}
 
 
-def write_with_cloudflare(vision, images: list[tuple[bytes, str]], roles: list[str], description: str) -> dict:
+def write_with_cloudflare(vision, images: list[tuple[bytes, str]], roles: list[str], description: str, facts: str) -> dict:
     """vision: vision.CloudflareVision. The free model sees the main picture; references are described in words."""
-    data, _ = images[0]
-    img = load_image(data, "image")
+    from PIL import Image
+    import io
+    data, mime = images[0]
+    img = Image.open(io.BytesIO(data)) if mime != "application/pdf" else load_image(data, "pdf")
     url = "data:image/png;base64," + base64.b64encode(image_png(img, max_side=1024)).decode()
-    text = _user_text(description, roles[:1])
+    text = _user_text(description, facts, roles[:1])
     if len(roles) > 1:
         text += f"\nThe architect also gave {len(roles) - 1} reference picture(s) for the scene; ask for a refined, realistic setting that suits the design."
     messages = [{"role": "system", "content": SYSTEM},

@@ -65,11 +65,13 @@ def test_read_my_plan_gives_an_editable_brief(studio, alice, repo):
     assert repo.usage[-1]["operation"] == "vision_read" and reader.calls
 
 
-def test_read_my_plan_refusals(studio, render_settings, repo, storage, alice, bob):
+def test_read_my_plan_refusals(studio, render_settings, repo, storage, alice, bob, sample_ifc_bytes):
     c, _, _ = studio
     pid = new_project(c, alice)
     f = upload(c, alice, pid, "plan.png", samples.png(400, 300))
     assert c.post(f"/api/projects/{pid}/plan/read", json={"source_file_id": f["id"]}, headers=bob["headers"]).status_code == 404
+    ifc = upload(c, alice, pid, "house.ifc", sample_ifc_bytes)
+    assert c.post(f"/api/projects/{pid}/plan/read", json={"source_file_id": ifc["id"]}, headers=alice["headers"]).json()["detail"]["code"] == "not_a_plan"
     off = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner(), vision=None))
     assert off.post(f"/api/projects/{pid}/plan/read", json={"source_file_id": f["id"]}, headers=alice["headers"]).status_code == 503
     broken = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner(), vision=FakeReader(fail=True)))
@@ -123,15 +125,26 @@ def test_a_model_view_keeps_the_shape_and_camera(studio, alice):
     assert "Aerial three-quarter view" not in p     # the model view decides the camera
 
 
+def test_a_pdf_plan_is_sent_as_an_image(studio, alice):
+    c, images, _ = studio
+    pid = new_project(c, alice)
+    pdf = upload(c, alice, pid, "A103.pdf", samples.pdf())
+    body = {"prompt": "Six storey block", "references": [{"file_id": pdf["id"], "role": "plan"}]}
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"]).status_code == 202
+    data, mime = images.calls[0]["images"][0]
+    assert mime == "image/png" and Image.open(io.BytesIO(data)).format == "PNG"
+
+
 @pytest.mark.parametrize("refs,code", [
     ([("plan", "plan.png"), ("plan", "plan2.png")], 422),            # one plan
     ([("base", "a.png"), ("model", "b.png")], 422),                  # keep a design or a model view, not both
     ([("style", "1.png"), ("style", "2.png"), ("style", "3.png"), ("style", "4.png")], 422),
+    ([("style", "doc.pdf")], 422),                                   # a PDF can only be the plan
 ])
 def test_reference_rules(studio, alice, refs, code):
     c, images, _ = studio
     pid = new_project(c, alice)
-    files = [upload(c, alice, pid, name, samples.png(8 + i, 8)) for i, (_, name) in enumerate(refs)]
+    files = [upload(c, alice, pid, name, samples.pdf() if name.endswith(".pdf") else samples.png(8 + i, 8)) for i, (_, name) in enumerate(refs)]
     body = {"prompt": "A house", "references": [{"file_id": f["id"], "role": role} for f, (role, _) in zip(files, refs)]}
     assert c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"]).status_code == code
     assert images.calls == []

@@ -45,6 +45,13 @@ export const api = {
   deleteRender: renderId => request("DELETE", `/renders/${renderId}`),
   deleteVideo: videoId => request("DELETE", `/videos/${videoId}`),
   makeClip: (projectId, body) => request("POST", `/projects/${projectId}/cinematic`, body),
+  // the architect's model
+  revitToIfc: (projectId, fileId) => request("POST", `/projects/${projectId}/revit-to-ifc`, { source_file_id: fileId }),
+  importIfc: (projectId, fileId, key) => request("POST", `/projects/${projectId}/import-ifc`, { source_file_id: fileId }, true, { "Idempotency-Key": key }),
+  models: projectId => request("GET", `/projects/${projectId}/models`),
+  // AI walkthroughs: Claude plans the shots; the options for filming them
+  planFilm: (projectId, body) => request("POST", `/projects/${projectId}/film-plan`, body),
+  filmEngines: () => request("GET", "/film/engines"),
 };
 
 export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -92,4 +99,40 @@ export async function uploadAnimation(projectId, blob, meta, onProgress) {
     form.append("meta", JSON.stringify(meta));
     xhr.send(form);
   });
+}
+
+/** Posts a form (a file and its settings) with upload progress. */
+async function postForm(path, form, onProgress, failed) {
+  const token = await accessToken();
+  if (!token) throw new ApiError(401, "Sign in to continue.");
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${base()}${path}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onerror = () => reject(new ApiError(0, `${failed}: the connection was interrupted. Try again.`));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new ApiError(xhr.status, data.detail || `${failed}.`));
+    };
+    xhr.send(form);
+  });
+}
+
+/** Saves a model this browser read from an IFC: the 3D file plus its report and parts. */
+export function saveBrowserModel(projectId, glb, meta, onProgress) {
+  const form = new FormData();
+  form.append("file", new Blob([glb], { type: "model/gltf-binary" }), "model.glb");
+  form.append("meta", JSON.stringify(meta));
+  return postForm(`/projects/${projectId}/models/from-browser`, form, onProgress, "The 3D model could not be saved");
+}
+
+/** Sends the exact guide video of one walkthrough shot with its settings; resolves with the job. */
+export function sendShot(projectId, blob, meta, onProgress) {
+  const form = new FormData();
+  form.append("file", blob, "guide.mp4");
+  form.append("meta", JSON.stringify(meta));
+  return postForm(`/projects/${projectId}/films`, form, onProgress, "The shot could not be sent");
 }

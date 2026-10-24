@@ -21,4 +21,11 @@ VIDEO_ENGINES = {
     "vs": {"name": "Ollic VS", "blurb": "Start and end frame clips, 4 to 15 s, with natural sound. Higher cost.",
            "price": "about $0.30 a second (720p), $0.68 (1080p)"},
 }
+# AI walkthroughs from the architect's model: an exact guide video becomes a photoreal shot
+FILM_ENGINES = {
+    "path": {"name": "Ollic Path", "blurb": "Follows your camera move and your building closely; best for walkthroughs and fly-arounds, up to 10 s a shot.",
+             "price": "about $0.28 a second"},
+    "path_plus": {"name": "Ollic Path Plus", "blurb": "Richer light and life (people, cars); slightly freer with fine detail. Up to 10 s a shot.",
+                  "price": "about $0.17 a second"},
+}
 PAID_TIERS = {"premium", "swift", "ultra", "studio", "vs"}

@@ -6,8 +6,11 @@ still applies to every database and storage call the job makes.
 
 from __future__ import annotations
 
+import io
 import logging
 import uuid
+
+from PIL import Image
 
 from .auth import CurrentUser
 from .imaging import CONCEPT_LABEL, BadImage, open_image, stamp_label, to_jpeg
@@ -65,6 +68,8 @@ def build_prompt(opts: dict, *, with_reference: bool = False, roles: list[str] |
         parts.append(f"The ground floor is a {opts['ground_floor']}.")
     if opts.get("style"):
         parts.append(f"Style: {STYLES.get(opts['style'], opts['style'])}.")
+    if opts.get("shot_name"):
+        parts.append(f"This shot is: {opts['shot_name'].strip()}. Render it as a finished, furnished, lived-in space or view, true to the model.")
     parts.append(f"Architect's brief: {opts['prompt'].strip()}")
     if opts.get("materials"):
         parts.append(f"Materials and colours: {opts['materials'].strip()}.")
@@ -109,7 +114,10 @@ def _premium_prompt(state, user, job, tier, ask):
 
 
 def _as_image(data: bytes, kind: str) -> tuple[bytes, str]:
-    """Reference images go to the model as they are (PNG or JPEG)."""
+    """Reference images go to the model as PNG or JPEG; a PDF drawing is sent as its first page."""
+    if kind == "pdf":
+        from .vision import image_png, load_image
+        return image_png(load_image(data, "pdf"), max_side=2000), "image/png"
     return data, REF_MIME[kind]
 
 
@@ -157,7 +165,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             images, roles = [], []
             for r in refs:
                 src = repo.get_source_file(user, r["file_id"])
-                if not src or src.get("project_id") != job["project_id"] or src.get("detected_type") not in ("png", "jpeg"):
+                if not src or src.get("project_id") != job["project_id"] or src.get("detected_type") not in ("png", "jpeg", "pdf"):
                     return fail("One of the reference images is no longer available. Choose it again.")
                 images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"]))
                 roles.append(r["role"])
@@ -166,7 +174,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 prompt = inp["prompt"].strip() + "\n" + SAFE_TAIL
             writer_note = None if inp.get("prompt_ready") else _premium_prompt(state, user, job, tier, lambda w: w.write(
                 brief=inp["prompt"], images=images, roles=roles,
-                choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect")}))
+                choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect", "shot_name")}))
             if writer_note:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
             model = settings.model_for(tier, "create")
@@ -203,6 +211,23 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
     # The call has been made and paid for: record its cost before anything else can fail.
     usage_recorded = record_usage(repo, user, job, model, operation, result)
 
+    # Made from the architect's model: check the geometry against the model's own line drawing, and
+    # when it drifted, make it once more with the geometry rule first and keep the better one.
+    check = None
+    if job["type"] == "concept_render" and inp.get("guide_file_id"):
+        check = geometry_check(state, user, job, inp, result, images, roles)
+        if check and check["band"] == "poor":
+            try:
+                repo.update_job(user, job_id, {"stage": "The first try drifted from the model; rendering again"})
+                again = client.edit(model=model, prompt=GEOMETRY_FIRST + prompt, images=images, size=size, quality=quality, user_id=user.id)
+                record_usage(repo, user, job, model, operation, again)
+                check2 = geometry_check(state, user, job, inp, again, images, roles)
+                if check2 and check2["score"] > check["score"]:
+                    result, check, prompt = again, check2, GEOMETRY_FIRST + prompt
+                check["retried"] = True
+            except (ProviderError, BackendUnavailable):
+                check["retried"] = False
+
     try:
         current = repo.get_job(user, job_id)
         if current and current["status"] == "cancelled":
@@ -218,8 +243,10 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         storage.upload(user, shown_path, shown_jpg, "image/jpeg", bucket=settings.renders_bucket)
         options = {"size": size, "quality": quality, "operation": operation, "tier": tier, "final_prompt": prompt[:8000],
                    "prompt_notes": (writer_note or {}).get("notes"), "premium_prompting": bool(writer_note)}
+        if check:
+            options["check"] = check
         if job["type"] == "concept_render":
-            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "anim_hero", "anim_line", "prompt_ready")})
+            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line", "prompt_ready", "guide_file_id", "film_shot")})
         elif inp.get("anim_line"):
             options["anim_line"] = inp["anim_line"]
         try:
@@ -242,6 +269,42 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
     except Exception:
         log.exception("unexpected error saving job %s", job_id)
         fail("Something went wrong while saving the render. Try again.")
+
+
+GEOMETRY_FIRST = ("Most important: Image 1 is an exact view of the architect's model. Keep its geometry exactly: the same number of floors, "
+                  "every window and door opening in the same place, the same roof line, balconies, columns, setbacks and camera. "
+                  "Do not add, remove or move any part of the building.\n")
+
+
+def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, images, roles) -> dict | None:
+    """How well the result kept the model's geometry (see geometry.py); Claude's view too when connected."""
+    from .geometry import band, claude_check, jpeg as gjpeg, match
+    repo, storage = state.repo, state.storage
+    try:
+        g = repo.get_source_file(user, inp["guide_file_id"])
+        if not g or g.get("project_id") != job["project_id"]:
+            return None
+        guide = Image.open(io.BytesIO(storage.download(user, g["storage_path"])))
+        out = Image.open(io.BytesIO(result.data))
+        score = match(guide, out, guide_is_lines=True)
+        check = {"score": score, "band": band(score)}
+        writer = getattr(state, "prompt_writer", None)
+        if writer is not None and "model" in roles:
+            seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out))
+            if seen:
+                check["claude"] = {"ok": seen["ok"], "issues": seen["issues"]}
+                if not seen["ok"] and check["band"] == "good":
+                    check["band"] = "fair"
+                try:
+                    repo.create_usage_event(user, {"project_id": job["project_id"], "job_id": job["id"], "provider": "anthropic", "model": getattr(writer, "model", "claude"),
+                                                   "operation": "geometry_check", "cost_usd": seen.get("cost_usd"), "price_source": "platform.claude.com price list",
+                                                   "raw_usage": seen.get("usage")})
+                except BackendUnavailable:
+                    pass
+        return check
+    except Exception:
+        log.exception("geometry check failed for job %s", job["id"])
+        return None
 
 
 def record_usage(repo, user: CurrentUser, job: dict, model: str, operation: str, result) -> bool:

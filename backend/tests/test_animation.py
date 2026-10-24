@@ -37,11 +37,11 @@ def test_settings_are_tidied_and_brought_into_range():
         Script.model_validate({"format": "4:3"})
 
 
-def test_model_and_schedule_endpoints_are_gone(anim, alice):
+def test_old_model_animation_endpoints_are_gone(anim, alice):
     c, _, _ = anim
     pid = new_project(c, alice)
     for method, path in (("get", "/api/animation/defaults"), ("post", f"/api/projects/{pid}/animation/direct"), ("post", f"/api/projects/{pid}/schedule/read"),
-                         ("post", f"/api/projects/{pid}/import-ifc"), ("get", f"/api/projects/{pid}/models"), ("get", f"/api/projects/{pid}/shots")):
+                         ("get", f"/api/projects/{pid}/shots")):
         assert getattr(c, method)(path, headers=alice["headers"]).status_code in (404, 405), path
 
 

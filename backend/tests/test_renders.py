@@ -119,12 +119,9 @@ def test_the_openai_key_never_reaches_the_browser(rclient):
     assert "not-a-real" not in repr(rclient.app.state.settings)
 
 
-def test_older_pdf_and_ifc_files_cannot_be_used_as_a_reference(rclient, alice, project, repo, fake_images):
-    import uuid
-    user = rclient.app.state.verifier.verify(alice["headers"]["Authorization"].split()[1])
-    for name, kind in (("plan.pdf", "pdf"), ("house.ifc", "ifc")):   # uploaded before Ollic became images-only
-        f = repo.create_source_file(user, {"id": str(uuid.uuid4()), "project_id": project["id"], "original_name": name, "storage_path": f"{alice['id']}/{project['id']}/{name}",
-                                           "detected_type": kind, "size_bytes": 10, "checksum_sha256": "0" * 64, "validation": {"status": "valid", "details": {}}, "processing_status": "uploaded"})
+def test_pdf_and_ifc_cannot_be_used_as_a_reference(rclient, alice, project, fake_images):
+    for name, data in (("plan.pdf", samples.pdf()), ("house.ifc", samples.ifc())):
+        f = upload(rclient, alice, project, name, data)
         r = render(rclient, alice, project, reference_file_id=f["id"])
         assert r.status_code == 422 and r.json()["detail"]["code"] == "unsupported_reference"
     assert fake_images.calls == []

@@ -87,6 +87,28 @@ class ClaudePromptWriter:
                    {"type": "text", "text": f"The architect asks: {instruction}"}]
         return self._call(EDIT_SYSTEM, content)
 
+    def ask_json(self, system: str, content: list, max_tokens: int = 1800) -> dict:
+        """Any question whose answer is one JSON object: returns {"answer": dict, "usage", "cost_usd", "model"}."""
+        body = {"model": self.model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": content}]}
+        try:
+            res = self._http.post("/v1/messages", json=body, headers=self._headers)
+        except httpx.HTTPError as exc:
+            raise PromptWriterFailed(f"could not reach Claude: {exc.__class__.__name__}") from exc
+        if res.status_code >= 400:
+            log.warning("Claude error %s", res.status_code)
+            raise PromptWriterFailed(f"Claude error {res.status_code}")
+        payload = res.json()
+        text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
+        m = re.search(r"\{.*\}", text, re.S)
+        try:
+            out = json.loads(m.group(0)) if m else None
+        except ValueError:
+            out = None
+        if not isinstance(out, dict):
+            raise PromptWriterFailed("Claude returned no JSON")
+        usage = payload.get("usage")
+        return {"answer": out, "usage": usage, "cost_usd": cost_usd(self.model, usage), "model": self.model}
+
     def _call(self, system: str, content: list) -> dict:
         body = {"model": self.model, "max_tokens": 1800, "system": system, "messages": [{"role": "user", "content": content}]}
         try:

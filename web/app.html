@@ -8,6 +8,7 @@
 <meta name="theme-color" content="#070707">
 <link rel="stylesheet" href="assets/styles.css">
 <script src="assets/config.js"></script>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/"}}</script>
 </head>
 <body>
 <div class="blueprint" aria-hidden="true"></div>
@@ -101,9 +102,9 @@
         <div>
         <div class="drop" id="dropZone">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
-          <h3>Add images</h3>
-          <p class="muted">PNG or JPEG: a sketch, a 3D view, a render, a photo or a floor plan picture.</p>
-          <label class="btn primary" style="cursor:pointer">Choose images<input type="file" id="fileInput" accept=".png,.jpg,.jpeg" multiple hidden></label>
+          <h3>Add your files</h3>
+          <p class="muted">Your model as a Revit .rvt file or IFC (from Revit or ArchiCAD), or images: PNG or JPEG sketches, 3D views and photos, and PDF drawings.</p>
+          <label class="btn primary" style="cursor:pointer">Choose files<input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.pdf,.ifc,.rvt" multiple hidden></label>
           <p class="hint">or drop them here</p>
         </div>
         <div class="uploads" id="uploads" aria-live="polite"></div>
@@ -120,6 +121,89 @@
       </div>
     </section>
 
+    <section class="model" id="modelSection" aria-labelledby="modelTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">Your model</span><h2 id="modelTitle" class="studio-title">Frame the view</h2>
+          <p class="muted">Move around your model, outside, inside or on foot. The AI renders on top of an exact view of it, so the building stays yours.</p></div>
+      </div>
+      <div class="model-local" id="modelLocal" aria-live="polite"></div>
+      <div class="jobs" id="modelJobs" aria-live="polite"></div>
+      <div id="viewerWrap" hidden>
+        <div class="viewer-bar" role="toolbar" aria-label="3D view">
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" class="seg-btn" id="viewOutside" aria-pressed="true">Outside</button>
+            <button type="button" class="seg-btn" id="viewInside" aria-pressed="false">Inside</button>
+            <button type="button" class="seg-btn" id="viewWalk" aria-pressed="false">Walk</button>
+          </div>
+          <label class="storey-pick" id="storeyPick" hidden><span>Floor</span><select id="storeySelect"></select></label>
+          <label class="storey-pick" id="viewPickWrap"><span>View</span><select id="viewPick" aria-label="Quick view">
+            <option value="">Choose…</option><option value="corner">Corner (3D)</option><option value="front">Front</option><option value="back">Back</option>
+            <option value="left">Left</option><option value="right">Right</option><option value="top">Top (plan)</option></select></label>
+          <button type="button" class="btn" id="viewReset">Reset view</button>
+          <button type="button" class="btn primary" id="useView">Capture view</button>
+          <button type="button" class="btn primary" id="addShotView">Add a shot from this view</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn model-badge" id="modelBadge" aria-expanded="false" aria-controls="modelDetails" hidden></button>
+        </div>
+        <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
+        <div class="walk-panel" id="walkPanel" hidden>
+          <div class="room-list" id="roomList" role="group" aria-label="Rooms"></div>
+          <div class="walk-pad" role="group" aria-label="Move">
+            <button type="button" class="btn" data-hold="0,1" aria-label="Turn left">&#8630;</button>
+            <button type="button" class="btn" data-hold="1,0" aria-label="Walk forward">&#9650;</button>
+            <button type="button" class="btn" data-hold="-1,0" aria-label="Walk back">&#9660;</button>
+            <button type="button" class="btn" data-hold="0,-1" aria-label="Turn right">&#8631;</button>
+            <button type="button" class="btn" data-hold="0,0,1" aria-label="Rise">&#8679;</button>
+            <button type="button" class="btn" data-hold="0,0,-1" aria-label="Lower">&#8681;</button>
+          </div>
+          <div class="walk-floors" role="group" aria-label="Floors">
+            <button type="button" class="btn sm" id="floorUp">Floor up</button>
+            <button type="button" class="btn sm" id="floorDown">Floor down</button>
+            <span class="hint walk-keys">W A S D or arrows to walk, drag to look, Q / E down and up, Shift to go faster, double-click a floor to step there.</span>
+          </div>
+        </div>
+        <div class="card model-details" id="modelDetails" hidden>
+          <div id="reportCard"></div>
+          <div class="row"><a class="btn" id="dlGlb" download>Download 3D (GLB)</a><a class="btn" id="dlIfc" hidden>Download IFC</a></div>
+        </div>
+      </div>
+      <div class="empty" id="modelEmpty" hidden>Your model is being read into 3D. Small models take under a minute; large ones a few minutes.</div>
+    </section>
+    <section class="film" id="filmSection" aria-labelledby="filmTitle">
+      <div class="studio-head">
+        <div><span class="eyebrow">AI walkthrough</span><h2 id="filmTitle" class="studio-title">Film your model</h2>
+          <p class="muted">Let Claude plan the shots, or frame them yourself in the model. Ollic records each camera move exactly from your model, the AI films it photoreal, and every shot is checked against the model.</p></div>
+      </div>
+      <div class="card film-card">
+        <div class="tier-slot" id="tierSlotFilm"></div>
+        <div class="film-grid">
+          <label class="field">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
+          <label class="field">Format <select id="filmFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
+        </div>
+        <label class="field">Describe the look <span class="hint">Materials, light, time of day, setting. Claude uses it for every shot.</span>
+          <textarea id="filmDesc" rows="2" maxlength="1500" placeholder="e.g. White render and bronze glass, warm evening light, palm trees, interlocking paving"></textarea></label>
+        <label class="check"><input type="checkbox" id="filmLife"> Add life: people walking and cars passing</label>
+        <div class="rwrite"><button type="button" class="btn" id="planBtn">Plan the shots with Claude</button><span class="hint" id="planNoteFilm">Or frame a view in the model and add shots yourself.</span></div>
+        <div class="shot-add">
+          <label class="storey-pick"><span>Add</span><select id="shotKind" aria-label="Camera move">
+            <option value="approach">Approach from the street</option><option value="orbit">Orbit around the building</option><option value="aerial">Aerial over the site</option>
+            <option value="rise">Rise up the facade</option><option value="push">Slow move in on this view</option></select></label>
+          <label class="storey-pick"><span>Length</span><select id="shotSecs" aria-label="Shot length"><option value="5">5 s</option><option value="8" selected>8 s</option><option value="10">10 s</option></select></label>
+          <button type="button" class="btn" id="addShot">Add shot</button>
+        </div>
+        <ol class="film-shots" id="filmShots"></ol>
+        <div class="render-go">
+          <button type="button" class="btn primary big" id="filmGo" disabled>Film the shots</button>
+          <span class="hint" id="filmEst">Add a shot first.</span>
+        </div>
+        <div class="export-progress" id="filmProgress" hidden>
+          <div class="progress"><i id="filmBar"></i></div><span class="hint" id="filmProgText"></span>
+        </div>
+        <div id="filmMsg" class="notice" role="status" hidden></div>
+        <div class="jobs" id="filmJobs" aria-live="polite"></div>
+        <div class="video-list" id="filmVideos"></div>
+      </div>
+    </section>
     <section class="img-anim" id="imgAnimSection" aria-labelledby="iaTitle">
       <div class="studio-head">
         <div><span class="eyebrow">Construction animation</span><h2 id="iaTitle" class="studio-title">From a 3D image</h2>
@@ -178,8 +262,8 @@
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
         </fieldset></div>
         <div class="span2 rbox">
-          <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Upload a sketch, 3D image, photo or plan picture.</span>
-            <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg" hidden></label></div>
+          <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Capture a view of your model, or upload a sketch, 3D image, photo or plan.</span>
+            <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg,.pdf" hidden></label></div>
           <div class="rpics" id="rPics" role="radiogroup" aria-label="Picture to render"></div>
         </div>
         <div class="span2 rbox">
@@ -191,7 +275,7 @@
           <textarea id="rDesc" rows="2" maxlength="1500" placeholder="e.g. Luxury office complex in a well landscaped environment, bronze glass, white stone, evening light"></textarea></label>
         <div class="span2 rwrite">
           <button type="button" class="btn" id="writePromptBtn">Read image and write prompt</button>
-          <span class="hint" id="planNote">The AI studies the picture and the references, and writes the rendering prompt.</span>
+          <span class="hint" id="planNote">The AI studies the picture, your model and the references, and writes the rendering prompt.</span>
         </div>
         <label class="field span2">Rendering prompt <span class="hint">Written by the AI. Edit it if you like.</span>
           <textarea id="rPrompt" rows="7" maxlength="6000" required placeholder="Press “Read image and write prompt”, or write your own."></textarea></label>

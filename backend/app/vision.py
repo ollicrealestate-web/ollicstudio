@@ -37,12 +37,21 @@ class VisionUnavailable(Exception):
 
 
 def load_image(data: bytes, kind: str) -> Image.Image:
-    """A PNG or JPEG as an RGB image (transparent parts on white)."""
-    img = Image.open(io.BytesIO(data))
-    img.load()
-    if img.mode in ("RGBA", "LA", "P"):
-        bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-        img = Image.alpha_composite(bg, img.convert("RGBA"))
+    """PNG, JPEG or the first page of a PDF, as an RGB image."""
+    if kind == "pdf":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(data)
+        if len(pdf) == 0:
+            raise VisionUnavailable("the PDF has no pages")
+        page = pdf[0]
+        w, h = page.get_size()
+        img = page.render(scale=min(4.0, 2000 / max(w, h)), fill_color=(255, 255, 255, 255)).to_pil()
+    else:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            img = Image.alpha_composite(bg, img.convert("RGBA"))
     return img.convert("RGB")
 
 
