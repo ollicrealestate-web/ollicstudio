@@ -287,4 +287,4 @@ def test_claude_answers_through_a_tool_so_the_json_is_clean():
     w = ClaudePromptWriter("k", client=httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)))
     out = w.ask_json("system", [{"type": "text", "text": "q"}])
     assert out["answer"] == {"ok": False, "issues": ["make the bays glass"]}
-    assert sent[0]["tool_choice"] == {"type": "tool", "name": "answer"} and sent[0]["tools"][0]["name"] == "answer"
+    assert sent[0]["tools"][0]["name"] == "answer" and sent[0]["tool_choice"] == {"type": "auto"} and sent[0]["max_tokens"] >= 6000
