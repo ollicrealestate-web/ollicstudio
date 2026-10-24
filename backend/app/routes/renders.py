@@ -240,7 +240,7 @@ def start_concept_render(project_id: uuid.UUID, body: ConceptRenderIn, request: 
             g = _repo(request).get_source_file(user, str(gid))
             if not g or g.get("owner_id") != user.id or g.get("project_id") != str(project_id) or g.get("detected_type") not in ("png", "jpeg"):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "The model guide is not in this project.")
-    if body.tier == "exact" and not (body.depth_file_id and any(r.role == "model" for r in refs)):
+    if body.tier == "exact" and not ((body.depth_file_id or body.guide_file_id) and any(r.role == "model" for r in refs)):
         raise HTTPException(422, {"code": "exact_needs_model", "reason": "Ollic Exact renders from your model. Open your model, frame the view and press Capture view."})
     job_input = body.model_dump(mode="json")
     job_input["references"] = [{"file_id": str(r.file_id), "role": r.role} for r in refs]

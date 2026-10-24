@@ -50,6 +50,7 @@ class Settings:
     # largest IFC the server reads; reading takes about 17x the file size in memory, so 12 MB suits
     # a 512 MB server; set IFC_MAX_MB=80 on a 2 GB one
     ifc_max_mb: int = 12
+    exact_guide: str = "lines"     # what Ollic Exact draws on: "lines" (floors and openings) or "depth"
     aps_client_id: str = ""         # Autodesk Platform Services app: reads Revit files
     aps_client_secret: str = field(default="", repr=False)
     # Google Gemini API (direct): Nano Banana images, used for animation line drawings
@@ -128,6 +129,7 @@ class Settings:
             kling_model=os.environ.get("KLING_MODEL", "").strip() or "kling-3.0",
             daily_clips_per_user=_int("DAILY_CLIPS_PER_USER", 5),
             ifc_max_mb=_int("IFC_MAX_MB", 12),
+            exact_guide=(os.environ.get("EXACT_GUIDE", "").strip().lower() or "lines") if os.environ.get("EXACT_GUIDE", "").strip().lower() in ("", "lines", "depth") else "lines",
             aps_client_id=os.environ.get("APS_CLIENT_ID", "").strip(),
             aps_client_secret=os.environ.get("APS_CLIENT_SECRET", "").strip(),
             gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip() or None,

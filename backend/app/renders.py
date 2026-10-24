@@ -184,10 +184,12 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 if block:
                     prompt = (prompt[: -len(SAFE_TAIL)].rstrip() if prompt.endswith(SAFE_TAIL) else prompt) + "\n" + block + "\n" + SAFE_TAIL
                 send = images
-                if tier == "exact":   # Ollic Exact draws on the model's depth map from the same camera
-                    d = repo.get_source_file(user, inp.get("depth_file_id") or "")
+                if tier == "exact":   # Ollic Exact draws on the model's line drawing (or depth map) from the same camera
+                    guide_kind = getattr(client, "guide", "depth")
+                    gid = inp.get("guide_file_id") if guide_kind == "lines" else inp.get("depth_file_id")
+                    d = repo.get_source_file(user, gid or "")
                     if not d or d.get("project_id") != job["project_id"]:
-                        return fail("The depth view of your model is missing. Capture the view again.")
+                        return fail("The guide of your model is missing. Capture the view again.")
                     send = [(storage.download(user, d["storage_path"]), "image/png")]
             model = settings.model_for(tier, "create")
             if images:

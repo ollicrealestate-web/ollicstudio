@@ -76,6 +76,8 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     fal = fal or {}
     app.state.image_clients.setdefault("vs", fal.get("images"))
     app.state.image_clients.setdefault("exact", fal.get("exact"))
+    if fal.get("exact") is not None and hasattr(fal["exact"], "guide"):
+        fal["exact"].guide = settings.exact_guide
     # video options by id; an option with no client is listed as not connected
     app.state.video_clients = {"motion": kling, "vs": fal.get("video")}
 

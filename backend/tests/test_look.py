@@ -111,15 +111,16 @@ def test_a_model_render_uses_the_approved_materials_and_hero(look_app, alice, bo
 
 
 def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
-    exact = FakeImages()
+    exact = FakeImages(); exact.guide = "lines"
     c, images = look_app(exact=exact, writer=FakeChecker())        # Claude finds a floor missing in the Exact picture
     repo.roles[alice["id"]] = "admin"
     pid = new_project(c, alice)
     view, lines, depth, mats = captured(c, alice, pid)
     c.post(f"/api/projects/{pid}/look/materials", json={"groups": GROUPS}, headers=alice["headers"])
-    base = {"prompt": "photoreal render", "prompt_ready": True, "tier": "exact", "references": [{"file_id": view["id"], "role": "model"}], "guide_file_id": lines["id"]}
+    base = {"prompt": "photoreal render", "prompt_ready": True, "tier": "exact", "references": [{"file_id": view["id"], "role": "model"}]}
     r = c.post(f"/api/projects/{pid}/architectural-render", json=base, headers=alice["headers"])
-    assert r.status_code == 422 and r.json()["detail"]["code"] == "exact_needs_model"
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "exact_needs_model"      # no guide from the model
+    base["guide_file_id"] = lines["id"]
     r = c.post(f"/api/projects/{pid}/architectural-render", json=base | {"depth_file_id": depth["id"], "material_file_id": mats["id"]}, headers=alice["headers"])
     assert repo.jobs[r.json()["id"]]["status"] == "succeeded", repo.jobs[r.json()["id"]]["error"]
     call = exact.calls[0]
@@ -129,7 +130,8 @@ def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
     assert len(fix["images"]) == 3 and fix["images"][1][1] == "image/jpeg" and fix["images"][2][1] == "image/png"
     assert "Correct only these differences" in fix["prompt"] and "Image 3 is the MATERIAL MAP" in fix["prompt"]
     assert "- the model has 7 floors above the ground floor; the result shows 6: add the missing floor" in fix["prompt"]
-    assert len(call["images"]) == 1 and call["images"][0][1] == "image/png" and call["model"] == "fal-ai/flux-control-lora-depth"
+    assert len(call["images"]) == 1 and call["images"][0][1] == "image/png" and call["model"] == "fal-ai/flux-control-lora-canny"
+    assert call["images"][0][0] == png(picture("#000000", "#ffffff"))         # the model's line drawing is the guide
     assert "Use exactly these approved materials" in call["prompt"] and "MATERIAL MAP" not in call["prompt"]
     (img,) = repo.images.values()
     assert img["options"]["tier"] == "exact" and "check" in img["options"]
@@ -288,3 +290,27 @@ def test_claude_answers_through_a_tool_so_the_json_is_clean():
     out = w.ask_json("system", [{"type": "text", "text": "q"}])
     assert out["answer"] == {"ok": False, "issues": ["make the bays glass"]}
     assert sent[0]["tools"][0]["name"] == "answer" and sent[0]["tool_choice"] == {"type": "auto"} and sent[0]["max_tokens"] >= 6000
+
+
+def test_the_exact_engine_sends_the_line_drawing_to_the_line_guided_model():
+    import httpx
+    from app.fal import FalExact
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        if req.method == "POST":
+            return httpx.Response(200, json={"request_id": "r1", "status_url": "https://queue.fal.run/fal-ai/flux-control-lora-canny/requests/r1/status",
+                                             "response_url": "https://queue.fal.run/fal-ai/flux-control-lora-canny/requests/r1"})
+        if req.url.path.endswith("/status"):
+            return httpx.Response(200, json={"status": "COMPLETED"})
+        return httpx.Response(200, json={"images": [{"url": "data:image/jpeg;base64," + __import__("base64").b64encode(jpg(picture("#ffffff", "#cccccc"))).decode()}]})
+    ex = FalExact("k", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    ex.poll_seconds = 0
+    out = ex.edit(model="m", prompt="photoreal", images=[(png(picture("#000000", "#ffffff")), "image/png")], size="1536x1024")
+    body = json.loads(seen[0].content)
+    assert seen[0].url.path == "/fal-ai/flux-control-lora-canny" and body["control_lora_image_url"].startswith("data:image/")
+    assert body["image_size"] == {"width": 1536, "height": 1024} and "preprocess_depth" not in body and out.model == "fal-ai/flux-control-lora-canny"
+    ex.guide = "depth"; seen.clear()
+    ex.edit(model="m", prompt="p", images=[(png(picture("#000000", "#ffffff")), "image/png")])
+    assert seen[0].url.path == "/fal-ai/flux-control-lora-depth" and json.loads(seen[0].content)["preprocess_depth"] is False

@@ -41,6 +41,9 @@ IMAGE_PRICE = Decimal("0.04")
 # prompt, control_lora_image_url, control_lora_strength, preprocess_depth, image_size {width, height},
 # num_inference_steps, guidance_scale, output_format. No list price was found: about $0.04 is an estimate.
 EXACT_MODEL = "fal-ai/flux-control-lora-depth"
+# Guided by the model's line drawing (white lines on black, like a Canny edge map): every floor edge, opening and
+# balcony is in the guide, which a depth map of a flat facade does not carry. Same input shape as the depth model.
+EXACT_LINES_MODEL = "fal-ai/flux-control-lora-canny"
 EXACT_SIZES = {"1536x1024": (1536, 1024), "1024x1536": (1024, 1536), "1024x1024": (1024, 1024)}
 VIDEO_MODEL = "bytedance/seedance-2.0/image-to-video"
 VIDEO_PRICES = {"720p": Decimal("0.3034"), "1080p": Decimal("0.682")}
@@ -173,8 +176,10 @@ class FalImages(_Fal):
 
 
 class FalExact(FalImages):
-    """Ollic Exact: the first picture given must be the model's depth map (white near, black far), drawn
-    from the same camera; the picture is generated on that exact depth, so the geometry and the camera
+    guide = "lines"     # "lines" (the model's line drawing) or "depth" (the model's depth map)
+
+    """Ollic Exact: the first picture given is the model's guide from the same camera: its line drawing
+    (guide "lines", white on black) or its depth map (guide "depth", white near, black far); the picture is generated on that exact depth, so the geometry and the camera
     come from the model and the AI only adds materials, light and setting."""
 
     def edit(self, *, model: str, prompt: str, images: list[tuple[bytes, str]], size: str = "1536x1024", quality: str | None = None, user_id: str | None = None) -> ImageResult:
@@ -182,11 +187,14 @@ class FalExact(FalImages):
             raise ProviderError("Ollic Exact needs a view of your model. Capture the view again.")
         w, h = EXACT_SIZES.get(size, (1536, 1024))
         depth = data_uri(images[0][0], images[0][1], max(w, h))
-        body = {"prompt": prompt[:4000], "control_lora_image_url": depth, "preprocess_depth": False, "control_lora_strength": 1.0,
+        body = {"prompt": prompt[:4000], "control_lora_image_url": depth, "control_lora_strength": 1.0,
                 "image_size": {"width": w, "height": h}, "num_inference_steps": 28, "guidance_scale": 3.5, "num_images": 1,
                 "output_format": "jpeg", "enable_safety_checker": True}
-        out = self._image(EXACT_MODEL, body)
-        out.model = EXACT_MODEL
+        endpoint = EXACT_LINES_MODEL if self.guide == "lines" else EXACT_MODEL
+        if endpoint == EXACT_MODEL:
+            body["preprocess_depth"] = False
+        out = self._image(endpoint, body)
+        out.model = endpoint
         return out
 
     def generate(self, *, model: str, prompt: str, size: str = "1536x1024", quality: str | None = None, user_id: str | None = None) -> ImageResult:
