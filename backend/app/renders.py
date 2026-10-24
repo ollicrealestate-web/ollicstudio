@@ -212,7 +212,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             result = client.edit(model=model, prompt=prompt, images=[(base, "image/jpeg")], size=size, quality=quality, user_id=user.id)
             source_file_id = parent.get("source_file_id")
     except ProviderError as exc:
-        return fail(exc.message)
+        return fail(exc.message + _owner_note(repo, user, exc))
     except BackendUnavailable:
         log.exception("storage or database failed before the model call in job %s", job_id)
         return fail("Could not read the image to work from. Try again in a moment.")
@@ -289,6 +289,18 @@ from .geometry import GOOD as GOOD_MATCH  # noqa: E402
 
 MATERIALS_FIRST = ("Most important: use exactly the approved materials and colours listed below, in exactly the places the material map "
                    "shows, and keep the building's geometry and camera exactly as in Image 1.\n")
+
+
+def _owner_note(repo, user: CurrentUser, exc) -> str:
+    """For the owner's own accounts only: what the provider actually said, to fix the setup quickly."""
+    detail = getattr(exc, "owner_detail", None)
+    if not detail:
+        return ""
+    try:
+        role = (repo.get_profile(user) or {}).get("role")
+    except BackendUnavailable:
+        return ""
+    return f" [owner only: {detail}]" if role == "admin" else ""
 
 
 def needs_another(check: dict) -> bool:

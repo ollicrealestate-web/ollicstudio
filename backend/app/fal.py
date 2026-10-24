@@ -160,7 +160,7 @@ class FalImages(_Fal):
             else:
                 data = self.fetch(url, 50 * 1024 * 1024)
         except _Failed as exc:
-            raise ProviderError(_neutral(exc.status, "image"), status=exc.status) from exc
+            raise ProviderError(_neutral(exc.status, "image"), status=exc.status, owner_detail=f"http {exc.status}: {exc.detail}"[:400]) from exc
         except httpx.HTTPError as exc:
             raise ProviderError("Could not reach the image service. Try again in a moment.") from exc
         return ImageResult(data=data, output_format="jpeg", model=endpoint, usage={"images": 1}, request_id=sub.get("request_id"))

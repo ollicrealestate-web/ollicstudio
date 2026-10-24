@@ -556,11 +556,14 @@ export function createViewer(host, { onSelect } = {}) {
   // The material map: each material of the model (its class and the colour the architect gave it)
   // drawn in one flat, distinct colour, so the AI and the check know exactly where each material is.
   const MAP_COLOURS = ["#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#46f0f0", "#f032e6", "#bcf60c", "#fabebe",
-    "#008080", "#e6beff", "#9a6324", "#fffac8", "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075", "#808080", "#ff7f7f", "#7fbfff", "#bf7fff", "#7fff7f"];
+    "#008080", "#e6beff", "#9a6324", "#fffac8", "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075", "#556b2f", "#ff7f7f", "#7fbfff", "#bf7fff", "#7fff7f"];
   const mapMats = new Map();
+  // near-identical colours (Revit models carry many) count as one material: each channel to steps of 24
+  const q = hex => "#" + [1, 3, 5].map(i => Math.min(255, Math.round(parseInt(hex.slice(i, i + 2), 16) / 24) * 24).toString(16).padStart(2, "0")).join("");
   function materialKey(e) {
-    return `${e.userData.cls || "paint"}|${e.userData.srcHex || "#cccccc"}`;
+    return `${e.userData.cls || "paint"}|${q(e.userData.srcHex || "#cccccc")}`;
   }
+  const MAX_MATERIALS = 24;
   /** The model's materials, largest first: key, class, the model's colour and its map colour. */
   function materialGroups() {
     const area = new Map();
@@ -569,8 +572,10 @@ export function createViewer(host, { onSelect } = {}) {
       const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3();
       area.set(k, (area.get(k) || 0) + sz.x * sz.y + sz.y * sz.z + sz.x * sz.z);
     }
-    const keys = [...area.keys()].sort();      // the map colour depends only on the model, so it is the same in every view
-    const groups = keys.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i % MAP_COLOURS.length], area: area.get(k) }));
+    // the main materials by size get their own map colour (chosen in key order, so it is the same in every view);
+    // small ones are drawn grey and left out of the look
+    const main = [...area.keys()].sort((a, b) => area.get(b) - area.get(a)).slice(0, MAX_MATERIALS).sort();
+    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k) }));
     return groups.sort((a, b) => b.area - a.area);
   }
   function mapMatFor(colour) {

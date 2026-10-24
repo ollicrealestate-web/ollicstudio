@@ -23,9 +23,10 @@ SIZES = {"landscape": "1536x1024", "portrait": "1024x1536", "square": "1024x1024
 class ProviderError(Exception):
     """The image provider refused or failed the request. `message` is safe to show the user."""
 
-    def __init__(self, message: str, *, status: int | None = None, code: str | None = None, charged: bool = False):
+    def __init__(self, message: str, *, status: int | None = None, code: str | None = None, charged: bool = False, owner_detail: str | None = None):
         super().__init__(message)
         self.message = message
+        self.owner_detail = owner_detail      # the provider's own words: shown only to owner accounts
         self.status = status
         self.code = code
         self.charged = charged
