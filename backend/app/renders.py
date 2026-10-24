@@ -232,12 +232,25 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         if check and needs_another(check):
             try:
                 rule = fix_rule(check)
-                repo.update_job(user, job_id, {"stage": f"The first try did not match your model closely enough ({rule[0]}); rendering again"})
-                again = client.edit(model=model, prompt=rule[1] + prompt, images=send, size=size, quality=quality, user_id=user.id)
-                record_usage(repo, user, job, model, operation, again)
-                check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
-                if check2 and rank(check2) > rank(check):
-                    result, check, prompt = again, check2, rule[1] + prompt
+                finisher = state.image_clients.get("vs") if tier == "exact" else None
+                if finisher is not None:
+                    # Exact keeps the model's shape and camera; the finishing pass corrects only what was found, on that picture
+                    repo.update_job(user, job_id, {"stage": f"Correcting what did not match your model ({rule[0]})"})
+                    fprompt = finish_prompt(check, look_ctx)
+                    fimages = [(result.data, "image/jpeg"), images[roles.index("model")]] + ([(look_ctx["map"], "image/png")] if look_ctx and look_ctx.get("map") else [])
+                    fmodel = settings.model_for("vs", "revise")
+                    again = finisher.edit(model=fmodel, prompt=fprompt, images=fimages, size=size, quality=quality, user_id=user.id)
+                    record_usage(repo, user, job, fmodel, "image_edit", again)
+                    check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
+                    if check2 and rank(check2) >= rank(check):
+                        result, check = again, check2 | {"finished": True}
+                else:
+                    repo.update_job(user, job_id, {"stage": f"The first try did not match your model closely enough ({rule[0]}); rendering again"})
+                    again = client.edit(model=model, prompt=rule[1] + prompt, images=send, size=size, quality=quality, user_id=user.id)
+                    record_usage(repo, user, job, model, operation, again)
+                    check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
+                    if check2 and rank(check2) > rank(check):
+                        result, check, prompt = again, check2, rule[1] + prompt
                 check["retried"] = True
             except (ProviderError, BackendUnavailable):
                 check["retried"] = False
@@ -301,6 +314,24 @@ def _owner_note(repo, user: CurrentUser, exc) -> str:
     except BackendUnavailable:
         return ""
     return f" [owner only: {detail}]" if role == "admin" else ""
+
+
+def finish_prompt(check: dict, look_ctx: dict | None) -> str:
+    """The finishing pass: keep the photo, fix only what the check found."""
+    from .look import look_block
+    issues = [i for i in (check.get("claude") or {}).get("issues") or [] if i][:8]
+    off = [m for m in ((check.get("materials") or {}).get("materials") or []) if not m.get("ok")]
+    lines = ["Image 1 is a photorealistic architectural render. Keep Image 1 as it is: the same photograph, camera, framing, light, sky, "
+             "setting and the same building shape. Image 2 is the exact view of the architect's model from the same camera.",
+             "Correct only these differences from the architect's model, and change nothing else:"]
+    lines += [f"- {i}" for i in issues]
+    lines += [f"- {m['name']}: make it the approved material and colour (it looks {m['seen']} now)" for m in off]
+    if not issues and not off:
+        lines.append("- make every floor, opening, balcony and roof element match Image 2 exactly")
+    if look_ctx and look_ctx.get("map"):
+        lines.append(look_block(look_ctx["look"], 3, None))
+    lines.append(SAFE_TAIL)
+    return "\n".join(lines)
 
 
 def needs_another(check: dict) -> bool:
@@ -405,7 +436,11 @@ def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, image
                     facts = facts_text(m) if m and m.get("project_id") == job["project_id"] else ""
                 except BackendUnavailable:
                     facts = ""
-            seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out), facts)
+            mmap, mtext = None, ""
+            if look_ctx and look_ctx.get("map"):
+                from .look import look_block
+                mmap, mtext = look_ctx["map"], look_block(look_ctx["look"], 3, None)
+            seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out), facts, mmap, mtext)
             if seen and seen.get("error"):
                 check["claude_error"] = seen["error"]
                 seen = None

@@ -149,17 +149,30 @@ def band(score: float) -> str:
     return "good" if score >= GOOD else "fair" if score >= FAIR else "poor"
 
 
-def claude_check(writer, guide_jpg: bytes, result_jpg: bytes, facts: str = "") -> dict | None:
+CHECK_MATERIALS = (
+    " Image 3 is the MATERIAL MAP of the same view: each flat colour marks one approved material, listed after the pictures. "
+    "Also check the materials: each part of the building in Image 2 must show the approved material for its colour in the map "
+    "(for example, glazing must be glass, not timber or panels; render must be render). Light and shade do not count. Add each "
+    "material difference to issues as an instruction, e.g. \"the three tall bays on the front are glazing in the map: make them "
+    "clear grey-blue glass, not timber slats\"; ok is false if any approved material is clearly replaced by another."
+)
+
+
+def claude_check(writer, guide_jpg: bytes, result_jpg: bytes, facts: str = "", material_map: bytes | None = None, materials_text: str = "") -> dict | None:
     """Claude's own comparison; None when Claude is not connected or does not answer."""
     if writer is None or not hasattr(writer, "ask_json"):
         return None
     from .prompt_writer import PromptWriterFailed, _image_block
     content = [{"type": "text", "text": "Image 1 (guide):"}, _image_block(guide_jpg), {"type": "text", "text": "Image 2 (AI result):"}, _image_block(result_jpg)]
+    system = CHECK_SYSTEM
+    if material_map is not None and materials_text:
+        content += [{"type": "text", "text": "Image 3 (material map):"}, _image_block(material_map), {"type": "text", "text": materials_text}]
+        system = CHECK_SYSTEM.replace("Ignore materials, colours, light", "Ignore light") + CHECK_MATERIALS
     if facts:
         content.append({"type": "text", "text": "Facts from the architect's model (use them to count floors and openings; the numbers cover the whole "
                                                 "building, not only the faces in view):\n" + facts})
     try:
-        out = writer.ask_json(CHECK_SYSTEM, content, max_tokens=1500)
+        out = writer.ask_json(system, content, max_tokens=1500)
     except (PromptWriterFailed, KeyError, TypeError) as exc:
         log.warning("geometry check by Claude failed: %s", exc)
         return {"error": str(exc)[:200]}

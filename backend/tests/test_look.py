@@ -121,8 +121,12 @@ def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
     assert r.status_code == 422 and r.json()["detail"]["code"] == "exact_needs_model"
     r = c.post(f"/api/projects/{pid}/architectural-render", json=base | {"depth_file_id": depth["id"], "material_file_id": mats["id"]}, headers=alice["headers"])
     assert repo.jobs[r.json()["id"]]["status"] == "succeeded", repo.jobs[r.json()["id"]]["error"]
-    call = exact.calls[0]          # (the stand-in picture fails the check, so it is made once more, also on the depth)
-    assert all(len(x["images"]) == 1 for x in exact.calls) and len(exact.calls) == 2
+    call = exact.calls[0]
+    assert len(exact.calls) == 1
+    # the stand-in picture fails the check: the finishing pass (Ollic VS) corrects that picture instead of drawing a new one
+    (fix,) = [x for x in images.calls if x["prompt"].startswith("Image 1 is a photorealistic architectural render")]
+    assert len(fix["images"]) == 3 and fix["images"][1][1] == "image/jpeg" and fix["images"][2][1] == "image/png"
+    assert "Correct only these differences" in fix["prompt"] and "Image 3 is the MATERIAL MAP" in fix["prompt"]
     assert len(call["images"]) == 1 and call["images"][0][1] == "image/png" and call["model"] == "fal-ai/flux-control-lora-depth"
     assert "Use exactly these approved materials" in call["prompt"] and "MATERIAL MAP" not in call["prompt"]
     (img,) = repo.images.values()
@@ -238,3 +242,20 @@ def test_reading_materials_needs_claude(look_app, alice):
     view, lines, depth, mats = captured(c, alice, pid)
     r = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"]}, headers=alice["headers"])
     assert r.status_code == 503 and "Name them yourself" in r.json()["detail"]["reason"]
+
+
+def test_claudes_check_looks_at_materials_when_there_is_a_map():
+    from app.geometry import claude_check
+    seen = []
+
+    class W:
+        def ask_json(self, system, content, max_tokens=1800, **kw):
+            seen.append((system, content))
+            return {"answer": {"ok": False, "issues": ["the three tall bays are glazing in the map: make them glass, not timber slats"]}, "usage": {}, "cost_usd": None}
+
+    view, res = jpg(picture("#f2f2f2", "#d9c39a")), jpg(picture("#f2f2f2", "#6b4a2a"))
+    plain = claude_check(W(), view, res)
+    with_map = claude_check(W(), view, res, material_map=png(picture(WALL, PANEL)), materials_text="Image 3 is the MATERIAL MAP ... = Clear glazing")
+    assert "Ignore materials" in seen[0][0] and sum(b["type"] == "image" for b in seen[0][1]) == 2
+    assert "Ignore materials" not in seen[1][0] and "glazing must be glass" in seen[1][0] and sum(b["type"] == "image" for b in seen[1][1]) == 3
+    assert with_map["ok"] is False and "not timber" in with_map["issues"][0] and plain["ok"] is False
