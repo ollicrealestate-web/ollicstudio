@@ -211,17 +211,18 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
     # The call has been made and paid for: record its cost before anything else can fail.
     usage_recorded = record_usage(repo, user, job, model, operation, result)
 
-    # Made from the architect's model: check the geometry against the model's own line drawing, and
-    # when it drifted, make it once more with the geometry rule first and keep the better one.
+    # Made from the architect's model: check the geometry against the exact model view; when the AI only
+    # reframed the building, put it back in the model's camera; below the target, make it once more with
+    # the geometry rule first and keep the better one.
     check = None
     if job["type"] == "concept_render" and inp.get("guide_file_id"):
-        check = geometry_check(state, user, job, inp, result, images, roles)
-        if check and check["band"] == "poor":
+        check, result = geometry_check(state, user, job, inp, result, images, roles)
+        if check and check["score"] < GOOD_MATCH:
             try:
-                repo.update_job(user, job_id, {"stage": "The first try drifted from the model; rendering again"})
+                repo.update_job(user, job_id, {"stage": f"The first try matched the model {round(check['score'] * 100)}%; rendering again, geometry first"})
                 again = client.edit(model=model, prompt=GEOMETRY_FIRST + prompt, images=images, size=size, quality=quality, user_id=user.id)
                 record_usage(repo, user, job, model, operation, again)
-                check2 = geometry_check(state, user, job, inp, again, images, roles)
+                check2, again = geometry_check(state, user, job, inp, again, images, roles)
                 if check2 and check2["score"] > check["score"]:
                     result, check, prompt = again, check2, GEOMETRY_FIRST + prompt
                 check["retried"] = True
@@ -271,25 +272,32 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         fail("Something went wrong while saving the render. Try again.")
 
 
+from .geometry import GOOD as GOOD_MATCH  # noqa: E402
+
 GEOMETRY_FIRST = ("Most important: Image 1 is an exact view of the architect's model. Keep its geometry exactly: the same number of floors, "
                   "every window and door opening in the same place, the same roof line, balconies, columns, setbacks and camera. "
+                  "Keep the same framing: the building at exactly the same size and position in the picture as in Image 1. "
                   "Do not add, remove or move any part of the building.\n")
 
 
-def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, images, roles) -> dict | None:
-    """How well the result kept the model's geometry (see geometry.py); Claude's view too when connected."""
-    from .geometry import band, claude_check, jpeg as gjpeg, match
-    repo, storage = state.repo, state.storage
+def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, images, roles):
+    """(check, result): how well the result kept the model's geometry (see geometry.py), with the
+    result put back in the model's camera when the AI only reframed it; Claude's view too when connected."""
+    from dataclasses import replace
+
+    from .geometry import assess, claude_check, jpeg as gjpeg
+    repo = state.repo
+    if "model" not in roles:
+        return None, result
     try:
-        g = repo.get_source_file(user, inp["guide_file_id"])
-        if not g or g.get("project_id") != job["project_id"]:
-            return None
-        guide = Image.open(io.BytesIO(storage.download(user, g["storage_path"])))
-        out = Image.open(io.BytesIO(result.data))
-        score = match(guide, out, guide_is_lines=True)
-        check = {"score": score, "band": band(score)}
+        view = Image.open(io.BytesIO(images[roles.index("model")][0]))
+        out = Image.open(io.BytesIO(result.data)).convert("RGB")
+        check, fixed = assess(view, out)
+        if fixed is not None:
+            out = fixed
+            result = replace(result, data=gjpeg(fixed, 93), output_format="jpeg")
         writer = getattr(state, "prompt_writer", None)
-        if writer is not None and "model" in roles:
+        if writer is not None:
             seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out))
             if seen:
                 check["claude"] = {"ok": seen["ok"], "issues": seen["issues"]}
@@ -301,10 +309,10 @@ def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, image
                                                    "raw_usage": seen.get("usage")})
                 except BackendUnavailable:
                     pass
-        return check
+        return check, result
     except Exception:
         log.exception("geometry check failed for job %s", job["id"])
-        return None
+        return None, result
 
 
 def record_usage(repo, user: CurrentUser, job: dict, model: str, operation: str, result) -> bool:

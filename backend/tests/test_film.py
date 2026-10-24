@@ -260,3 +260,21 @@ def test_a_vp9_guide_is_converted_to_h264(film_app, alice, repo, storage, tmp_pa
     (guide,) = [d for p, d in seen if "/guides/" in p]
     out = tmp_path / "out.mp4"; out.write_bytes(guide)
     assert probe(out).codec == "h264"
+
+
+def test_a_reframed_render_is_put_back_in_the_model_camera():
+    from app.geometry import assess
+    view = building()
+    # the AI drew the right building 20% smaller and lower, in its own colours
+    small = ImageOps.autocontrast(building()).resize((512, 320))
+    reframed = Image.new("RGB", (640, 400), (120, 160, 110)); reframed.paste(small, (64, 60))
+    check, fixed = assess(view, reframed)
+    assert check["framing"] == "corrected" and fixed is not None and fixed.size == reframed.size
+    assert 1.2 <= check["frame"]["scale"] <= 1.3 and check["score"] >= 0.8 and check["band"] == "good"
+    # a different building, or the view turned over, is not rescued by reframing
+    # (floor and opening counts are Claude's part of the check: see geometry.claude_check)
+    for wrong in (view.transpose(Image.Transpose.ROTATE_90).resize(view.size), view.transpose(Image.Transpose.FLIP_TOP_BOTTOM)):
+        other, _ = assess(view, wrong)
+        assert other["score"] < 0.65 and other["band"] == "poor", other
+    same, none = assess(view, view)
+    assert same["framing"] == "kept" and none is None and same["score"] == 1.0

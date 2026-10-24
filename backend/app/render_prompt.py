@@ -22,7 +22,9 @@ from .vision import VISION_MODEL, image_png, load_image
 log = logging.getLogger("ollic.render_prompt")
 
 ROLE_INTRO = {
-    "model": "Image {n} is the VIEW TO RENDER: a plain, untextured view captured from the architect's BIM model.",
+    "model": ("Image {n} is the VIEW TO RENDER: a plain, untextured view captured from the architect's BIM model. Its flat green ground, "
+              "plain grey slab and empty sky are only the 3D viewer's placeholders: replace them with a real, fitting setting (landscaping, "
+              "paving, street, neighbouring context, a real sky) and never describe them as part of the scene."),
     "base": "Image {n} is the VIEW TO RENDER: the architect's design (a sketch, 3D image or photo).",
     "plan": "Image {n} is the architect's FLOOR PLAN of a typical floor.",
     "style": "Image {n} is a REFERENCE: copy its scene (setting, landscaping, sky, light, mood and material palette), never its building.",

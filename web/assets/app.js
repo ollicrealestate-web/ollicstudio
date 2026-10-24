@@ -654,7 +654,11 @@ function checkChip(v) {
   const c = (v.script || {}).check;
   if (!c || c.score === undefined) return "";
   const word = { good: "Matches the model", fair: "Mostly matches the model", poor: "Drifted from the model" }[c.band] || "Checked";
-  return el("span", { class: `chip check-${c.band}`, title: (c.claude?.issues || []).join("; ") || `Match ${Math.round(c.score * 100)}%` }, `${word} · ${Math.round(c.score * 100)}%`);
+  const why = [c.framing === "corrected" ? "The AI reframed the building; Ollic put it back in your model's camera." : "",
+    c.claude ? (c.claude.ok ? "Claude checked floors and openings: no differences found." : "Claude found: " + c.claude.issues.join("; ")) : "",
+    c.retried ? "Rendered twice, geometry first; the better one is kept." : ""].filter(Boolean).join(" ");
+  return el("span", { class: `chip check-${c.band}`, title: why || `Shape and camera match ${Math.round(c.score * 100)}%` },
+    `${word} · ${Math.round(c.score * 100)}%${c.framing === "corrected" ? " · framing fixed" : ""}`);
 }
 
 /* ---------- concept renders (Phase 2) ---------- */
