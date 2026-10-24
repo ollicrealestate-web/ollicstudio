@@ -128,11 +128,14 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         assert names == {"lines.png", "depth.png", "materials.png"} and job["input"]["material_file_id"] and job["input"]["depth_file_id"]
 
         # the project look: the model's materials are listed; the architect names one and approves the render as the hero
-        page.click("#lookCard summary")
-        assert page.locator("#lookMats .look-mat").count() >= 2
+        assert page.evaluate("document.querySelector('#lookCard').open")      # opened by itself after the capture
+        page.wait_for_function("document.querySelector('#lookMsg').textContent.includes('yourself')")   # no Claude in this test
+        assert page.locator("#lookMats .look-mat").count() >= 2 and "to confirm" in page.inner_text("#lookSummary")
         page.fill("#lookMats .look-mat >> nth=0 >> input[aria-label='Material name']", "Sandtex white render")
         page.fill("#lookSetting", "Maitama avenue, palm trees, late afternoon sun")
-        page.click("#lookSave"); page.wait_for_function("document.querySelector('#lookMsg').textContent.includes('Saved')")
+        page.click("#lookAdd"); page.fill("#lookMats .look-mat.extra >> input[aria-label='Material name']", "Palm trees in planters")
+        page.click("#lookConfirm"); page.wait_for_function("document.querySelector('#lookMsg').textContent.includes('confirmed')")
+        assert "all confirmed" in page.inner_text("#lookSummary")
         page.click(".shot button:has-text('Use as project look')")
         page.wait_for_selector(".shot .chip:has-text('Project look')")
         (pr,) = stack["repo"].projects.values()
@@ -153,6 +156,7 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         # the model view, its material map, the approved hero render and the reference
         assert len(call["images"]) == 4 and len(stack["images"].calls) >= 4
         assert "Image 3 is the APPROVED LOOK" in call["prompt"] and "Sandtex white render" in call["prompt"] and "Maitama avenue" in call["prompt"]
+        assert "Also in this project:" in call["prompt"] and "Palm trees in planters" in call["prompt"]
         card = page.inner_text(".shot >> nth=0").upper()
         assert "STANDARD RENDER" in card and "AI CONCEPT" in card
 

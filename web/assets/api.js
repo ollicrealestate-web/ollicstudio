@@ -48,6 +48,7 @@ export const api = {
   // the architect's model
   look: projectId => request("GET", `/projects/${projectId}/look`),
   saveLook: (projectId, look) => request("PUT", `/projects/${projectId}/look`, look),
+  suggestLook: (projectId, body) => request("POST", `/projects/${projectId}/look/suggest`, body),
   addModelMaterials: (projectId, groups) => request("POST", `/projects/${projectId}/look/materials`, { groups }),
   revitToIfc: (projectId, fileId) => request("POST", `/projects/${projectId}/revit-to-ifc`, { source_file_id: fileId }),
   importIfc: (projectId, fileId, key) => request("POST", `/projects/${projectId}/import-ifc`, { source_file_id: fileId }, true, { "Idempotency-Key": key }),

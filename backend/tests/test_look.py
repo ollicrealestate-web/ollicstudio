@@ -170,3 +170,68 @@ def test_claude_corrects_a_render_it_finds_wrong(render_settings, repo, storage,
     chk = img["options"]["check"]
     assert chk["retried"] and chk["claude"]["ok"] is True          # the corrected try is kept
     assert sum(1 for e in repo.usage if e["operation"] == "geometry_check") == 2
+
+
+class FakeReader:
+    """Claude reading the materials of a captured view."""
+    model = "claude-test"
+
+    def __init__(self):
+        self.calls = []
+
+    def ask_json(self, system, content, max_tokens=1800):
+        self.calls.append((system, content))
+        return {"answer": {"materials": [
+                    {"key": "paint|#f2f2f2", "name": "White render", "finish": "smooth acrylic render, matt", "hex": "#f4f2ec"},
+                    {"key": "paint|#d9c39a", "name": "Tan aluminium cladding", "finish": "vertical panels, satin", "hex": "#c9a46b"},
+                    {"key": "nope", "name": "ignored"}],
+                "extra": [{"name": "Roof terrace decking", "finish": "composite boards, warm grey", "hex": "#8a8178", "where": "roof terrace under the pergola"}],
+                "setting": "Lekki street, palm trees, late afternoon", "notes": "Three materials named from the model."},
+                "usage": {"input_tokens": 2000, "output_tokens": 300}, "cost_usd": "0.01", "model": self.model}
+
+
+def test_claude_reads_the_materials_and_the_architect_confirms(render_settings, repo, storage, alice):
+    reader = FakeReader()
+    app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner(),
+                     fal={}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=reader)
+    c = TestClient(app)
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    groups = [g | {"types": ["IfcWall", "IfcSlab"] if g["cls"] == "paint" else ["IfcWindow"]} for g in GROUPS]
+    c.post(f"/api/projects/{pid}/look/materials", json={"groups": groups}, headers=alice["headers"])
+    out = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"], "description": "luxury flats"},
+                 headers=alice["headers"]).json()
+    system, content = reader.calls[0]
+    text = content[-1]["text"]
+    assert sum(1 for b in content if b["type"] == "image") == 2 and "used on Wall, Slab" in text and "luxury flats" in text
+    by = {m["key"]: m for m in out["materials"]}
+    assert by["paint|#d9c39a"]["name"] == "Tan aluminium cladding" and by["paint|#d9c39a"]["hex"] == "#c9a46b" and by["paint|#d9c39a"]["source"] == "ai"
+    assert not by["paint|#d9c39a"]["confirmed"] and by["glass|#9fb4c4"]["source"] == "model"
+    deck = next(m for m in out["materials"] if m["extra"])
+    assert deck["name"] == "Roof terrace decking" and deck["note"] == "roof terrace under the pergola"
+    assert out["setting"] == "Lekki street, palm trees, late afternoon" and out["notes"].startswith("Three materials")
+    # the architect changes one and confirms all; reading again keeps what the architect wrote
+    by["paint|#f2f2f2"] |= {"name": "Sandtex white", "source": "architect", "confirmed": True}
+    for m in out["materials"]:
+        m["confirmed"] = True
+    out.pop("notes")
+    c.put(f"/api/projects/{pid}/look", json=out, headers=alice["headers"])
+    again = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"]}, headers=alice["headers"]).json()
+    names = [m["name"] for m in again["materials"]]
+    assert "Sandtex white" in names and names.count("Roof terrace decking") == 1      # confirmed extras stay, once
+    # the render is told about the extras too
+    images = app.state.image_clients["standard"]
+    c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": "photoreal", "prompt_ready": True, "references": [{"file_id": view["id"], "role": "model"}],
+                                                             "guide_file_id": lines["id"], "material_file_id": mats["id"]}, headers=alice["headers"])
+    p = images.calls[0]["prompt"]
+    assert "Also in this project:" in p and "Roof terrace decking: composite boards, warm grey; colour #8a8178 (roof terrace under the pergola)" in p
+    assert "= Sandtex white" in p and "= Tan aluminium cladding: vertical panels, satin; colour #c9a46b" in p
+    assert any(e["operation"] == "vision_read" for e in repo.usage)
+
+
+def test_reading_materials_needs_claude(look_app, alice):
+    c, _ = look_app()
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    r = c.post(f"/api/projects/{pid}/look/suggest", json={"view_file_id": view["id"], "material_file_id": mats["id"]}, headers=alice["headers"])
+    assert r.status_code == 503 and "Name them yourself" in r.json()["detail"]["reason"]

@@ -566,16 +566,18 @@ export function createViewer(host, { onSelect } = {}) {
   const MAX_MATERIALS = 24;
   /** The model's materials, largest first: key, class, the model's colour and its map colour. */
   function materialGroups() {
-    const area = new Map();
+    const area = new Map(), types = new Map();
     for (const e of elements) {
       if (e.userData.ifcType === "IfcSpace" || e.userData.cls === "space") continue;
       const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3();
       area.set(k, (area.get(k) || 0) + sz.x * sz.y + sz.y * sz.z + sz.x * sz.z);
+      const t = types.get(k) || new Map(); t.set(e.userData.ifcType || "Element", (t.get(e.userData.ifcType || "Element") || 0) + 1); types.set(k, t);
     }
+    const usedOn = k => [...(types.get(k) || new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t]) => t);
     // the main materials by size get their own map colour (chosen in key order, so it is the same in every view);
     // small ones are drawn grey and left out of the look
     const main = [...area.keys()].sort((a, b) => area.get(b) - area.get(a)).slice(0, MAX_MATERIALS).sort();
-    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k) }));
+    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k), types: usedOn(k) }));
     return groups.sort((a, b) => b.area - a.area);
   }
   function mapMatFor(colour) {
@@ -648,7 +650,7 @@ export function createViewer(host, { onSelect } = {}) {
   function guides(w, h, kinds = ["view", "clay", "lines", "depth"], at = null) {
     const out = {}, pose = at || currentPose();
     for (const k of kinds) { beginGuide(k, w, h); out[k] = guideFrame(pose).toDataURL(k === "view" || k === "clay" ? "image/jpeg" : "image/png", 0.92); }
-    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map }) => ({ key, cls, hex, map }));
+    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map, types }) => ({ key, cls, hex, map, types }));
     endGuide();
     return out;
   }

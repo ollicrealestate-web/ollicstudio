@@ -592,3 +592,11 @@ tr:last-child td { border-bottom: 0; }
 .look-hero img { border-radius: 8px; object-fit: cover; }
 .chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 @media (max-width: 640px) { .look-mat { grid-template-columns: 18px 18px 1fr 44px; } .look-mat input[type=text]:nth-of-type(2), .look-mat small { grid-column: 3 / -1; } }
+.look-mat { grid-template-columns: 18px 18px minmax(120px, 1fr) minmax(160px, 2fr) 44px minmax(80px, auto) auto auto; }
+.look-mat.confirmed input[type=text] { border-color: rgba(70, 200, 120, .45); }
+.look-mat .used { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.swatch.map.extra { background: repeating-linear-gradient(45deg, #444 0 3px, #222 3px 6px); }
+.chip.src-ai { border-color: rgba(229, 72, 77, .5); }
+.chip.src-architect { border-color: rgba(70, 200, 120, .5); }
+.look-tools { gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+@media (max-width: 640px) { .look-mat { grid-template-columns: 18px 18px 1fr 44px; } .look-mat .used, .look-mat .chip { grid-column: 3 / -1; } }

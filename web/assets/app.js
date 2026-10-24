@@ -538,6 +538,8 @@ $("#useView").onclick = async () => {
     for (const k of ["lines", "depth", "materials"])
       await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {});
     await syncLook(g.legend);
+    const viewId = saved.id, matsId = (await api.getProject(current.id)).source_files.find(f => f.original_name === `Guide - ${name} - materials.png`)?.id;
+    if (matsId && (look?.materials || []).some(m => !m.extra && m.source === "model" && !m.confirmed)) readMaterials(viewId, matsId);
     current = await api.getProject(current.id); rPick = saved.id; promptByAI = false; renderProject();
     toast("View captured. Press “Read image and write prompt”.");
     $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
@@ -554,23 +556,45 @@ async function loadLook() {
 }
 async function syncLook(legend) {
   if (!legend?.length || !current) return;
-  try { look = await api.addModelMaterials(current.id, legend.map(({ key, cls, hex, map }) => ({ key, cls, hex, map }))); lookFor = current.id; drawLook(); }
+  try { look = await api.addModelMaterials(current.id, legend.map(({ key, cls, hex, map, types }) => ({ key, cls, hex, map, types: types || [] }))); lookFor = current.id; drawLook(); }
   catch (err) { console.warn("look", err); }
 }
+let lastCapture = null;
+/** Claude studies the captured view and its material map and fills in the list; the architect confirms or edits. */
+async function readMaterials(viewId, matsId) {
+  lastCapture = { viewId, matsId };
+  $("#lookCard").open = true;
+  $("#lookMsg").textContent = "Claude is studying your model's materials…"; $("#lookAsk").disabled = true;
+  try {
+    const out = await api.suggestLook(current.id, { view_file_id: viewId, material_file_id: matsId, description: $("#rDesc")?.value.trim() || "" });
+    look = out; lookFor = current.id; drawLook();
+    $("#lookMsg").textContent = (out.notes ? out.notes + " " : "") + "Check each material, change anything, then press Confirm all.";
+  } catch (err) {
+    if (err.status === 401) return handle(err);
+    $("#lookMsg").textContent = err.status === 503 ? "Name the materials yourself for now (Claude is not connected)." : err.message;
+  } finally { $("#lookAsk").disabled = false; }
+}
+const SOURCE = { ai: "Claude", architect: "You", model: "Model" };
 function drawLook() {
   if (!look) return;
-  const mats = look.materials || [];
-  $("#lookSummary").textContent = mats.length ? `${mats.length} material${mats.length > 1 ? "s" : ""}${look.hero_render_id ? " · hero render set" : ""}. Every view, shot and stage uses them.`
-    : "Capture a view of your model to list its materials.";
+  const mats = look.materials || [], open = mats.filter(m => !m.confirmed).length;
+  $("#lookSummary").textContent = mats.length ? `${mats.length} material${mats.length > 1 ? "s" : ""}${open ? ` · ${open} to confirm` : " · all confirmed"}${look.hero_render_id ? " · hero render set" : ""}`
+    : "Capture a view of your model: Claude lists its materials for you to confirm.";
   $("#lookMats").replaceChildren(...mats.map(m => {
+    const touched = () => { m.source = "architect"; m.confirmed = true; row.classList.add("confirmed"); tag.textContent = "You ✓"; };
     const name = el("input", { type: "text", value: m.name, maxlength: "80", "aria-label": "Material name" });
     const finish = el("input", { type: "text", value: m.finish || "", maxlength: "300", placeholder: "Finish, e.g. smooth render, matt", "aria-label": `Finish of ${m.name}` });
     const colour = el("input", { type: "color", value: m.hex, "aria-label": `Approved colour of ${m.name}` });
-    name.oninput = () => { m.name = name.value; }; finish.oninput = () => { m.finish = finish.value; }; colour.oninput = () => { m.hex = colour.value; };
-    return el("li", { class: "look-mat" },
-      el("span", { class: "swatch map", style: `background:${m.map}`, title: "Its colour in the material map" }),
-      el("span", { class: "swatch", style: `background:${m.model_hex}`, title: `In the model: ${m.model_hex}` }),
-      name, finish, colour, el("small", { class: "hint" }, m.cls));
+    name.oninput = () => { m.name = name.value; touched(); }; finish.oninput = () => { m.finish = finish.value; touched(); }; colour.oninput = () => { m.hex = colour.value; touched(); };
+    const tag = el("span", { class: `chip src-${m.source}`, title: m.source === "ai" ? "Suggested by Claude" : m.source === "model" ? "From the model's colour only" : "Written by you" },
+      `${SOURCE[m.source] || "Model"}${m.confirmed ? " ✓" : ""}`);
+    const used = m.extra ? (m.note || "Added") : (m.types || []).map(t => t.replace(/^Ifc/, "")).join(", ") || m.cls;
+    const del = m.extra ? el("button", { class: "btn sm danger", type: "button", "aria-label": `Remove ${m.name}`, onclick: () => { look.materials = look.materials.filter(x => x !== m); drawLook(); } }, "×") : "";
+    const row = el("li", { class: `look-mat${m.confirmed ? " confirmed" : ""}${m.extra ? " extra" : ""}` },
+      m.extra ? el("span", { class: "swatch map extra", title: "Not in the model's map" }) : el("span", { class: "swatch map", style: `background:${m.map}`, title: "Its colour in the material map" }),
+      el("span", { class: "swatch", style: `background:${m.extra ? m.hex : m.model_hex}`, title: m.extra ? "" : `In the model: ${m.model_hex}` }),
+      name, finish, colour, el("small", { class: "hint used" }, used), tag, del);
+    return row;
   }));
   $("#lookSetting").value = look.setting || "";
   const hero = look.hero_render_id ? (images || []).find(i => i.id === look.hero_render_id) : null;
@@ -580,6 +604,19 @@ function drawLook() {
     el("button", { class: "btn sm", type: "button", onclick: () => setHero(null) }, "Clear")]
     : [el("span", { class: "hint" }, "Tip: when a render looks right, press “Use as project look” on it. Every new view will match it.")]));
 }
+$("#lookSetting").addEventListener("input", () => { if (look) look.setting = $("#lookSetting").value; });
+$("#lookConfirm").onclick = () => { (look?.materials || []).forEach(m => { m.confirmed = true; }); saveLook("All materials confirmed. Every view, shot and stage uses them."); };
+$("#lookAdd").onclick = () => {
+  if (!look) return;
+  look.materials.push({ key: `extra|you|${Date.now()}`, cls: "extra", model_hex: "#000000", map: "#000000", name: "New material", finish: "", hex: "#cccccc",
+    types: [], source: "architect", confirmed: true, extra: true, note: "" });
+  drawLook(); const ins = document.querySelectorAll("#lookMats .look-mat.extra input[aria-label='Material name']"); ins[ins.length - 1]?.select();
+};
+$("#lookAsk").onclick = () => {
+  const cap = lastCapture || (() => { const v = rPick, m = rPick ? guideFor(rPick, "materials") : null; return v && m ? { viewId: v, matsId: m } : null; })();
+  if (!cap) { toast("Capture a view of your model first."); return; }
+  readMaterials(cap.viewId, cap.matsId);
+};
 async function saveLook(msg = "Saved. New renders and shots use this look.") {
   look.setting = $("#lookSetting").value.trim();
   try { look = await api.saveLook(current.id, look); drawLook(); $("#lookMsg").textContent = msg; toast(msg); }
