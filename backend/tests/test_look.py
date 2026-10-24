@@ -111,7 +111,7 @@ def test_a_model_render_uses_the_approved_materials_and_hero(look_app, alice, bo
 
 
 def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
-    exact = FakeImages(); exact.guide = "lines"
+    exact = FakeImages()
     c, images = look_app(exact=exact, writer=FakeChecker())        # Claude finds a floor missing in the Exact picture
     repo.roles[alice["id"]] = "admin"
     pid = new_project(c, alice)
@@ -130,8 +130,8 @@ def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
     assert len(fix["images"]) == 3 and fix["images"][1][1] == "image/jpeg" and fix["images"][2][1] == "image/png"
     assert "Correct only these differences" in fix["prompt"] and "Image 3 is the MATERIAL MAP" in fix["prompt"]
     assert "- the model has 7 floors above the ground floor; the result shows 6: add the missing floor" in fix["prompt"]
-    assert len(call["images"]) == 1 and call["images"][0][1] == "image/png" and call["model"] == "fal-ai/flux-control-lora-canny"
-    assert call["images"][0][0] == png(picture("#000000", "#ffffff"))         # the model's line drawing is the guide
+    assert len(call["images"]) == 1 and call["images"][0][1] == "image/png"
+    assert Image.open(io.BytesIO(call["images"][0][0])).convert("RGB").getpixel((200, 200)) == (128, 128, 128)   # the depth map (the default guide)
     assert "Use exactly these approved materials" in call["prompt"] and "MATERIAL MAP" not in call["prompt"]
     (img,) = repo.images.values()
     assert img["options"]["tier"] == "exact" and "check" in img["options"]
@@ -306,7 +306,7 @@ def test_the_exact_engine_sends_the_line_drawing_to_the_line_guided_model():
             return httpx.Response(200, json={"status": "COMPLETED"})
         return httpx.Response(200, json={"images": [{"url": "data:image/jpeg;base64," + __import__("base64").b64encode(jpg(picture("#ffffff", "#cccccc"))).decode()}]})
     ex = FalExact("k", client=httpx.Client(transport=httpx.MockTransport(handler)))
-    ex.poll_seconds = 0
+    ex.poll_seconds, ex.guide = 0, "lines"
     out = ex.edit(model="m", prompt="photoreal", images=[(png(picture("#000000", "#ffffff")), "image/png")], size="1536x1024")
     body = json.loads(seen[0].content)
     assert seen[0].url.path == "/fal-ai/flux-control-lora-canny" and body["control_lora_image_url"].startswith("data:image/")
@@ -314,3 +314,33 @@ def test_the_exact_engine_sends_the_line_drawing_to_the_line_guided_model():
     ex.guide = "depth"; seen.clear()
     ex.edit(model="m", prompt="p", images=[(png(picture("#000000", "#ffffff")), "image/png")])
     assert seen[0].url.path == "/fal-ai/flux-control-lora-depth" and json.loads(seen[0].content)["preprocess_depth"] is False
+
+
+def test_ultra_runs_on_fal_with_several_pictures_and_its_own_price():
+    import httpx
+    from app.fal import FalGemini
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        if req.method == "POST":
+            return httpx.Response(200, json={"request_id": "r", "status_url": "https://queue.fal.run/fal-ai/nano-banana-pro/requests/r/status", "response_url": "https://queue.fal.run/fal-ai/nano-banana-pro/requests/r"})
+        if req.url.path.endswith("/status"):
+            return httpx.Response(200, json={"status": "COMPLETED"})
+        return httpx.Response(200, json={"images": [{"url": "data:image/jpeg;base64," + __import__("base64").b64encode(jpg(picture("#ffffff", "#cccccc"))).decode()}]})
+    u = FalGemini("k", "fal-ai/nano-banana-pro/edit", "0.15", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    u.poll_seconds = 0
+    out = u.edit(model="x", prompt="photoreal", images=[(jpg(picture("#fff", "#ccc") if False else picture("#ffffff", "#cccccc")), "image/jpeg"), (png(picture(WALL, PANEL)), "image/png")], size="1536x1024")
+    body = json.loads(seen[0].content)
+    assert seen[0].url.path == "/fal-ai/nano-banana-pro/edit" and len(body["image_urls"]) == 2 and body["aspect_ratio"] == "3:2" and body["resolution"] == "2K"
+    assert out.extra["cost_usd"] == "0.15" and u.model_name == "fal-ai/nano-banana-pro/edit"
+    seen.clear(); u.generate(model="x", prompt="p")
+    assert seen[0].url.path == "/fal-ai/nano-banana-pro"
+
+
+def test_with_a_fal_key_ultra_and_swift_are_connected(render_settings, repo, storage):
+    from dataclasses import replace
+    app = create_app(replace(render_settings, fal_key="fk", gemini_api_key=None), repo=repo, storage=storage, verifier=TokenVerifier(render_settings),
+                     image_client=FakeImages(), runner=InlineRunner(), kling=None, runway=None, aps=None, prompt_writer=None, gemini=None)
+    assert app.state.image_clients["ultra"].endpoint == "fal-ai/nano-banana-pro/edit" and app.state.image_clients["swift"].endpoint == "fal-ai/nano-banana-2/edit"
+    assert app.state.image_clients["exact"].guide == "depth"

@@ -7,6 +7,7 @@ still applies to every database and storage call the job makes.
 from __future__ import annotations
 
 import io
+from decimal import Decimal
 import logging
 import uuid
 
@@ -191,7 +192,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                     if not d or d.get("project_id") != job["project_id"]:
                         return fail("The guide of your model is missing. Capture the view again.")
                     send = [(storage.download(user, d["storage_path"]), "image/png")]
-            model = settings.model_for(tier, "create")
+            model = getattr(client, "model_name", None) or settings.model_for(tier, "create")
             if images:
                 operation = "image_edit"
                 result = client.edit(model=model, prompt=prompt, images=send, size=size, quality=quality, user_id=user.id)
@@ -210,7 +211,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             writer_note = _premium_prompt(state, user, job, tier, lambda w: w.write_edit(instruction=inp["instruction"], current=base))
             if writer_note:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
-            model, operation = settings.model_for(tier, "revise"), "image_edit"
+            model, operation = getattr(client, "model_name", None) or settings.model_for(tier, "revise"), "image_edit"
             result = client.edit(model=model, prompt=prompt, images=[(base, "image/jpeg")], size=size, quality=quality, user_id=user.id)
             source_file_id = parent.get("source_file_id")
     except ProviderError as exc:
@@ -234,18 +235,20 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         if check and needs_another(check, tier):
             try:
                 rule = fix_rule(check)
-                finisher = state.image_clients.get("vs") if tier == "exact" else None
+                # the finishing pass: the strongest editing engine connected (Ultra sees several pictures and keeps the photo)
+                fin_tier = next((t for t in ("ultra", "vs") if state.image_clients.get(t) is not None), None) if tier == "exact" else None
+                finisher = state.image_clients.get(fin_tier) if fin_tier else None
                 if finisher is not None:
                     # Exact keeps the model's shape and camera; the finishing pass corrects only what was found, on that picture
                     repo.update_job(user, job_id, {"stage": f"Correcting what did not match your model ({rule[0]})"})
                     fprompt = finish_prompt(check, look_ctx)
                     fimages = [(result.data, "image/jpeg"), images[roles.index("model")]] + ([(look_ctx["map"], "image/png")] if look_ctx and look_ctx.get("map") else [])
-                    fmodel = settings.model_for("vs", "revise")
+                    fmodel = getattr(finisher, "model_name", None) or settings.model_for(fin_tier, "revise")
                     again = finisher.edit(model=fmodel, prompt=fprompt, images=fimages, size=size, quality=quality, user_id=user.id)
                     record_usage(repo, user, job, fmodel, "image_edit", again)
                     check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
                     if check2 and rank(check2) >= rank(check):
-                        result, check = again, check2 | {"finished": True}
+                        result, check = again, check2 | {"finished": fin_tier}
                 else:
                     repo.update_job(user, job_id, {"stage": f"The first try did not match your model closely enough ({rule[0]}); rendering again"})
                     again = client.edit(model=model, prompt=rule[1] + prompt, images=send, size=size, quality=quality, user_id=user.id)
@@ -469,7 +472,8 @@ def record_usage(repo, user: CurrentUser, job: dict, model: str, operation: str,
     if model.startswith("fal-ai/"):
         from .fal import IMAGE_PRICE, PRICE_SOURCE as F_SRC
         provider, text_in, image_in, out = "fal", 0, 0, 0
-        cost, source = IMAGE_PRICE, F_SRC
+        extra = getattr(result, "extra", None) or {}
+        cost, source = (Decimal(extra["cost_usd"]), extra.get("price_source") or F_SRC) if extra.get("cost_usd") else (IMAGE_PRICE, F_SRC)
     elif model.startswith("gemini"):
         from .gemini_images import PRICE_SOURCE as G_SRC, cost_usd as g_cost
         provider, text_in, image_in, out = "google", 0, 0, 0

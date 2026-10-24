@@ -17,7 +17,7 @@ from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
 from .gemini_images import GeminiImages
-from .fal import FalExact, FalImages, FalVideo
+from .fal import FalExact, FalGemini, FalImages, FalVideo
 from .kling import KlingVideo
 from .aps import AutodeskModels
 from .runway import RunwayVideo
@@ -76,6 +76,11 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     fal = fal or {}
     app.state.image_clients.setdefault("vs", fal.get("images"))
     app.state.image_clients.setdefault("exact", fal.get("exact"))
+    # Ultra and Swift through fal when there is no Google key of our own
+    if settings.fal_key and fal.get("gemini", "auto") == "auto":
+        for t, ep, price in (("ultra", "fal-ai/nano-banana-pro/edit", "0.15"), ("swift", "fal-ai/nano-banana-2/edit", "0.08")):
+            if app.state.image_clients.get(t) is None:
+                app.state.image_clients[t] = FalGemini(settings.fal_key, ep, price)
     if fal.get("exact") is not None and hasattr(fal["exact"], "guide"):
         fal["exact"].guide, fal["exact"].strength = settings.exact_guide, settings.exact_strength
     # video options by id; an option with no client is listed as not connected

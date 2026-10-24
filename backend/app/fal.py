@@ -176,8 +176,8 @@ class FalImages(_Fal):
 
 
 class FalExact(FalImages):
-    guide = "lines"     # "lines" (the model's line drawing) or "depth" (the model's depth map)
-    strength = 0.75     # how strictly the guide is followed: 1.0 copies the drawing's look; lower lets the photo through
+    guide = "depth"     # "depth" (the model's depth map) or "lines" (the model's line drawing)
+    strength = 1.0      # how strictly the guide is followed
 
     """Ollic Exact: the first picture given is the model's guide from the same camera: its line drawing
     (guide "lines", white on black) or its depth map (guide "depth", white near, black far); the picture is generated on that exact depth, so the geometry and the camera
@@ -200,6 +200,28 @@ class FalExact(FalImages):
 
     def generate(self, *, model: str, prompt: str, size: str = "1536x1024", quality: str | None = None, user_id: str | None = None) -> ImageResult:
         raise ProviderError("Ollic Exact renders from your model. Capture a view of the model first.")
+
+
+class FalGemini(FalImages):
+    """Google's image models (Nano Banana Pro = Gemini 3 Pro Image; Nano Banana 2) served by fal, so Ollic Ultra
+    and Swift work with the fal key alone. Input per fal's client types (NanoBananaProEditInput): prompt,
+    image_urls (several pictures at once), aspect_ratio, resolution 1K/2K/4K, output_format, num_images.
+    Prices are estimates (fal's model pages list them per image; 4K costs more)."""
+
+    def __init__(self, api_key: str, endpoint: str, price: str, client: httpx.Client | None = None):
+        super().__init__(api_key, client)
+        self.endpoint, self.model_name, self.price = endpoint, endpoint, Decimal(price)
+
+    def _run(self, prompt: str, images: list[tuple[bytes, str]], size: str) -> ImageResult:
+        body = {"prompt": prompt[:6000], "aspect_ratio": ASPECT.get(size, "3:2"), "resolution": "2K", "output_format": "jpeg", "num_images": 1}
+        endpoint = self.endpoint
+        if images:
+            body["image_urls"] = [data_uri(d, m, 2048) for d, m in images[:6]]
+        else:
+            endpoint = endpoint.removesuffix("/edit")
+        out = self._image(endpoint, body)
+        out.extra = {"cost_usd": str(self.price), "price_source": f"fal.ai model page for {self.endpoint} (estimate at 2K), read 2026-10-24"}
+        return out
 
 
 class FalVideo(_Fal):
