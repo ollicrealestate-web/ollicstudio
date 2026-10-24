@@ -229,16 +229,15 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
     check = None
     if job["type"] == "concept_render" and inp.get("guide_file_id"):
         check, result = geometry_check(state, user, job, inp, result, images, roles, look_ctx)
-        if check and overall(check) < GOOD_MATCH:
+        if check and needs_another(check):
             try:
-                what = "materials" if check["score"] >= GOOD_MATCH else "geometry"
-                repo.update_job(user, job_id, {"stage": f"The first try matched the model {round(overall(check) * 100)}%; rendering again, {what} first"})
-                first_rule = (MATERIALS_FIRST if what == "materials" else GEOMETRY_FIRST)
-                again = client.edit(model=model, prompt=first_rule + prompt, images=send, size=size, quality=quality, user_id=user.id)
+                rule = fix_rule(check)
+                repo.update_job(user, job_id, {"stage": f"The first try did not match your model closely enough ({rule[0]}); rendering again"})
+                again = client.edit(model=model, prompt=rule[1] + prompt, images=send, size=size, quality=quality, user_id=user.id)
                 record_usage(repo, user, job, model, operation, again)
                 check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
-                if check2 and overall(check2) > overall(check):
-                    result, check, prompt = again, check2, first_rule + prompt
+                if check2 and rank(check2) > rank(check):
+                    result, check, prompt = again, check2, rule[1] + prompt
                 check["retried"] = True
             except (ProviderError, BackendUnavailable):
                 check["retried"] = False
@@ -290,6 +289,27 @@ from .geometry import GOOD as GOOD_MATCH  # noqa: E402
 
 MATERIALS_FIRST = ("Most important: use exactly the approved materials and colours listed below, in exactly the places the material map "
                    "shows, and keep the building's geometry and camera exactly as in Image 1.\n")
+
+
+def needs_another(check: dict) -> bool:
+    """Below the target on shape or materials, or Claude saw a floor, opening or element out of place."""
+    return overall(check) < GOOD_MATCH or (check.get("claude") or {}).get("ok") is False
+
+
+def rank(check: dict) -> tuple:
+    """Which of two tries to keep: Claude's verdict first, then the scores."""
+    return ((check.get("claude") or {}).get("ok") is not False, overall(check))
+
+
+def fix_rule(check: dict) -> tuple[str, str]:
+    """(what went wrong, in a few words; the rule put first in the prompt for the second try)."""
+    issues = [i for i in (check.get("claude") or {}).get("issues") or [] if i][:6]
+    if issues:
+        return ("Claude found differences", "Most important: the previous attempt differed from the architect's model. Fix exactly these, and keep "
+                "everything else as in Image 1:\n" + "\n".join(f"- {i}" for i in issues) + "\n" + GEOMETRY_FIRST)
+    if check["score"] >= GOOD_MATCH:
+        return ("materials", MATERIALS_FIRST)
+    return ("geometry", GEOMETRY_FIRST)
 
 
 def overall(check: dict) -> float:
@@ -365,7 +385,15 @@ def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, image
                 check["materials"] = mc
         writer = getattr(state, "prompt_writer", None)
         if writer is not None:
-            seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out))
+            facts = ""
+            if inp.get("model_id"):
+                from .render_prompt import facts_text
+                try:
+                    m = repo.get_model(user, inp["model_id"])
+                    facts = facts_text(m) if m and m.get("project_id") == job["project_id"] else ""
+                except BackendUnavailable:
+                    facts = ""
+            seen = claude_check(writer, images[roles.index("model")][0], gjpeg(out), facts)
             if seen:
                 check["claude"] = {"ok": seen["ok"], "issues": seen["issues"]}
                 if not seen["ok"] and check["band"] == "good":

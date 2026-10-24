@@ -34,7 +34,8 @@ CHECK_SYSTEM = (
     "the building: number of floors, the roof line and parapets, the position and number of window and door openings on each "
     "floor, balconies, columns, the entrance, setbacks and overall proportions, and the camera angle. "
     'Answer with JSON only: {"ok": true or false, "issues": ["short description of each geometric difference"]}. '
-    "ok is false if any floor, opening, roof or major element is added, removed or moved."
+    "ok is false if any floor, opening, roof or major element is added, removed or moved. Write each issue as a short instruction "
+    "an image model can follow to fix it, e.g. \"the model has 7 floors above the ground floor; the result shows 6: add the missing floor\"."
 )
 
 
@@ -148,12 +149,15 @@ def band(score: float) -> str:
     return "good" if score >= GOOD else "fair" if score >= FAIR else "poor"
 
 
-def claude_check(writer, guide_jpg: bytes, result_jpg: bytes) -> dict | None:
+def claude_check(writer, guide_jpg: bytes, result_jpg: bytes, facts: str = "") -> dict | None:
     """Claude's own comparison; None when Claude is not connected or does not answer."""
     if writer is None or not hasattr(writer, "ask_json"):
         return None
     from .prompt_writer import PromptWriterFailed, _image_block
     content = [{"type": "text", "text": "Image 1 (guide):"}, _image_block(guide_jpg), {"type": "text", "text": "Image 2 (AI result):"}, _image_block(result_jpg)]
+    if facts:
+        content.append({"type": "text", "text": "Facts from the architect's model (use them to count floors and openings; the numbers cover the whole "
+                                                "building, not only the faces in view):\n" + facts})
     try:
         out = writer.ask_json(CHECK_SYSTEM, content, max_tokens=600)
     except (PromptWriterFailed, KeyError, TypeError) as exc:

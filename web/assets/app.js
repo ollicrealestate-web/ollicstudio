@@ -878,6 +878,7 @@ function briefFromForm() {
   const guide = rPick ? guideFor(rPick) : null, depth = rPick ? guideFor(rPick, "depth") : null, mats = rPick ? guideFor(rPick, "materials") : null;
   return { prompt, prompt_ready: promptByAI && !!$("#rPrompt").value.trim(), references: renderRefs(), tier: chosenTier(), quality: $("#rQuality").value,
     ...(guide ? { guide_file_id: guide } : {}), ...(depth ? { depth_file_id: depth } : {}), ...(mats ? { material_file_id: mats } : {}),
+    ...(guide && viewerModelId ? { model_id: viewerModelId } : {}),
     aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
 $("#renderForm").onsubmit = e => {

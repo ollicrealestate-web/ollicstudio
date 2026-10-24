@@ -130,3 +130,43 @@ def test_ollic_exact_draws_on_the_models_depth(look_app, alice, repo):
     # a revision of an Exact render is made with the editing option (Exact draws only from the model)
     e = c.post(f"/api/renders/{img['id']}/edit", json={"instruction": "make the panels darker"}, headers=alice["headers"])
     assert repo.jobs[e.json()["id"]]["input"]["tier"] == "vs"
+
+
+class FakeChecker:
+    """Claude as the checker: finds a missing floor in the first try, nothing in the second."""
+    model = "claude-test"
+
+    def __init__(self):
+        self.calls = []
+
+    def ask_json(self, system, content, max_tokens=1800):
+        self.calls.append(content)
+        first = len(self.calls) == 1
+        answer = {"ok": not first, "issues": ["the model has 7 floors above the ground floor; the result shows 6: add the missing floor"] if first else []}
+        return {"answer": answer, "usage": {"input_tokens": 900, "output_tokens": 40}, "cost_usd": "0.004", "model": self.model}
+
+
+def test_claude_corrects_a_render_it_finds_wrong(render_settings, repo, storage, alice):
+    images, checker = FakeImages(), FakeChecker()
+    app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
+                     fal={}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=checker)
+    c = TestClient(app)
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    owner = type("U", (), {"id": alice["id"]})()
+    model = repo.create_model(owner, {"id": "11111111-1111-1111-1111-111111111111", "project_id": pid, "source_file_id": view["id"], "job_id": None,
+                                      "glb_path": f"{alice['id']}/{pid}/m.glb",
+                                      "report": {"storeys": ["Ground", "1", "2", "3", "4", "5", "6", "7"], "counts": {"IfcWindow": 112}}})
+    body = {"prompt": "photoreal render", "prompt_ready": True, "references": [{"file_id": view["id"], "role": "model"}],
+            "guide_file_id": lines["id"], "model_id": model["id"]}
+    r = c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"])
+    assert repo.jobs[r.json()["id"]]["status"] == "succeeded"
+    first, second = images.calls
+    assert "add the missing floor" not in first["prompt"]
+    assert second["prompt"].startswith("Most important: the previous attempt differed") and "- the model has 7 floors above the ground floor" in second["prompt"]
+    facts = [b["text"] for b in checker.calls[0] if b.get("type") == "text" and "Facts from the architect's model" in b.get("text", "")]
+    assert facts and "Storeys in the model (8" in facts[0] and "112 windows" in facts[0]
+    (img,) = repo.images.values()
+    chk = img["options"]["check"]
+    assert chk["retried"] and chk["claude"]["ok"] is True          # the corrected try is kept
+    assert sum(1 for e in repo.usage if e["operation"] == "geometry_check") == 2
