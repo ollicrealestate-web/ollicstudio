@@ -3,12 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Ollic Design Studio</title>
-<meta name="description" content="Upload an image of your building. Ollic's AI turns it into photoreal renders, a golden construction animation and cinematic video clips.">
+<title>Ollic Design Studio: realistic renders for architects and designers</title>
+<meta name="description" content="A realistic render studio for architects and interior designers. Upload a sketch, a 3D view or a floor plan picture, describe the finish in plain words, and get a photoreal render that keeps your design.">
 <meta name="theme-color" content="#070707">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preload" href="vendor/archivo/archivo-var.woff" as="font" type="font/woff" crossorigin>
+<link rel="preload" as="image" href="assets/img/villa-render.jpg">
 <link rel="stylesheet" href="assets/styles.css">
 <script>try { if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) document.documentElement.classList.add('js-motion'); } catch (e) {}</script>
 </head>
@@ -17,7 +16,9 @@
 <header class="site-head">
   <div class="wrap">
     <a class="brand" href="./" aria-label="Ollic Design Studio home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Design Studio</b></a>
-    <nav class="nav" aria-label="Account">
+    <nav class="nav" aria-label="Site">
+      <a class="nav-link" href="#studio">The studio</a>
+      <a class="nav-link" href="#how">How it works</a>
       <a class="btn" href="app.html#sign-in">Sign in</a>
       <a class="btn primary" href="app.html#sign-up">Start free</a>
     </nav>
@@ -26,153 +27,144 @@
 
 <main>
   <section class="wrap hero">
-    <div>
-      <span class="eyebrow">Image to film · in one upload</span>
-      <h1 style="margin-top:18px">Watch your house get built <span class="red">before the first block.</span></h1>
-      <p class="lead">Upload a sketch, a 3D view or a floor plan picture. Tell Ollic what you want in plain words, and its AI turns your image into photoreal renders, a golden construction animation and cinematic video clips your client can open on a phone.</p>
+    <div class="hero-copy">
+      <span class="eyebrow">Realistic render studio for architects and designers</span>
+      <h1>Your design, rendered real.</h1>
+      <p class="lead">Upload a sketch, a Revit, SketchUp or Lumion view, or a picture of a floor plan. Describe the finish in plain words. Ollic reads your image, writes the prompt and returns a photoreal render that keeps your building and your camera.</p>
       <div class="ctas">
-        <a class="btn primary big" href="app.html#sign-up">Start a project
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-        <a class="btn big" href="#how">How it works</a>
+        <a class="btn primary big" href="app.html#sign-up">Start a render
+          <svg class="ico go" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="btn big" href="#how">See how it works</a>
       </div>
-      <div class="formats" aria-label="Accepted files">
-        <span class="chip">PNG</span><span class="chip">JPEG</span>
-      </div>
+      <p class="fine">PNG or JPEG. Three free renders a day. Your images stay private.</p>
     </div>
 
-    <figure class="build" style="margin:0" aria-label="Illustration: a bungalow drawn stage by stage">
-      <div class="build-top"><span class="live">Golden animation</span><span>Shot 1 / 3</span></div>
-      <svg class="house" viewBox="0 0 420 250" role="img" aria-label="Line drawing of a bungalow rising from its foundation">
-        <!-- ground and setting-out lines -->
-        <path class="ln dim" d="M20 196 L210 246 L400 196" />
-        <path class="ln dim" d="M40 170 L210 125 L380 170" stroke-dasharray="3 5"/>
-        <!-- foundation slab -->
-        <path class="ln draw fill" style="--len:560;--d:.1s" d="M70 182 L210 220 L350 182 L210 144 Z"/>
-        <!-- walls -->
-        <path class="ln draw fill" style="--len:420;--d:.5s" d="M70 182 L70 124 L210 162 L210 220 Z"/>
-        <path class="ln draw fill" style="--len:420;--d:.7s" d="M210 220 L210 162 L350 124 L350 182 Z"/>
-        <!-- columns -->
-        <path class="ln draw" style="--len:60;--d:.4s" d="M140 201 L140 143 M280 201 L280 143"/>
-        <!-- windows and door -->
-        <path class="ln draw" style="--len:120;--d:1.1s" d="M95 166 L95 146 L125 154 L125 174 Z M155 182 L155 162 L185 170 L185 190 Z"/>
-        <path class="ln draw" style="--len:140;--d:1.2s" d="M240 209 L240 178 L262 172 L262 203 M300 175 L300 155 L330 147 L330 167 Z"/>
-        <!-- hip roof -->
-        <path class="ln draw" style="--len:700;--d:1.4s" d="M56 128 L210 170 L364 128 L262 96 L158 96 Z M158 96 L210 170 M262 96 L210 170"/>
-        <path class="ln draw" style="--len:120;--d:1.8s" d="M158 96 L262 96"/>
-        <!-- dimensions -->
-        <path class="ln dim" d="M66 200 L206 238 M214 238 L354 200"/>
-        <text class="lbl" x="104" y="232">14.0 M</text>
-        <text class="lbl" x="292" y="232">10.0 M</text>
-        <text class="lbl" x="372" y="122">ROOF</text>
-        <text class="lbl" x="356" y="160">BLOCKWORK</text>
-        <text class="lbl" x="18" y="186">DPC</text>
-      </svg>
-      <div class="stages-mini">
-        <div class="row"><span class="n">01</span><span>Your 3D image<div class="bar"><i style="width:100%;--d:.2s"></i></div></span><span></span></div>
-        <div class="row"><span class="n">02</span><span>Photoreal render by AI<div class="bar"><i style="width:100%;--d:.5s"></i></div></span><span></span></div>
-        <div class="row"><span class="n">03</span><span>Gold lines rise from the ground<div class="bar"><i style="width:68%;--d:.8s"></i></div></span><span></span></div>
-        <div class="row"><span class="n">04</span><span>Light sweep reveals the building<div class="bar"><i style="width:0%"></i></div></span><span></span></div>
-      </div>
-    </figure>
+    <div>
+      <figure class="reveal-stage" id="stage" aria-label="A line drawing of a villa turning into its photoreal render">
+        <img src="assets/img/villa-lines.jpg" alt="" width="1248" height="832">
+        <img class="render" src="assets/img/villa-render.jpg" alt="Photoreal render of a modern two-storey villa with white walls, bronze-framed glazing, a timber soffit and landscaped garden" width="1248" height="832">
+        <span class="beam" aria-hidden="true"></span>
+        <span class="tag l" aria-hidden="true">Lines</span>
+        <span class="tag r" aria-hidden="true">Render</span>
+        <input type="range" min="0" max="100" value="50" step="1" aria-label="Compare the line drawing with the render">
+      </figure>
+      <p class="stage-cap"><span><b>Move across the picture</b> to sweep the light.</span><span>Rendered by Ollic from a one-line brief.</span></p>
+    </div>
   </section>
 
-  <div class="marquee" aria-hidden="true">
-    <div class="marquee-track">
-      <span>Sketch</span><span>3D view</span><span>Floor plan</span><span>Photoreal render</span><span>Plain-words revision</span><span>Gold line drawing</span><span>Light sweep</span><span>Cinematic clip</span><span>MP4</span><span>Reels</span><span>WhatsApp Status</span><span>TikTok</span>
-      <span>Sketch</span><span>3D view</span><span>Floor plan</span><span>Photoreal render</span><span>Plain-words revision</span><span>Gold line drawing</span><span>Light sweep</span><span>Cinematic clip</span><span>MP4</span><span>Reels</span><span>WhatsApp Status</span><span>TikTok</span>
-    </div>
-  </div>
-
-  <section class="band" id="how">
+  <section class="band" id="studio" style="padding-top:0">
     <div class="wrap">
       <div class="section-head reveal">
-        <span class="eyebrow">How it works</span>
-        <h2>Three steps from image to film.</h2>
-        <p>Claude AI reads your image and your words, writes the prompts and drives the best image and video AI for each job.</p>
+        <h2>Three ways to use the studio</h2>
+        <p>Each one starts from an image you already have. Nothing to model, nothing to install.</p>
       </div>
-      <div class="chapters">
-        <article class="chapter reveal">
-          <span class="num">01</span>
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v4h16v-4"/></svg>
-          <h3>Upload</h3>
-          <p>A PNG or JPEG: a sketch, a Revit, SketchUp or Lumion view, a render, a photo or a floor plan picture. Stored privately in your project.</p>
+      <div class="makes">
+        <article class="make reveal">
+          <div class="make-art">
+            <img src="assets/img/villa-render.jpg" alt="Photoreal render of a modern villa at golden hour" loading="lazy" width="1248" height="832">
+            <div class="prompt-card"><b>The brief that made this render</b>Modern two-storey luxury villa in Lekki, Lagos: white render walls, large bronze-framed glass windows, flat roof with cantilevered upper floor, palm trees and interlocking paving.</div>
+          </div>
+          <div class="make-copy">
+            <h3>Photoreal render</h3>
+            <p>Start from a sketch, a 3D view or a photo of a room or a facade. The picture you choose keeps its shape and camera; up to three reference images set the scene, the materials and the light.</p>
+            <ul>
+              <li>The AI studies your picture and writes the prompt; you can edit it before anything is made.</li>
+              <li>Exteriors and interiors: facades, lobbies, kitchens, bedrooms.</li>
+              <li>Change anything afterwards in plain words, like “make the roof dark grey”.</li>
+            </ul>
+          </div>
         </article>
-        <article class="chapter reveal">
-          <span class="num">02</span>
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM4 9h16M9 4v16"/></svg>
-          <h3>Describe</h3>
-          <p>Say what you want in plain words. The AI studies the image and writes the prompt; you can read and edit it before anything is made.</p>
+
+        <article class="make reveal">
+          <div class="make-art plan-art" aria-hidden="true">
+            <svg viewBox="0 0 400 260">
+              <path class="wall" d="M30 30h340v200H30z"/>
+              <path class="wall" d="M170 30v80M170 150v80M30 140h90M150 140h20M250 30v70M250 130v100M250 100h120"/>
+              <path class="thin" d="M120 140a30 30 0 0 1 30-30M170 110a40 40 0 0 1 40 40M250 100a30 30 0 0 0-30 30"/>
+              <path class="thin" d="M60 230h60M290 30h50M370 160v40"/>
+              <text class="room" x="58" y="82">Living</text><text class="area" x="58" y="96">28 m²</text>
+              <text class="room" x="58" y="188">Dining</text><text class="area" x="58" y="202">16 m²</text>
+              <text class="room" x="192" y="74">Kitchen</text><text class="area" x="192" y="88">12 m²</text>
+              <text class="room" x="270" y="66">Bed 1</text><text class="area" x="270" y="80">15 m²</text>
+              <text class="room" x="270" y="176">Bed 2</text><text class="area" x="270" y="190">13 m²</text>
+              <text class="room" x="188" y="196">Hall</text>
+            </svg>
+          </div>
+          <div class="make-copy">
+            <h3>Floor plan to 3D</h3>
+            <p>Upload a picture of a floor plan. Ollic reads the rooms and the layout, then makes exterior and interior views that follow it, ready for an early client meeting.</p>
+            <ul>
+              <li>Room names, areas and the overall shape are read for you.</li>
+              <li>Add a reference photo to set the style of the finished house.</li>
+            </ul>
+          </div>
         </article>
-        <article class="chapter reveal">
-          <span class="num">03</span>
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l14 8-14 8z"/></svg>
-          <h3>Get the result</h3>
-          <p>Renders, animations and video clips are made in the background and saved to your project's Library.</p>
+
+        <article class="make reveal">
+          <div class="make-art gold-art" aria-hidden="true">
+            <img src="assets/img/villa-gold.jpg" alt="" loading="lazy" width="1248" height="832">
+            <img class="render" src="assets/img/villa-render.jpg" alt="" loading="lazy" width="1248" height="832">
+          </div>
+          <div class="make-copy">
+            <span><span class="chip gold">Video</span></span>
+            <h3>Golden animation</h3>
+            <p>Turn up to three 3D images into a short film. The building is drawn in glowing gold lines from the ground up, then a line of light sweeps up and reveals the photoreal render.</p>
+            <ul>
+              <li>Landscape, portrait and square, for presentations, Reels, Status and TikTok.</li>
+              <li>Or make one continuous AI camera move from the gold lines to the finished building.</li>
+            </ul>
+          </div>
         </article>
       </div>
+    </div>
+  </section>
+
+  <section class="band" id="how" style="padding-top:0">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <h2>How a render is made</h2>
+        <p>About a minute from upload to a picture you can send.</p>
+      </div>
+      <ol class="steps" id="steps">
+        <li class="step"><h3>Upload your image</h3><p>A sketch, a 3D view, a photo or a floor plan picture, as PNG or JPEG.</p></li>
+        <li class="step"><h3>Add references</h3><p>Optional: up to three photos whose setting, materials and mood you like.</p></li>
+        <li class="step"><h3>Let the AI write the prompt</h3><p>Press “Read image and write prompt”, then read and edit it, or describe the building yourself.</p></li>
+        <li class="step"><h3>Render and refine</h3><p>Choose the AI that suits the job, render, then revise in plain words. Every version is kept.</p></li>
+      </ol>
     </div>
   </section>
 
   <section class="band" style="padding-top:0">
     <div class="wrap">
       <div class="section-head reveal">
-        <span class="eyebrow">What you get</span>
-        <h2>One image. Every output <span class="red">matches it.</span></h2>
+        <h2>Made for design work</h2>
       </div>
-      <div class="bento">
-        <article class="tile feature w2 h2 reveal">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/></svg>
-          <h3>The golden animation</h3>
-          <p>Your 3D image becomes a photoreal night view. The building's lines are drawn in glowing gold from the ground up, then a line of light sweeps up and reveals the finished building. Up to three images make one video.</p>
-          <div class="art" aria-hidden="true"><div class="seq"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
-        </article>
-        <article class="tile reveal">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3zM3 15l5-4 4 3 3-2 6 4"/></svg>
-          <h3>Photoreal renders</h3>
-          <p>A sketch or 3D view becomes a photoreal picture of the same building, from the same camera.</p>
-        </article>
-        <article class="tile reveal">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h18v18H3zM3 12h9V3M12 12v9"/></svg>
-          <h3>Floor plan to 3D</h3>
-          <p>A picture of a floor plan becomes photoreal 3D views that follow its layout.</p>
-        </article>
-        <article class="tile reveal">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l14 8-14 8z"/></svg>
-          <h3>Cinematic clips</h3>
-          <p>One continuous AI video shot: the gold wireframe turns into the real building while the camera moves.</p>
-        </article>
-        <article class="tile reveal">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/></svg>
-          <h3>Revise in plain words</h3>
-          <p>"Make the roof dark grey." Each change is a new version; the original stays.</p>
-        </article>
-        <article class="tile wide reveal">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
-          <div><h3>Ready for WhatsApp, Instagram and TikTok</h3>
-          <p>MP4 videos with titles and your branding, in the shape each platform wants.</p></div>
-          <div class="art ratio-row" aria-hidden="true"><b style="width:96px;height:54px">16:9</b><b style="width:54px;height:96px">9:16</b><b style="width:70px;height:70px">1:1</b></div>
-        </article>
+      <div class="points reveal">
+        <div class="point"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/></svg><h3>Your design stays yours</h3><p>The render keeps the form, the floors, the openings and the camera of the picture you give it. The AI adds materials, light and setting.</p></div>
+        <div class="point"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/></svg><h3>The right AI for each job</h3><p>A free option every day, a premium option for client work, and others for speed or detail. Each shows its price before you start.</p></div>
+        <div class="point"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/></svg><h3>Revise without starting over</h3><p>Say what should change. The original stays, so you can compare versions side by side.</p></div>
+        <div class="point"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><h3>Private by default</h3><p>Your images, renders and videos are visible only to your account until you download and share them.</p></div>
       </div>
     </div>
   </section>
 
   <section class="band" style="padding-top:0">
     <div class="wrap">
-      <div class="cta-final reveal">
-        <span class="eyebrow" style="color:#ffc2c4">Your first project</span>
-        <h2>Show your client the house <span class="red">before it exists.</span></h2>
-        <p>Create an account, start a project and upload an image. Your images stay private to your account.</p>
-        <a class="btn primary big" href="app.html#sign-up">Create an account
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      <div class="cta-final reveal" id="ctaFinal">
+        <h2>Show your client the building before it exists.</h2>
+        <p>Create an account, start a project and upload an image. Your first render takes about a minute.</p>
+        <a class="btn primary big" href="app.html#sign-up">Create a free account
+          <svg class="ico go" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       </div>
     </div>
   </section>
 </main>
 
 <footer class="wrap foot">
-  <div class="row"><span class="brand" style="font-size:1rem"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Design Studio</b></span><span>Images in, renders and videos out</span></div>
-  <p>All outputs are AI visualisations, not construction documents.</p>
+  <div class="row"><span class="brand" style="font-size:1rem"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Design Studio</b></span><span>Realistic renders for architects and designers</span></div>
+  <p>Renders are AI visualisations for presentation, not construction documents.</p>
 </footer>
 <script src="assets/landing.js" defer></script>
+<script src="assets/ui.js" defer></script>
 </body>
 </html>

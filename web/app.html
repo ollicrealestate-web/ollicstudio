@@ -3,10 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Projects · Ollic Design Studio</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<title>Studio · Ollic Design Studio</title>
+<link rel="preload" href="vendor/archivo/archivo-var.woff" as="font" type="font/woff" crossorigin>
 <meta name="theme-color" content="#070707">
 <link rel="stylesheet" href="assets/styles.css">
 <script src="assets/config.js"></script>
@@ -32,7 +30,7 @@
 
   <section id="authView" hidden>
     <div class="auth-card">
-      <div class="auth-title"><span class="eyebrow">Your projects</span><h2 style="font-size:1.9rem">Welcome to Ollic</h2></div>
+      <div class="auth-title"><span class="eyebrow">Render studio</span><h2 style="font-size:1.9rem">Welcome to Ollic</h2><p>Realistic renders for architects and designers.</p></div>
       <div class="tabs" role="tablist">
         <button role="tab" id="tabIn" aria-selected="true" type="button">Sign in</button>
         <button role="tab" id="tabUp" aria-selected="false" type="button">Create account</button>
@@ -71,7 +69,7 @@
 
   <section id="projectsView" hidden>
     <div class="page-head">
-      <div><span class="eyebrow">Dashboard</span><h1 style="margin-top:10px">Projects</h1><p class="muted">Each project holds the images, renders and videos for one building.</p></div>
+      <div><span class="eyebrow">Your studio</span><h1 style="margin-top:10px">Projects</h1><p class="muted">Each project holds the images, renders and videos for one building.</p></div>
       <form class="new-project" id="newProjectForm">
         <input type="text" id="newProjectName" placeholder="Project name, e.g. Lekki 4-bed duplex" maxlength="120" aria-label="New project name" required>
         <button class="btn primary" type="submit"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New project</button>
@@ -169,10 +167,10 @@
     </section>
     <section class="studio" id="studio" aria-labelledby="studioTitle">
       <div class="studio-head">
-        <div><span class="eyebrow">Concept renders</span><h2 id="studioTitle" class="studio-title">Picture it before it is built</h2>
+        <div><span class="eyebrow">Render studio</span><h2 id="studioTitle" class="studio-title">Make it photoreal</h2>
           <p class="muted">Choose the picture, let the AI write the prompt, and render. About a minute per picture.</p></div>
       </div>
-      <div id="studioOff" class="notice" hidden>Concept renders are not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
+      <div id="studioOff" class="notice" hidden>Rendering is not switched on for this site yet. The owner needs to add the image provider settings to the server.</div>
       <form id="renderForm" class="render-form card" hidden>
         <div class="span2" id="tierHome"><fieldset class="tiers" id="tierPick">
           <legend>AI version <span class="hint">Used for every picture this service makes</span></legend>
@@ -236,5 +234,6 @@
 </main>
 <div class="toast" id="toast" role="status" hidden></div>
 <script type="module" src="assets/app.js"></script>
+<script src="assets/ui.js" defer></script>
 </body>
 </html>

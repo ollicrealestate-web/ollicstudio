@@ -667,7 +667,7 @@ $("#iaSeconds").onchange = () => { iaBuildKey = ""; buildIA(); };
 
 $("#iaMake").onclick = async () => {
   if (!current) return;
-  if ($("#renderForm").hidden) { toast("Concept renders are not switched on yet."); return; }
+  if ($("#renderForm").hidden) { toast("Rendering is not switched on yet."); return; }
   if (!iaSel.length) { toast("Tick the images to animate first."); return; }
   // views with a photoreal picture (made, or used as it is) but no line drawing yet: only the drawing is needed
   const needLines = iaSel.filter(fid => (iaRender(fid) || iaAsIs.has(fid)) && !iaLine(fid) && !iaLinePending.has(fid));
