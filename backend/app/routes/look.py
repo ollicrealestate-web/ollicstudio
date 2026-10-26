@@ -58,6 +58,10 @@ def put_look(project_id: uuid.UUID, body: Look, request: Request, user: CurrentU
             f = repo.get_source_file(user, str(m.sample_file_id))
             if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "A material sample is not in this project.")
+    if body.scene_ref_file_id:
+        f = repo.get_source_file(user, str(body.scene_ref_file_id))
+        if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "The scene picture is not in this project.")
     if body.hero_render_id:
         r = repo.get_rendered_image(user, str(body.hero_render_id))
         if not r or r.get("owner_id") != user.id or r.get("project_id") != str(project_id):
@@ -157,3 +161,53 @@ def suggest_look(project_id: uuid.UUID, body: SuggestIn, request: Request, user:
     saved = _save(request, user, project_id, look)
     request.app.state.runner.submit(_read_job, request.app.state, user, str(project_id), files[0], files[1], body.description)
     return saved
+
+
+@router.get("/scenes")
+def scenes():
+    """The preset scenes and the render types, for the pickers."""
+    from ..scenes import RENDER_TYPES, scene_list
+    return {"scenes": scene_list(), "types": {k: v["name"] for k, v in RENDER_TYPES.items()}}
+
+
+class SceneFromIn(BaseModel):
+    file_id: uuid.UUID
+
+
+@router.post("/projects/{project_id}/look/scene-from-image")
+def scene_from_image(project_id: uuid.UUID, body: SceneFromIn, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """Claude studies the architect's reference picture and writes its scene (light, sky, setting, planting, life, camera,
+    mood; never the building); it becomes the project's scene, with the picture kept as the scene reference."""
+    from ..prompt_writer import PromptWriterFailed, _image_block
+    from ..scenes import SCENE_SYSTEM
+    from ..vision import image_png, load_image
+    from .projects import _storage
+    project = _owned_project(request, user, project_id)
+    writer = getattr(request.app.state, "prompt_writer", None)
+    if writer is None or not hasattr(writer, "ask_json"):
+        raise HTTPException(503, {"code": "not_configured", "reason": "Copying a scene needs Claude, which is not connected yet. Pick a preset scene for now."})
+    repo = _repo(request)
+    f = repo.get_source_file(user, str(body.file_id))
+    if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That picture is not in this project.")
+    img = image_png(load_image(_storage(request).download(user, f["storage_path"]), f["detected_type"]), max_side=1100)
+    try:
+        out = writer.ask_json(SCENE_SYSTEM, [{"type": "text", "text": "The reference picture:"}, _image_block(img)], max_tokens=1500, timeout=90)
+    except (PromptWriterFailed, KeyError, TypeError) as exc:
+        raise HTTPException(502, {"code": "read_failed", "reason": "Claude could not read that picture this time. Try again in a moment."}) from exc
+    a = out.get("answer") or {}
+    recipe = " ".join(str(a.get("recipe") or "").split())[:1500]
+    if len(recipe) < 30:
+        raise HTTPException(502, {"code": "read_failed", "reason": "Claude could not describe that scene. Try another picture."})
+    try:
+        repo.create_usage_event(user, {"project_id": str(project_id), "provider": "anthropic", "model": out.get("model") or getattr(writer, "model", "claude"),
+                                       "operation": "vision_read", "cost_usd": str(out["cost_usd"]) if out.get("cost_usd") is not None else None,
+                                       "price_source": "platform.claude.com price list", "raw_usage": out.get("usage")})
+    except BackendUnavailable:
+        pass
+    look = current_look(project)
+    look.scene_id = None
+    look.scene_name = " ".join(str(a.get("name") or "My scene").split())[:80]
+    look.scene_text, look.scene_ref_file_id = recipe, body.file_id
+    saved = _save(request, user, project_id, look)
+    return saved | {"scene_type": a.get("type") if a.get("type") in ("exterior", "interior", "site_plan", "estate") else "exterior"}

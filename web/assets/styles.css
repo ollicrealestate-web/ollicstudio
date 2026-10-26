@@ -600,3 +600,14 @@ tr:last-child td { border-bottom: 0; }
 .chip.src-architect { border-color: rgba(70, 200, 120, .5); }
 .look-tools { gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 @media (max-width: 640px) { .look-mat { grid-template-columns: 18px 18px 1fr 44px; } .look-mat .used, .look-mat .chip { grid-column: 3 / -1; } }
+/* ---------- render type and scene ---------- */
+.scene-box { display: grid; gap: 10px; }
+.rtype { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rtype b { margin-right: 6px; }
+.rtype label { cursor: pointer; }
+.rtype input { position: absolute; opacity: 0; pointer-events: none; }
+.rtype span { display: inline-block; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); font-size: .9rem; transition: background .2s, border-color .2s; }
+.rtype input:checked + span { background: var(--accent, #e5484d); border-color: var(--accent, #e5484d); color: #fff; }
+.rtype input:focus-visible + span { outline: 2px solid var(--accent, #e5484d); outline-offset: 2px; }
+.scene-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.scene-row .field { flex: 1 1 260px; margin: 0; }

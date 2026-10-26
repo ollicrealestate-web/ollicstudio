@@ -28,6 +28,8 @@ VIEWS = {
     "aerial": "Aerial three-quarter view of the building and its plot",
     "cutaway": "Three-quarter cutaway view with the front facade removed, showing the furnished apartments and floors inside",
     "interior": "Interior view of a furnished room at standing eye level",
+    "site_plan": "Rendered site plan seen straight from above",
+    "estate": "Estate masterplan view of the whole development",
 }
 STYLES = {
     "luxury contemporary": "luxury contemporary architecture: glass balconies, stone and timber cladding, premium finishes, feature lighting",
@@ -180,11 +182,16 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
             # the project's approved look (materials by the model's material map, the hero render) for model views
             send, look_ctx = images, None
-            if "model" in roles:
+            from .scenes import type_rule
+            rule = type_rule(inp.get("view"))
+            if rule:
+                prompt = (prompt[: -len(SAFE_TAIL)].rstrip() if prompt.endswith(SAFE_TAIL) else prompt) + "\nRENDER TYPE: " + rule + "\n" + SAFE_TAIL
+            if "plan" not in roles and not inp.get("anim_line"):
                 images, roles, block, look_ctx = apply_look(state, user, job, inp, images, roles, exact=(tier == "exact"))
                 if block:
                     prompt = (prompt[: -len(SAFE_TAIL)].rstrip() if prompt.endswith(SAFE_TAIL) else prompt) + "\n" + block + "\n" + SAFE_TAIL
-                send = images
+            send = images
+            if "model" in roles:
                 if tier == "exact":   # Ollic Exact draws on the model's line drawing (or depth map) from the same camera
                     guide_kind = getattr(client, "guide", "depth")
                     gid = inp.get("guide_file_id") if guide_kind == "lines" else inp.get("depth_file_id")
@@ -434,17 +441,30 @@ def apply_look(state, user: CurrentUser, job: dict, inp: dict, images: list, rol
                 hero = storage.download(user, r.get("base_path") or r["storage_path"], bucket=settings.renders_bucket)
             except BackendUnavailable:
                 hero = None
-    if exact:      # the depth model sees only the prompt: the materials go in as words
+    if exact:      # the depth model sees only the prompt: the materials and the scene go in as words
         return images, roles, look_block(look, None, None), ctx
-    at = roles.index("model") + 1
+    # the scene copied from the architect's own picture goes along as a scene reference (never its building)
+    scene_ref = None
+    if look.scene_ref_file_id and not look.scene_id:
+        f = repo.get_source_file(user, str(look.scene_ref_file_id))
+        if f and f.get("project_id") == job["project_id"] and f.get("detected_type") in ("png", "jpeg") \
+                and str(look.scene_ref_file_id) not in {str(r.get("file_id")) for r in inp.get("references") or []}:
+            scene_ref = storage.download(user, f["storage_path"])
+    main = "model" if "model" in roles else "base" if "base" in roles else None
+    at = roles.index(main) + 1 if main else 0
     add = ([(ctx["map"], "image/png", "materials")] if ctx["map"] else []) + ([(hero, "image/jpeg", "hero")] if hero else [])
     images = images[:at] + [(d, m) for d, m, _ in add] + images[at:]
     roles = roles[:at] + [r for _, _, r in add] + roles[at:]
+    if scene_ref is not None and len(images) < 4:
+        images, roles = images + [(scene_ref, "image/jpeg")], roles + ["style"]
     while len(images) > 4 and "style" in roles:          # image models take up to four pictures: references go first
         i = len(roles) - 1 - roles[::-1].index("style"); images.pop(i); roles.pop(i)
     map_i = roles.index("materials") + 1 if "materials" in roles else None
     hero_i = roles.index("hero") + 1 if "hero" in roles else None
-    return images, roles, look_block(look, map_i, hero_i, roles.index("model") + 1), ctx
+    block = look_block(look, map_i, hero_i, roles.index(main) + 1 if main else None)
+    if scene_ref is not None and "style" in roles:
+        block += f"\nImage {len(roles) - roles[::-1].index('style')} is the project's SCENE REFERENCE: copy its light, sky, setting, planting, life, camera feel and mood, never its building."
+    return images, roles, block, ctx
 
 
 GEOMETRY_FIRST = ("Most important: Image 1 is an exact view of the architect's model. Keep its geometry exactly: the same number of floors, "

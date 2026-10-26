@@ -372,3 +372,45 @@ def test_a_walkthrough_frame_gets_a_second_round_that_fixes_what_claude_still_se
     assert len(fix) == 1 and "make them white, not beige stone" in fix[0]["prompt"]
     img = list(repo.images.values())[-1]
     assert img["options"]["check"]["rounds"] == 2 and img["options"]["check"]["claude"]["ok"] is True
+
+
+class SceneReader:
+    model = "claude-test"
+
+    def ask_json(self, system, content, max_tokens=1800, **kw):
+        assert "Never describe the building" in system
+        return {"answer": {"name": "Dusk by the Pool", "type": "exterior",
+                           "recipe": "Blue hour after sunset, warm interior glow, lit planters and a still pool in front, low symmetrical camera with a 24 mm lens."},
+                "usage": {}, "cost_usd": "0.01", "model": self.model}
+
+
+def test_scene_presets_and_a_scene_copied_from_a_picture(render_settings, repo, storage, alice):
+    images = FakeImages()
+    app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
+                     fal={}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=SceneReader())
+    c = TestClient(app)
+    lst = c.get("/api/scenes").json()
+    ids = {s["id"]: s for s in lst["scenes"]}
+    assert ids["golden_driveway"]["name"] == "Golden Hour Driveway" and ids["interior_morning"]["type"] == "interior"
+    assert lst["types"] == {"exterior": "Exterior", "interior": "Interior", "site_plan": "Site plan", "estate": "Estate layout"}
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    assert c.put(f"/api/projects/{pid}/look", json={"scene_id": "nope"}, headers=alice["headers"]).status_code == 422
+    c.put(f"/api/projects/{pid}/look", json={"scene_id": "golden_driveway"}, headers=alice["headers"])
+    body = {"prompt": "photoreal render", "prompt_ready": True, "references": [{"file_id": view["id"], "role": "model"}], "guide_file_id": lines["id"]}
+    c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"])
+    p = images.calls[0]["prompt"]
+    assert "SCENE for every view of this project (Golden Hour Driveway): Late-afternoon golden-hour sun" in p and "RENDER TYPE: An exterior view" in p
+    assert p.rstrip().endswith("watermarks.")
+    # an interior render is told the interior rules
+    c.post(f"/api/projects/{pid}/architectural-render", json=body | {"view": "interior"}, headers=alice["headers"])
+    assert "RENDER TYPE: An interior view: keep every wall" in images.calls[-1]["prompt"]
+    # a scene copied from the architect's own picture: named and written by Claude, the picture sent as the scene reference
+    ref = upload(c, alice, pid, "my-scene.jpg", jpg(picture("#203060", "#ffcc88")))
+    out = c.post(f"/api/projects/{pid}/look/scene-from-image", json={"file_id": ref["id"]}, headers=alice["headers"]).json()
+    assert out["scene_name"] == "Dusk by the Pool" and out["scene_id"] is None and out["scene_ref_file_id"] == ref["id"]
+    n = len(images.calls)
+    c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"])
+    call = images.calls[n]
+    assert "SCENE for every view of this project (Dusk by the Pool): Blue hour after sunset" in call["prompt"]
+    assert len(call["images"]) == 2 and "Image 2 is the project's SCENE REFERENCE" in call["prompt"]

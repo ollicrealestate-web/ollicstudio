@@ -207,7 +207,7 @@ function goTo(svc, st) {
   if (service) { q.set("service", service); q.set("step", step); }
   if (chosenIfc && SERVICES[service]?.modes) q.set("model", chosenIfc);
   history.replaceState(null, "", `${location.pathname}?${q}`);
-  applyView(); syncModelOnly(); if (SERVICES[service]?.modes) loadLook();
+  applyView(); syncModelOnly(); if (SERVICES[service]?.modes || SERVICES[service]?.sections?.includes("studio")) loadLook();
   if (!reduceMotion()) window.scrollTo({ top: 0 }); else window.scrollTo(0, 0);
 }
 function chooseService(k) { svcPicked = []; goTo(k, k === "library" ? "work" : "start"); }
@@ -584,8 +584,51 @@ async function readMaterials(viewId, matsId) {
   } finally { $("#lookAsk").disabled = false; }
 }
 const SOURCE = { ai: "Claude", architect: "You", model: "Model" };
+/* ---------- scenes: presets, or one copied from the architect's own picture; saved in the project look ---------- */
+let sceneList = null;
+const TYPE_NAMES = { exterior: "Exterior", interior: "Interior", site_plan: "Site plan", estate: "Estate layout" };
+async function loadScenes() {
+  if (sceneList) return sceneList;
+  try { sceneList = (await api.scenes()).scenes; } catch { sceneList = []; }
+  return sceneList;
+}
+async function drawScene() {
+  const list = await loadScenes(), sel = $("#rScene");
+  const groups = Object.keys(TYPE_NAMES).map(t => el("optgroup", { label: TYPE_NAMES[t] }, ...list.filter(x => x.type === t).map(x => el("option", { value: x.id }, x.name))));
+  const mine = look?.scene_text && !look?.scene_id ? [el("option", { value: "custom" }, `★ ${look.scene_name || "My scene"} (from your picture)`)] : [];
+  sel.replaceChildren(el("option", { value: "" }, "No scene (the prompt decides)"), ...mine, ...groups);
+  sel.value = look?.scene_id || (mine.length ? "custom" : "");
+  const pick = list.find(x => x.id === sel.value);
+  $("#rSceneText").textContent = pick ? pick.blurb : sel.value === "custom" ? (look.scene_text || "").slice(0, 220) + ((look.scene_text || "").length > 220 ? "…" : "") : "";
+}
+$("#rScene").addEventListener("change", async () => {
+  if (!current) return;
+  if (!look || lookFor !== current.id) { try { look = await api.look(current.id); lookFor = current.id; } catch (err) { return toast(err.message); } }
+  const v = $("#rScene").value;
+  if (v === "custom") return drawScene();
+  look.scene_id = v || null;
+  if (v) { look.scene_text = ""; look.scene_name = ""; look.scene_ref_file_id = null; }
+  const t = sceneList.find(x => x.id === v)?.type;
+  if (t) { const r = document.querySelector(`input[name=rtype][value=${t}]`); if (r) r.checked = true; }
+  try { look = await api.saveLook(current.id, look); drawScene(); toast(v ? "Scene saved for this project. Every view uses it." : "Scene cleared."); }
+  catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+});
+$("#rSceneUpload").onchange = async e => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file || !current) return;
+  $("#rSceneText").textContent = "Claude is studying the scene in your picture…";
+  try {
+    const saved = await uploadFile(current.id, file, () => {});
+    const out = await api.sceneFromImage(current.id, saved.id);
+    look = out; lookFor = current.id;
+    const r = document.querySelector(`input[name=rtype][value=${out.scene_type || "exterior"}]`); if (r) r.checked = true;
+    current = await api.getProject(current.id).catch(() => current);
+    await drawScene(); toast(`Scene “${out.scene_name}” copied and saved for this project.`);
+  } catch (err) { if (err.status === 401) return handle(err); $("#rSceneText").textContent = err.message; }
+};
 function drawLook() {
   if (!look) return;
+  drawScene();
   const mats = look.materials || [], open = mats.filter(m => !m.confirmed).length;
   $("#lookSummary").textContent = mats.length ? `${mats.length} material${mats.length > 1 ? "s" : ""}${open ? ` · ${open} to confirm` : " · all confirmed"}${look.hero_render_id ? " · hero render set" : ""}`
     : "Capture a view of your model: Claude lists its materials for you to confirm.";
@@ -944,6 +987,7 @@ function briefFromForm() {
   return { prompt, prompt_ready: promptByAI && !!$("#rPrompt").value.trim(), references: renderRefs(), tier: chosenTier(), quality: $("#rQuality").value,
     ...(guide ? { guide_file_id: guide } : {}), ...(depth ? { depth_file_id: depth } : {}), ...(mats ? { material_file_id: mats } : {}),
     ...(guide && viewerModelId ? { model_id: viewerModelId } : {}),
+    view: document.querySelector("input[name=rtype]:checked")?.value || "exterior",
     aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
 $("#renderForm").onsubmit = e => {

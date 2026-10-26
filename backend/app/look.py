@@ -76,13 +76,25 @@ class Look(BaseModel):
     materials: list[Material] = Field(default_factory=list, max_length=40)
     hero_render_id: uuid.UUID | None = None
     setting: str = Field(default="", max_length=500)   # surroundings, light and mood for every view
+    scene_id: str | None = Field(default=None, max_length=40)     # a preset scene (see scenes.py), or None
+    scene_name: str = Field(default="", max_length=80)            # a scene copied from the architect's picture: its name
+    scene_text: str = Field(default="", max_length=1500)          # ... and its recipe, written by Claude, editable
+    scene_ref_file_id: uuid.UUID | None = None                     # ... and the picture, sent along as the scene reference
     reading: str | None = None      # set while Claude reads the materials (when it started, ISO time)
     read_notes: str = Field(default="", max_length=400)   # what Claude said, or why it could not read them
 
-    @field_validator("setting")
+    @field_validator("setting", "scene_name", "scene_text")
     @classmethod
     def tidy(cls, v: str) -> str:
         return " ".join((v or "").split())
+
+    @field_validator("scene_id")
+    @classmethod
+    def known_scene(cls, v: str | None) -> str | None:
+        from .scenes import SCENES
+        if v and v not in SCENES:
+            raise ValueError("Unknown scene.")
+        return v or None
 
 
 def default_name(cls: str, hex_: str) -> str:
@@ -124,6 +136,12 @@ def look_block(look: Look, map_image: int | None, hero_image: int | None, model_
     if hero_image:
         parts.append(f"Image {hero_image} is the APPROVED LOOK of this building: match its materials, colours, glazing, light and mood exactly; "
                      f"take the building's shape and the camera only from Image {model_image or 1}.")
+    from .scenes import SCENES, scene_text
+    scene = scene_text(look.scene_id, look.scene_text)
+    if scene:
+        name = look.scene_name or (SCENES[look.scene_id][0] if look.scene_id in SCENES else "")
+        parts.append(f"SCENE for every view of this project{f' ({name})' if name else ''}: {scene} The scene never changes the building, its shape or its approved materials"
+                     + (f"; the camera, viewpoint and framing come only from Image {model_image}, so ignore any camera or lens in the scene." if model_image else "."))
     if look.setting:
         parts.append(f"Setting for every view: {look.setting}.")
     return "\n".join(parts)

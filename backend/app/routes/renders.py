@@ -49,7 +49,7 @@ class ConceptRenderIn(BaseModel):
     prompt_ready: bool = False     # true: a finished prompt (written by the AI from the pictures), used as written
     reference_file_id: uuid.UUID | None = None          # older clients: one base image
     references: list[Reference] = Field(default_factory=list, max_length=4)
-    view: Literal["exterior", "aerial", "cutaway", "interior"] = "exterior"
+    view: Literal["exterior", "aerial", "cutaway", "interior", "site_plan", "estate"] = "exterior"
     style: Literal["", "luxury contemporary", "minimalist modern", "classic luxury", "tropical modern"] = ""
     storeys: int | None = Field(default=None, ge=1, le=60)
     ground_floor: Literal["", "car park", "shops", "lobby", "flats"] = ""

@@ -46,6 +46,8 @@ export const api = {
   deleteVideo: videoId => request("DELETE", `/videos/${videoId}`),
   makeClip: (projectId, body) => request("POST", `/projects/${projectId}/cinematic`, body),
   // the architect's model
+  scenes: () => request("GET", "/scenes"),
+  sceneFromImage: (projectId, fileId) => request("POST", `/projects/${projectId}/look/scene-from-image`, { file_id: fileId }),
   look: projectId => request("GET", `/projects/${projectId}/look`),
   saveLook: (projectId, look) => request("PUT", `/projects/${projectId}/look`, look),
   suggestLook: (projectId, body) => request("POST", `/projects/${projectId}/look/suggest`, body),

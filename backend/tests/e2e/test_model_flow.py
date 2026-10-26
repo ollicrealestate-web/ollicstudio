@@ -138,6 +138,9 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#lookAdd"); page.fill("#lookMats .look-mat.extra >> input[aria-label='Material name']", "Palm trees in planters")
         page.click("#lookConfirm"); page.wait_for_function("document.querySelector('#lookMsg').textContent.includes('confirmed')")
         assert "all confirmed" in page.inner_text("#lookSummary")
+        # a scene preset: saved to the project, sent with every render
+        page.select_option("#rScene", "golden_driveway")
+        page.wait_for_function("document.querySelector('#rSceneText').textContent.includes('Low warm sun')")
         page.click(".shot button:has-text('Use as project look')")
         page.wait_for_selector(".shot .chip:has-text('Project look')")
         (pr,) = stack["repo"].projects.values()
@@ -159,6 +162,7 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         assert len(call["images"]) == 4 and len(stack["images"].calls) >= 4
         assert "Image 3 is the APPROVED LOOK" in call["prompt"] and "Sandtex white render" in call["prompt"] and "Maitama avenue" in call["prompt"]
         assert "Also in this project:" in call["prompt"] and "Palm trees in planters" in call["prompt"]
+        assert "SCENE for every view of this project (Golden Hour Driveway)" in call["prompt"] and "RENDER TYPE: An exterior view" in call["prompt"]
         card = page.inner_text(".shot >> nth=0").upper()
         assert "STANDARD RENDER" in card and "AI CONCEPT" in card
 

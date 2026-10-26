@@ -273,6 +273,17 @@
           <label class="tier"><input type="radio" name="tier" value="standard" checked><span><b>Standard render</b><small id="stdNote">Free</small></span></label>
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
         </fieldset></div>
+        <div class="span2 rbox scene-box">
+          <div class="rtype" role="radiogroup" aria-label="What are you rendering?"><b>What are you rendering?</b>
+            <label><input type="radio" name="rtype" value="exterior" checked><span>Exterior</span></label>
+            <label><input type="radio" name="rtype" value="interior"><span>Interior</span></label>
+            <label><input type="radio" name="rtype" value="site_plan"><span>Site plan</span></label>
+            <label><input type="radio" name="rtype" value="estate"><span>Estate layout</span></label></div>
+          <div class="scene-row"><label class="field">Scene <span class="hint">Light, sky, setting and mood. Saved to the project, so every view matches.</span>
+            <select id="rScene"><option value="">No scene (the prompt decides)</option></select></label>
+            <label class="btn sm" style="cursor:pointer" title="Upload a render you like: Claude copies its scene (never its building)">Copy a scene from a picture<input type="file" id="rSceneUpload" accept=".png,.jpg,.jpeg" hidden></label></div>
+          <p class="hint" id="rSceneText"></p>
+        </div>
         <div class="span2 rbox">
           <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Capture a view of your model, or upload a sketch, 3D image, photo or plan.</span>
             <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg,.pdf" hidden></label></div>
