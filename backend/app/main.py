@@ -17,7 +17,7 @@ from .cloudflare_images import CloudflareImages
 from .jobs import ThreadRunner
 from .openai_images import OpenAIImages
 from .gemini_images import GeminiImages
-from .fal import FalExact, FalGemini, FalImages, FalVideo
+from .fal import FalDepthVideo, FalExact, FalGemini, FalImages, FalVideo
 from .kling import KlingVideo
 from .aps import AutodeskModels
 from .runway import RunwayVideo
@@ -83,6 +83,8 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
                 app.state.image_clients[t] = FalGemini(settings.fal_key, ep, price)
     if fal.get("exact") is not None and hasattr(fal["exact"], "guide"):
         fal["exact"].guide, fal["exact"].strength = settings.exact_guide, settings.exact_strength
+    # Ollic Path Exact: walkthrough shots filmed on the model's depth (fal); tests pass fal={"film_exact": ...}
+    app.state.film_exact = fal.get("film_exact", FalDepthVideo(settings.fal_key) if settings.fal_key else None)
     # video options by id; an option with no client is listed as not connected
     app.state.video_clients = {"motion": kling, "vs": fal.get("video")}
 

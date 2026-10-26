@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ..animation_jobs import upload_path
 from ..auth import CurrentUser, get_current_user
 from ..engines import FILM_ENGINES, IMAGE_ENGINES
-from ..film import ENGINE_MODEL, SHOT_KINDS, run_film_job
+from ..film import ENGINE_MODEL, SHOT_KINDS, run_exact_film_job, run_film_job
 from ..runway import MAX_SECONDS, cost as runway_cost
 from ..video import VideoFailed, probe
 from .projects import _owned_project, _repo, _storage
@@ -50,15 +50,25 @@ def _to_h264(src) -> bytes:
 class ShotMeta(BaseModel):
     name: str = Field(default="Shot", max_length=80)
     kind: Literal["push", "orbit", "approach", "aerial", "rise", "custom"] = "custom"
-    engine: Literal["path", "path_plus"] = "path"
-    tier: Literal["standard", "premium", "swift", "ultra", "vs"] = "standard"   # the picture option for the first frame
+    engine: Literal["exact", "path", "path_plus"] = "exact"
+    tier: Literal["standard", "premium", "swift", "ultra", "vs"] = "standard"   # the picture option for the first (and last) frame
     format: Literal["16:9", "9:16", "1:1"] = "16:9"
     description: str = Field(default="", max_length=1500)
     frame_prompt: str = Field(default="", max_length=6000)
     motion_prompt: str = Field(default="", max_length=2000)
     life: bool = False
-    clay_file_id: uuid.UUID
-    lines_file_id: uuid.UUID
+    clay_file_id: uuid.UUID | None = None       # Ollic Path / Path Plus: the clay still of the first frame
+    lines_file_id: uuid.UUID | None = None
+    # Ollic Path Exact: the model's view, lines, depth and material map at the start and at the end of the move
+    start_view_id: uuid.UUID | None = None
+    start_lines_id: uuid.UUID | None = None
+    start_depth_id: uuid.UUID | None = None
+    start_materials_id: uuid.UUID | None = None
+    end_view_id: uuid.UUID | None = None
+    end_lines_id: uuid.UUID | None = None
+    end_depth_id: uuid.UUID | None = None
+    end_materials_id: uuid.UUID | None = None
+    model_id: uuid.UUID | None = None
 
 
 def _may_film(request: Request, user: CurrentUser, repo) -> str | None:
@@ -81,14 +91,19 @@ async def make_shot(project_id: uuid.UUID, request: Request, response: Response,
         m = ShotMeta.model_validate(json.loads(meta))
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, {"code": "bad_settings", "reason": "The shot settings were not valid. Reload the page and try again."}) from exc
-    if getattr(request.app.state, "runway", None) is None:
+    exact = m.engine == "exact"
+    if getattr(request.app.state, "film_exact" if exact else "runway", None) is None:
         raise HTTPException(503, {"code": "not_configured", "reason": f"{FILM_ENGINES[m.engine]['name']} is not connected yet."})
+    needed = ([m.start_view_id, m.start_lines_id, m.start_depth_id, m.end_view_id, m.end_lines_id, m.end_depth_id] if exact
+              else [m.clay_file_id, m.lines_file_id])
+    if any(x is None for x in needed):
+        raise HTTPException(422, {"code": "bad_settings", "reason": "The shot's views of the model are missing. Reload the page and record it again."})
     repo = _repo(request)
     why = _may_film(request, user, repo)
     if why:
         raise HTTPException(403, {"code": "premium_only", "reason": why})
     _require_tier(request, user, m.tier)
-    for fid in (m.clay_file_id, m.lines_file_id):
+    for fid in [x for x in needed + [m.start_materials_id, m.end_materials_id] if x]:
         f = repo.get_source_file(user, str(fid))
         if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "A guide picture of the shot is not in this project.")
@@ -118,9 +133,9 @@ async def make_shot(project_id: uuid.UUID, request: Request, response: Response,
         w, h = SIZES[m.format]
         if (info.width, info.height) != (w, h):
             raise HTTPException(422, {"code": "bad_video", "reason": f"The guide is {info.width}×{info.height}; {m.format} shots are {w}×{h}."})
-        top = min(10, MAX_SECONDS[ENGINE_MODEL[m.engine]])
-        if not 2 <= info.duration_s <= top + 0.5:
-            raise HTTPException(422, {"code": "bad_video", "reason": f"A shot is 2 to {top} seconds long."})
+        top, bottom = (10, 4) if exact else (min(10, MAX_SECONDS[ENGINE_MODEL[m.engine]]), 2)
+        if not bottom - 0.3 <= info.duration_s <= top + 0.5:
+            raise HTTPException(422, {"code": "bad_video", "reason": f"A shot is {bottom} to {top} seconds long."})
         if info.fps > 30.5:
             raise HTTPException(422, {"code": "bad_video", "reason": "The guide must be 30 frames a second or fewer."})
         data = tmp.read_bytes()
@@ -134,12 +149,16 @@ async def make_shot(project_id: uuid.UUID, request: Request, response: Response,
     finally:
         tmp.unlink(missing_ok=True)
     seconds = round(info.duration_s, 2)
-    est = runway_cost(ENGINE_MODEL[m.engine], seconds)
+    if exact:
+        from ..fal import depth_video_cost
+        est = depth_video_cost(seconds)
+    else:
+        est = runway_cost(ENGINE_MODEL[m.engine], seconds)
     # "tier" counts the job among the day's videos; the first frame uses the picture option "frame_tier"
     job_input = m.model_dump(mode="json", exclude={"tier"}) | {"guide_path": guide_path, "seconds": seconds, "width": w, "height": h, "aspect": ASPECT[m.format],
                                                                "tier": "film", "frame_tier": m.tier, "estimate_usd": str(est)}
     try:
-        job = _start_job(request, user, str(project_id), "film_shot", job_input, None, response, run=run_film_job, max_active=4)
+        job = _start_job(request, user, str(project_id), "film_shot", job_input, None, response, run=run_exact_film_job if exact else run_film_job, max_active=4)
     except HTTPException:
         _storage(request).remove(user, [guide_path], bucket=settings.videos_bucket)
         raise
@@ -212,6 +231,7 @@ def plan_film(project_id: uuid.UUID, body: PlanIn, request: Request, user: Curre
 
 @router.get("/film/engines")
 def film_engines(request: Request):
-    on = getattr(request.app.state, "runway", None) is not None
-    return {k: {**{x: v[x] for x in ("name", "blurb", "price")}, "available": on} for k, v in FILM_ENGINES.items()} | {
+    st = request.app.state
+    on = lambda k: getattr(st, "film_exact" if k == "exact" else "runway", None) is not None  # noqa: E731
+    return {k: {**{x: v[x] for x in ("name", "blurb", "price")}, "available": on(k)} for k, v in FILM_ENGINES.items()} | {
         "_pictures": {k: v["name"] for k, v in IMAGE_ENGINES.items()}}

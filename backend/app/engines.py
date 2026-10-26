@@ -26,6 +26,8 @@ VIDEO_ENGINES = {
 }
 # AI walkthroughs from the architect's model: an exact guide video becomes a photoreal shot
 FILM_ENGINES = {
+    "exact": {"name": "Ollic Path Exact", "blurb": "Filmed on your model's own depth along the camera move; the first and last frames are approved renders in your project look, and Claude checks the shot. 4 to 10 s a shot.",
+              "price": "about $0.10 a second, plus two renders"},
     "path": {"name": "Ollic Path", "blurb": "Follows your camera move and your building closely; best for walkthroughs and fly-arounds, up to 10 s a shot.",
              "price": "about $0.28 a second"},
     "path_plus": {"name": "Ollic Path Plus", "blurb": "Richer light and life (people, cars); slightly freer with fine detail. Up to 10 s a shot.",

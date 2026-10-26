@@ -269,3 +269,34 @@ class FalVideo(_Fal):
             return self.fetch(url, limit)
         except (_Failed, httpx.HTTPError) as exc:
             raise VideoProviderError("The finished clip could not be fetched. Try again.", retry=True) from exc
+
+
+DEPTH_VIDEO_MODEL = "fal-ai/wan-22-vace-fun-a14b/depth"
+DEPTH_VIDEO_PRICE = Decimal("0.10")   # a second at 720p, fal model page (wan-22-vace-fun-a14b), read 2026-10-26
+DEPTH_VIDEO_SOURCE = "fal.ai model page: wan-22-vace-fun-a14b $0.10 per video second at 720p, read 2026-10-26"
+
+
+class FalDepthVideo(FalVideo):
+    """Ollic Path Exact: the video follows the model's own depth along the camera path (video_url, already a
+    depth video: preprocess off), with its first and last frames pinned to approved renders. Input per fal's
+    client types (WanVace14bPoseInput, shared by the VACE depth endpoints); output video.url."""
+    model = DEPTH_VIDEO_MODEL
+
+    def film(self, *, depth_video_url: str, first_frame: bytes, last_frame: bytes | None, prompt: str, aspect: str = "16:9") -> str:
+        body = {"prompt": prompt[:2500], "video_url": depth_video_url, "first_frame_url": data_uri(first_frame), "preprocess": False,
+                "match_input_num_frames": True, "match_input_frames_per_second": True, "resolution": "720p",
+                "aspect_ratio": aspect if aspect in ("16:9", "9:16", "1:1") else "auto", "video_quality": "high",
+                "enable_safety_checker": True}
+        if last_frame is not None:
+            body["last_frame_url"] = data_uri(last_frame)
+        try:
+            sub = self.submit(DEPTH_VIDEO_MODEL, body)
+        except _Failed as exc:
+            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429) from exc
+        except httpx.HTTPError as exc:
+            raise VideoProviderError("Could not reach the video service. Try again in a moment.", retry=True) from exc
+        return f"{sub['request_id']}|{sub['status_url']}|{sub['response_url']}"
+
+
+def depth_video_cost(seconds: float) -> Decimal:
+    return (DEPTH_VIDEO_PRICE * Decimal(str(seconds))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

@@ -407,8 +407,9 @@ def apply_look(state, user: CurrentUser, job: dict, inp: dict, images: list, rol
         if f and f.get("project_id") == job["project_id"]:
             ctx["map"] = storage.download(user, f["storage_path"])
     hero = None
-    if look.hero_render_id and not exact:
-        r = repo.get_rendered_image(user, str(look.hero_render_id))
+    hero_id = inp.get("hero_render_id") or look.hero_render_id     # a walkthrough's end frame copies its start frame
+    if hero_id and not exact:
+        r = repo.get_rendered_image(user, str(hero_id))
         if r and r.get("project_id") == job["project_id"]:
             try:
                 hero = storage.download(user, r.get("base_path") or r["storage_path"], bucket=settings.renders_bucket)

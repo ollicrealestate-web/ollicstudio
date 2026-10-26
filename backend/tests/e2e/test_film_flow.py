@@ -21,7 +21,7 @@ from app.video import probe
 from ..conftest import SECRET, FakeImages, FakeRepo
 from ..fixtures.builder import build_ifc
 from ..fixtures.layout import sample_house
-from ..test_film import FakeRunway
+from ..test_film import FakeDepthVideo, FakeRunway
 from ..test_revit import APS, RVT, client_for
 from .test_model_flow import GL_ARGS
 from .test_render_flow import InlineLinkStorage
@@ -46,13 +46,13 @@ def stack(tmp_path_factory):
     (web / "assets" / "config.js").write_text(f'window.OLLIC_CONFIG = {{ supabaseUrl: "http://127.0.0.1:{auth_port}", supabaseAnonKey: "anon", apiUrl: "" }};')
     settings = Settings(supabase_url=f"http://127.0.0.1:{auth_port}", supabase_anon_key="anon", supabase_jwt_secret=SECRET, web_dir=str(web),
                         cloudflare_account_id="acct", cloudflare_api_token="cf")
-    repo, storage, images, runway = FakeRepo(), InlineLinkStorage(), FakeImages(), FakeRunway()
+    repo, storage, images, runway, depth = FakeRepo(), InlineLinkStorage(), FakeImages(), FakeRunway(), FakeDepthVideo()
     repo.roles = EveryoneAdmin()
     uploads = []
     real = storage.upload
     storage.upload = lambda user, path, data, *a, **k: (uploads.append((path, data)), real(user, path, data, *a, **k))[1]
     api = create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=ThreadRunner(),
-                     image_clients={"standard": images, "premium": None}, runway=runway, aps=client_for(APS()))
+                     image_clients={"standard": images, "premium": None}, runway=runway, aps=client_for(APS()), fal={"film_exact": depth})
     api.state.clip_poll_seconds = 0; api.state.aps_poll_seconds = 0
     auth = fake_supabase_auth()
     from fastapi.middleware.cors import CORSMiddleware
@@ -63,7 +63,7 @@ def stack(tmp_path_factory):
     for s in servers:
         while not s.started:
             time.sleep(0.05)
-    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "runway": runway, "uploads": uploads, "dir": web}
+    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "runway": runway, "depth": depth, "uploads": uploads, "dir": web}
     for s in servers:
         s.should_exit = True
 
@@ -84,7 +84,7 @@ def test_a_walkthrough_shot_is_planned_recorded_and_filmed(stack, tmp_path):
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_selector("#filmSection:not([hidden])")
         assert page.is_visible("#addShotView") and not page.is_visible("#useView")
-        assert "Ollic Path" in page.inner_text("#filmEngine") and "Runway" not in page.content()
+        assert page.input_value("#filmEngine") == "exact" and "Ollic Path Exact" in page.inner_text("#filmEngine") and "Runway" not in page.content()
 
         # 1. the plan (no Claude key here, so the ready-made three shots), then keep one short shot
         page.fill("#filmDesc", "white render, bronze glazing, palm trees")
@@ -111,10 +111,17 @@ def test_a_walkthrough_shot_is_planned_recorded_and_filmed(stack, tmp_path):
     repo = stack["repo"]
     (job,) = [j for j in repo.jobs.values() if j["type"] == "film_shot"]
     assert job["status"] == "succeeded" and job["input"]["kind"] == "approach" and 3.5 <= job["input"]["seconds"] <= 4.5
-    (call,) = stack["runway"].calls
-    assert call["model"] == "aleph2" and "palm trees" in call["prompt"] and call["first_frame"][:2] == b"\xff\xd8"
+    # Ollic Path Exact: the model at both ends was saved; both frames were rendered; the depth video was filmed between them
+    ends = {k: v for k, v in job["input"].items() if k.startswith(("start_", "end_"))}
+    assert len(ends) == 8 and all(ends.values())
+    names = {repo.files[ends["start_depth_id"]]["original_name"], repo.files[ends["end_view_id"]]["original_name"]}
+    assert any(n.endswith("start - depth.png") for n in names) and any(n.endswith("end - view.jpg") for n in names)
+    assert sum(1 for j in repo.jobs.values() if j["type"] == "concept_render") >= 2
+    (call,) = stack["depth"].calls
+    assert "palm trees" in call["prompt"] and call["first_frame"][:2] == b"\xff\xd8" and call["last_frame"][:2] == b"\xff\xd8"
+    assert stack["runway"].calls == []
     (vid,) = repo.videos.values()
-    assert vid["kind"] == "film" and "score" in vid["script"]["check"]
+    assert vid["kind"] == "film" and vid["script"]["engine"] == "exact" and "score" in vid["script"]["check"]
     # whatever the browser recorded, the guide sent on was H.264 at the exact 16:9 size
     (guide,) = [d for path, d in stack["uploads"] if "/guides/" in path]
     g = tmp_path / "guide.mp4"; g.write_bytes(guide)

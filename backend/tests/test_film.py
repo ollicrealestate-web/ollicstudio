@@ -123,9 +123,10 @@ class FakeRunway:
 
 @pytest.fixture
 def film_app(render_settings, repo, storage):
-    def make(runway="fake", writer=None):
+    def make(runway="fake", writer=None, exact=None):
         app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner(),
-                         runway=FakeRunway() if runway == "fake" else runway, prompt_writer=writer, kling=None, gemini=None, fal={})
+                         runway=FakeRunway() if runway == "fake" else runway, prompt_writer=writer, kling=None, gemini=None,
+                         fal={"film_exact": exact} if exact else {})
         app.state.clip_poll_seconds = 0
         return TestClient(app), app
     return make
@@ -182,7 +183,7 @@ def test_shot_refusals(film_app, alice, bob, repo, storage):
     other = new_project(c, bob)
     clay, lines = guides(c, bob, other)
     r = c.post(f"/api/projects/{pid}/films", files={"file": ("g.mp4", mp4(3, "1280x720"), "video/mp4")},
-               data={"meta": json.dumps({"clay_file_id": clay["id"], "lines_file_id": lines["id"]})}, headers=alice["headers"])
+               data={"meta": json.dumps({"engine": "path", "clay_file_id": clay["id"], "lines_file_id": lines["id"]})}, headers=alice["headers"])
     assert r.status_code == 404          # someone else's guide pictures
     off, _ = film_app(runway=None)
     assert shot(off, alice, pid, mp4(3, "1280x720")).status_code == 503
@@ -278,3 +279,67 @@ def test_a_reframed_render_is_put_back_in_the_model_camera():
         assert other["score"] < 0.65 and other["band"] == "poor", other
     same, none = assess(view, view)
     assert same["framing"] == "kept" and none is None and same["score"] == 1.0
+
+
+
+# ---------------------------------------------------------------- Ollic Path Exact (depth-guided, on fal)
+class FakeDepthVideo(FakeRunway):
+    provider = "fal"
+
+    def film(self, **kw):
+        self.calls.append(kw)
+        return "req|https://queue.fal.run/x/status|https://queue.fal.run/x"
+
+
+class FilmChecker:
+    model = "claude-test"
+
+    def __init__(self):
+        self.calls = []
+
+    def ask_json(self, system, content, max_tokens=1800, **kw):
+        self.calls.append((system, content))
+        if "walkthrough video" in system:
+            return {"answer": {"ok": True, "issues": []}, "usage": {"input_tokens": 3000, "output_tokens": 20}, "cost_usd": "0.02", "model": self.model}
+        return {"answer": {"ok": True, "issues": []}, "usage": {}, "cost_usd": None, "model": self.model}
+
+
+def exact_views(c, user, pid):
+    ids = {}
+    for end in ("start", "end"):
+        ids[f"{end}_view_id"] = upload(c, user, pid, f"Guide - Arrival {end} - view.jpg", jpeg_bytes(640, 360, (210, 210, 210)))["id"]
+        for k in ("lines", "depth", "materials"):
+            ids[f"{end}_{k}_id"] = upload(c, user, pid, f"Guide - Arrival {end} - {k}.png", samples.png(640, 360))["id"]
+    return ids
+
+
+@needs_ffmpeg
+def test_an_exact_shot_has_approved_ends_and_follows_the_models_depth(film_app, alice, repo, storage):
+    video, checker = FakeDepthVideo(), FilmChecker()
+    c, app = film_app(runway=None, writer=checker, exact=video)
+    repo.roles[alice["id"]] = "admin"
+    pid = new_project(c, alice)
+    assert c.get("/api/film/engines").json()["exact"]["available"] is True and c.get("/api/film/engines").json()["path"]["available"] is False
+    meta = {"name": "Arrival", "kind": "approach", "engine": "exact", "format": "16:9", "description": "white render, palm trees", "life": True,
+            "frame_prompt": "photoreal Lekki apartment block"} | exact_views(c, alice, pid)
+    send = lambda m, v: c.post(f"/api/projects/{pid}/films", files={"file": ("guide.mp4", v, "video/mp4")}, data={"meta": json.dumps(m)}, headers=alice["headers"])  # noqa: E731
+    assert send(meta, mp4(3, "1280x720")).json()["detail"]["reason"] == "A shot is 4 to 10 seconds long."
+    assert send({k: v for k, v in meta.items() if k != "end_depth_id"}, mp4(4, "1280x720")).json()["detail"]["code"] == "bad_settings"
+    r = send(meta, mp4(4, "1280x720"))
+    assert r.status_code == 202, r.text
+    job = repo.jobs[r.json()["id"]]
+    assert job["status"] == "succeeded", job["error"]
+    # both ends went through the still pipeline; the end frame copies the start frame's look
+    renders = sorted((j for j in repo.jobs.values() if j["type"] == "concept_render"), key=lambda j: j["created_at"])
+    assert [j["input"]["film_shot"] for j in renders] == ["Arrival (start)", "Arrival (end)"]
+    assert renders[0]["input"]["depth_file_id"] == meta["start_depth_id"] and renders[1]["input"]["guide_file_id"] == meta["end_lines_id"]
+    assert renders[1]["input"]["hero_render_id"] == job["result"]["first_frame"]
+    # the video follows the depth guide, pinned to both frames
+    (call,) = video.calls
+    assert call["depth_video_url"] and call["first_frame"][:2] == b"\xff\xd8" and call["last_frame"][:2] == b"\xff\xd8" and call["aspect"] == "16:9"
+    (vid,) = repo.videos.values()
+    assert vid["script"]["engine"] == "exact" and vid["script"]["check"]["claude"]["ok"] is True and vid["script"]["check"]["band"] == "good"
+    assert any(e["provider"] == "fal" and e["model"] == "fal-ai/wan-22-vace-fun-a14b/depth" and e["cost_usd"] == "0.40" for e in repo.usage)
+    film_q = [cnt for s_, cnt in checker.calls if "walkthrough video" in s_]
+    assert film_q and sum(b["type"] == "image" for b in film_q[0]) == 5          # the model at both ends and three frames of the shot
+    assert not [p for p in storage.buckets["videos"] if "/guides/" in p]

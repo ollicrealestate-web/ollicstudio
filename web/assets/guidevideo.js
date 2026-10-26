@@ -20,20 +20,22 @@ async function codecFor(w, h) {
 
 /**
  * viewer: the 3D viewer; poses: the shot's camera poses; seconds: its length; format: "16:9" etc.
- * Returns { blob, first } where first is the first frame's stills { clay, lines } as data URLs.
+ * kind: what the guide video shows ("clay", or "depth" for Ollic Path Exact); stills: the model views saved at the
+ * first and last frame. Returns { blob, first, last } with those stills as data URLs.
  */
-export async function recordShot(viewer, poses, seconds, format, { onProgress, signal } = {}) {
+export async function recordShot(viewer, poses, seconds, format, { onProgress, signal, kind = "clay", stills = ["clay", "lines"] } = {}) {
   const [w, h] = GUIDE_SIZES[format];
   const chosen = await codecFor(w, h);
   if (!chosen) throw new Error("This browser cannot record the shot. Use Chrome or Edge on a computer, or Safari 17 or newer.");
-  const first = viewer.guides(w, h, ["clay", "lines"], viewer.along(poses, 0));
+  const first = viewer.guides(w, h, stills, viewer.along(poses, 0));
+  const last = viewer.guides(w, h, stills, viewer.along(poses, 1));
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({ target, video: { codec: chosen.kind, width: w, height: h, frameRate: GUIDE_FPS }, fastStart: "in-memory" });
   let failure = null;
   const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { failure = e; } });
   enc.configure(chosen.config);
   const n = Math.max(2, Math.round(seconds * GUIDE_FPS));
-  viewer.beginGuide("clay", w, h);
+  viewer.beginGuide(kind, w, h);
   try {
     for (let i = 0; i < n; i++) {
       if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
@@ -53,5 +55,5 @@ export async function recordShot(viewer, poses, seconds, format, { onProgress, s
   if (failure) throw failure;
   muxer.finalize();
   onProgress?.(1);
-  return { blob: new Blob([target.buffer], { type: "video/mp4" }), first, width: w, height: h };
+  return { blob: new Blob([target.buffer], { type: "video/mp4" }), first, last, width: w, height: h };
 }

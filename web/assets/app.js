@@ -649,7 +649,7 @@ function guideFor(fileId, kind = "lines") {
 
 /* ---------- AI walkthrough: Claude plans the shots, the model gives the exact camera moves ---------- */
 const SHOT_NAME = { approach: "Approach from the street", orbit: "Orbit around the building", aerial: "Aerial over the site", rise: "Rise up the facade", push: "Slow move in", custom: "Your move" };
-const FILM_PRICE = { path: 0.28, path_plus: 0.17 };
+const FILM_PRICE = { exact: 0.10, path: 0.28, path_plus: 0.17 };
 let shots = [], filmEngines = {}, filming = null;
 function newShot(kind, seconds, extra = {}) {
   if (!viewer) { toast("Open your model first."); return null; }
@@ -677,7 +677,7 @@ function drawShots() {
 function drawFilmEstimate() {
   const secs = shots.reduce((a, s) => a + s.seconds, 0), eng = $("#filmEngine").value, p = FILM_PRICE[eng] || 0.28;
   $("#filmGo").disabled = !shots.length || !!filming;
-  $("#filmEst").textContent = shots.length ? `${shots.length} shot${shots.length > 1 ? "s" : ""}, ${secs} s of film. About $${(secs * p).toFixed(2)} for the video plus one render per shot; ready in about ${Math.max(3, Math.round(2 + secs / 4))}–${Math.round(6 + secs / 3)} minutes.` : "Add a shot first.";
+  $("#filmEst").textContent = shots.length ? `${shots.length} shot${shots.length > 1 ? "s" : ""}, ${secs} s of film. About $${(secs * p).toFixed(2)} for the video plus ${eng === "exact" ? "two renders" : "one render"} per shot; ready in about ${Math.max(3, Math.round(2 + secs / 4))}–${Math.round(6 + secs / 3)} minutes.` : "Add a shot first.";
 }
 async function previewShot(s) {
   if (!viewer) return;
@@ -728,13 +728,24 @@ $("#filmGo").onclick = async () => {
     for (const [i, s] of shots.entries()) {
       const part = 1 / shots.length, at = i * part;
       say(at, `Shot ${i + 1} of ${shots.length}: recording the exact camera move from your model…`);
-      const rec = await recordShot(viewer, s.poses, s.seconds, fmt, { signal: ctl.signal, onProgress: f => say(at + part * 0.7 * f, `Shot ${i + 1} of ${shots.length}: recording the camera move… ${Math.round(f * 100)}%`) });
-      const stamp = stampNow();
-      const clay = await uploadFile(current.id, new File([await dataBlob(rec.first.clay)], `Guide - ${s.name} ${stamp} - clay.jpg`, { type: "image/jpeg" }), () => {});
-      const lines = await uploadFile(current.id, new File([await dataBlob(rec.first.lines)], `Guide - ${s.name} ${stamp} - lines.png`, { type: "image/png" }), () => {});
-      await sendShot(current.id, rec.blob, { name: s.name, kind: s.kind, engine, tier: chosenTier(), format: fmt, description: desc,
-        frame_prompt: s.frame_prompt, motion_prompt: s.motion_prompt, life: s.life ?? life, clay_file_id: clay.id, lines_file_id: lines.id },
-        f => say(at + part * (0.7 + 0.3 * f), `Shot ${i + 1} of ${shots.length}: sending… ${Math.round(f * 100)}%`));
+      const exact = engine === "exact";
+      const secs = exact ? Math.max(4, s.seconds) : s.seconds;
+      const rec = await recordShot(viewer, s.poses, secs, fmt, { signal: ctl.signal, kind: exact ? "depth" : "clay", stills: exact ? ["view", "lines", "depth", "materials"] : ["clay", "lines"],
+        onProgress: f => say(at + part * 0.6 * f, `Shot ${i + 1} of ${shots.length}: recording the camera move… ${Math.round(f * 100)}%`) });
+      const stamp = stampNow(), up = async (url, name, type) => uploadFile(current.id, new File([await dataBlob(url)], name, { type }), () => {});
+      const meta = { name: s.name, kind: s.kind, engine, tier: chosenTier(), format: fmt, description: desc, frame_prompt: s.frame_prompt, motion_prompt: s.motion_prompt,
+        life: s.life ?? life, ...(viewerModelId ? { model_id: viewerModelId } : {}) };
+      if (exact) {           // the model at both ends of the move: what the first and last frames are rendered from
+        say(at + part * 0.62, `Shot ${i + 1} of ${shots.length}: saving the views of your model…`);
+        for (const [end, st] of [["start", rec.first], ["end", rec.last]]) {
+          meta[`${end}_view_id`] = (await up(st.view, `Guide - ${s.name} ${stamp} ${end} - view.jpg`, "image/jpeg")).id;
+          for (const k of ["lines", "depth", "materials"]) meta[`${end}_${k}_id`] = (await up(st[k], `Guide - ${s.name} ${stamp} ${end} - ${k}.png`, "image/png")).id;
+        }
+      } else {
+        meta.clay_file_id = (await up(rec.first.clay, `Guide - ${s.name} ${stamp} - clay.jpg`, "image/jpeg")).id;
+        meta.lines_file_id = (await up(rec.first.lines, `Guide - ${s.name} ${stamp} - lines.png`, "image/png")).id;
+      }
+      await sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `Shot ${i + 1} of ${shots.length}: sending… ${Math.round(f * 100)}%`));
       sent++;
     }
     say(1, `${sent} shot${sent > 1 ? "s" : ""} sent. Each is rendered, filmed and checked against your model; they appear below in a few minutes.`);
