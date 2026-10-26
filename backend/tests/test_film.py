@@ -333,12 +333,14 @@ def test_an_exact_shot_has_approved_ends_and_follows_the_models_depth(film_app, 
     renders = sorted((j for j in repo.jobs.values() if j["type"] == "concept_render"), key=lambda j: j["created_at"])
     assert [j["input"]["film_shot"] for j in renders] == ["Arrival (start)", "Arrival (end)"]
     assert renders[0]["input"]["depth_file_id"] == meta["start_depth_id"] and renders[1]["input"]["guide_file_id"] == meta["end_lines_id"]
-    assert renders[1]["input"]["hero_render_id"] == job["result"]["first_frame"]
+    assert renders[1]["input"]["hero_render_id"] == job["result"]["first_frame"] and all(j["input"]["rounds"] == 2 for j in renders)
     # the video follows the depth guide, pinned to both frames
     (call,) = video.calls
+    assert "the forecourt and its paving" in call["prompt"] and "Only the camera moves." in call["prompt"]
     assert call["depth_video_url"] and call["first_frame"][:2] == b"\xff\xd8" and call["last_frame"][:2] == b"\xff\xd8" and call["aspect"] == "16:9"
     (vid,) = repo.videos.values()
     assert vid["script"]["engine"] == "exact" and vid["script"]["check"]["claude"]["ok"] is True and vid["script"]["check"]["band"] == "good"
+    assert set(vid["script"]["check"]["frames_checked"]) == {"start", "end"}
     assert any(e["provider"] == "fal" and e["model"] == "fal-ai/wan-22-vace-fun-a14b/depth" and e["cost_usd"] == "0.40" for e in repo.usage)
     film_q = [cnt for s_, cnt in checker.calls if "walkthrough video" in s_]
     assert film_q and sum(b["type"] == "image" for b in film_q[0]) == 5          # the model at both ends and three frames of the shot

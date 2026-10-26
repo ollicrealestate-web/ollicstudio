@@ -259,6 +259,25 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
                 check["retried"] = True
             except (ProviderError, BackendUnavailable):
                 check["retried"] = False
+        # a frame of a walkthrough shot gets a second round: the finishing pass fixes exactly what Claude still sees,
+        # because the video copies whatever the frame gets wrong
+        if check and int(inp.get("rounds") or 1) >= 2 and tier != "exact" and (check.get("claude") or {}).get("ok") is False \
+                and (check.get("claude") or {}).get("issues"):
+            fin_tier = next((t for t in ("ultra", "vs") if state.image_clients.get(t) is not None), None)
+            finisher = state.image_clients.get(fin_tier) if fin_tier else None
+            if finisher is not None:
+                try:
+                    repo.update_job(user, job_id, {"stage": "Correcting what still differs from your model"})
+                    fimages = [(result.data, "image/jpeg"), images[roles.index("model")]] + ([(look_ctx["map"], "image/png")] if look_ctx and look_ctx.get("map") else [])
+                    fmodel = getattr(finisher, "model_name", None) or settings.model_for(fin_tier, "revise")
+                    again = finisher.edit(model=fmodel, prompt=finish_prompt(check, look_ctx), images=fimages, size=size, quality=quality, user_id=user.id)
+                    record_usage(repo, user, job, fmodel, "image_edit", again)
+                    check2, again = geometry_check(state, user, job, inp, again, images, roles, look_ctx)
+                    if check2 and rank(check2) > rank(check):
+                        result, check = again, check2 | {"finished": fin_tier, "retried": True}
+                    check["rounds"] = 2
+                except (ProviderError, BackendUnavailable):
+                    pass
 
     try:
         current = repo.get_job(user, job_id)

@@ -66,6 +66,7 @@ class ConceptRenderIn(BaseModel):
     depth_file_id: uuid.UUID | None = None      # the model's depth map from the same camera (Ollic Exact draws on it)
     material_file_id: uuid.UUID | None = None   # the model's material map from the same camera (see the project look)
     model_id: uuid.UUID | None = None           # the 3D model the view was captured from: its facts help check the result
+    rounds: int = Field(default=1, ge=1, le=2)    # 2: after the re-render, a finishing pass fixes what Claude still sees
 
     @field_validator("prompt")
     @classmethod

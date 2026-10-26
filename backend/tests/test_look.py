@@ -344,3 +344,31 @@ def test_with_a_fal_key_ultra_and_swift_are_connected(render_settings, repo, sto
                      image_client=FakeImages(), runner=InlineRunner(), kling=None, runway=None, aps=None, prompt_writer=None, gemini=None)
     assert app.state.image_clients["ultra"].endpoint == "fal-ai/nano-banana-pro/edit" and app.state.image_clients["swift"].endpoint == "fal-ai/nano-banana-2/edit"
     assert app.state.image_clients["exact"].guide == "depth"
+
+
+
+class StubbornChecker:
+    """Claude still sees the beige piers after the re-render; the finishing pass fixes them."""
+    model = "claude-test"
+
+    def __init__(self):
+        self.n = 0
+
+    def ask_json(self, system, content, max_tokens=1800, **kw):
+        self.n += 1
+        issues = [] if self.n >= 3 else ["the front piers are white render in the map: make them white, not beige stone"]
+        return {"answer": {"ok": not issues, "issues": issues}, "usage": {}, "cost_usd": None, "model": self.model}
+
+
+def test_a_walkthrough_frame_gets_a_second_round_that_fixes_what_claude_still_sees(look_app, alice, repo):
+    vs = FakeImages()
+    c, images = look_app(exact=FakeImages(), writer=StubbornChecker(), images=vs)
+    repo.roles[alice["id"]] = "admin"
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    body = {"prompt": "photoreal", "prompt_ready": True, "references": [{"file_id": view["id"], "role": "model"}], "guide_file_id": lines["id"]}
+    c.post(f"/api/projects/{pid}/architectural-render", json=body | {"rounds": 2}, headers=alice["headers"])
+    fix = [x for x in vs.calls if x["prompt"].startswith("Image 1 is a photorealistic architectural render")]
+    assert len(fix) == 1 and "make them white, not beige stone" in fix[0]["prompt"]
+    img = list(repo.images.values())[-1]
+    assert img["options"]["check"]["rounds"] == 2 and img["options"]["check"]["claude"]["ok"] is True

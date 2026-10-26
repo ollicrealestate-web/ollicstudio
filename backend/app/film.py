@@ -236,6 +236,9 @@ def run_film_job(state, user: CurrentUser, job_id: str) -> None:
 
 
 # ---------------------------------------------------------------- Ollic Path Exact (fal, depth-guided)
+SAME_SCENE = ("Only the camera moves. The building, its facade materials and colours, the ground, the forecourt and its paving, gates, "
+              "parking, landscaping and the neighbouring buildings stay exactly as they are in the first frame for the whole shot; "
+              "nothing in the scene changes, appears or disappears.")
 FILM_CHECK_SYSTEM = (
     "You check an AI architectural walkthrough video against the architect's model. Image 1 is the model at the START of the "
     "camera move and Image 2 the model at the END (exact views, plain colours). Images 3, 4 and 5 are frames from the AI video at "
@@ -271,7 +274,7 @@ def _render_frame(state, user, pid: str, inp: dict, end: str, prompt: str, hero:
                                   "input": {"prompt": prompt[:6000], "prompt_ready": True, "references": [{"file_id": inp[f"{end}_view_id"], "role": "model"}],
                                             "guide_file_id": inp[f"{end}_lines_id"], "depth_file_id": inp[f"{end}_depth_id"],
                                             "material_file_id": inp.get(f"{end}_materials_id"), "model_id": inp.get("model_id"),
-                                            "hero_render_id": hero, "tier": inp.get("frame_tier") or "standard", "aspect": inp["aspect"],
+                                            "hero_render_id": hero, "tier": inp.get("frame_tier") or "standard", "aspect": inp["aspect"], "rounds": 2,
                                             "quality": "high", "view": "exterior", "time_of_day": "midday",
                                             "film_shot": f"{inp.get('name') or 'Shot'} ({end})"}})
     run_render_job(state, user, rjob["id"])
@@ -319,9 +322,16 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
         # 1. both ends of the shot, photoreal, through the still pipeline; the end frame copies the start frame's look
         fprompt = inp.get("frame_prompt") or ""
         if not fprompt and writer is not None:
-            from .render_prompt import PromptUnavailable, write_with_claude
+            from .render_prompt import PromptUnavailable, facts_text, write_with_claude
+            facts = ""
+            if inp.get("model_id"):
+                try:
+                    mdl = repo.get_model(user, inp["model_id"])
+                    facts = facts_text(mdl) if mdl and mdl.get("project_id") == pid else ""
+                except BackendUnavailable:
+                    facts = ""
             try:
-                fprompt = write_with_claude(writer, [(views["start"], "image/jpeg")], ["model"], inp.get("description") or "", "")["prompt"]
+                fprompt = write_with_claude(writer, [(views["start"], "image/jpeg")], ["model"], inp.get("description") or "", facts)["prompt"]
             except PromptUnavailable:
                 fprompt = ""
         fprompt = fprompt or frame_prompt(inp.get("description") or "")
@@ -340,7 +350,7 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
         url = storage.signed_urls(user, [guide_path], bucket=settings.videos_bucket, expires_in=3 * 3600).get(guide_path)
         if not url:
             return fail("The guide video could not be read. Record the shot again.")
-        mprompt = inp.get("motion_prompt") or motion_prompt(inp.get("description") or "", bool(inp.get("life")))
+        mprompt = (inp.get("motion_prompt") or motion_prompt(inp.get("description") or "", bool(inp.get("life")))) + " " + SAME_SCENE
         repo.update_job(user, job_id, {"stage": "Filming the shot on your model", "result": {"first_frame": start["id"], "last_frame": last["id"]}})
         task = video.film(depth_video_url=url, first_frame=jpeg(cover(first_img, inp["width"], inp["height"])),
                           last_frame=jpeg(cover(last_img, inp["width"], inp["height"])), prompt=mprompt, aspect=inp["format"])
@@ -383,6 +393,7 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
             info = probe(final)
             frames = _frames(final, [0.05, info.duration_s / 2, max(0.1, info.duration_s - 0.1)], (768, round(768 * info.height / info.width)), tmp, "c")
             out = final.read_bytes()
+        check["frames_checked"] = {e: ((r.get("options") or {}).get("check") or {}).get("band") for e, r in (("start", start), ("end", last))}
         seen = film_check(writer, views["start"], views["end"], frames)
         if seen and seen.get("error"):
             check["claude_error"] = seen["error"]
