@@ -414,3 +414,11 @@ def test_scene_presets_and_a_scene_copied_from_a_picture(render_settings, repo, 
     call = images.calls[n]
     assert "SCENE for every view of this project (Dusk by the Pool): Blue hour after sunset" in call["prompt"]
     assert len(call["images"]) == 2 and "Image 2 is the project's SCENE REFERENCE" in call["prompt"]
+
+
+def test_aerial_scenes_and_the_planting_rule():
+    from app.scenes import SCENES, type_rule
+    for sid in ("valley_misty", "rooftop_gardens", "urban_drone_sunset", "parkland_pines", "green_campus",
+                "hillside_forest", "waterfront_topdown", "suburb_sunset", "terraced_green_city"):
+        assert sid in SCENES and len(SCENES[sid][3]) > 200
+    assert "PLANTING" in type_rule("front") and "PLANTING" in type_rule("estate") and "PLANTING" not in type_rule("interior")

@@ -4,7 +4,8 @@ come from the model and the project look; a scene never changes them.
 
 The exterior scenes were written on 26 Oct 2026 from a study of twenty published architectural renders
 the owner collected as the quality bar. Only the scene qualities were described (no building, brand or
-image is copied or stored). Interior, site plan and estate scenes are Ollic's own starters.
+image is copied or stored). Nine aerial scenes and the planting rule were added the same day from a second
+study of nine aerial renders. Interior, site plan and estate scenes are Ollic's own starters.
 
 A project keeps one scene (a preset, or one Claude reads from the architect's own reference picture) in its
 look, so every view, walkthrough shot and stage is staged the same way.
@@ -97,6 +98,47 @@ SCENES = {
         "Bright midday sun, saturated blue sky with big white cumulus clouds; a perfectly kept green lawn with stepping-stone path and white "
         "pebbles; a young palm in front; strong clean shadows; wide-angle real-estate camera close to the ground, 18-20 mm lens, vivid but "
         "natural colours."),
+    # ---------------------------------------------------------------- aerial (from a second study, 26 Oct 2026)
+    "valley_misty": ("Valley Masterplan, Misty Light", "estate", "High aerial over a valley, mountains in haze, low cloud in front.",
+        "Very high aerial view at about 50 degrees over a wide green valley in soft early-evening light; layered mountains fading into warm "
+        "haze and drifting cloud on the horizon; wisps of low cloud blurring the bottom corners of the frame; the development sitting in a "
+        "dense mosaic of mature trees of many sizes and shades of green; winding roads and lanes lined with trees; warm lights just coming on "
+        "in buildings, a turquoise pool catching the sky; fields, ponds and bare earth around the edges; strong atmospheric depth, 35 mm aerial lens."),
+    "rooftop_gardens": ("Golden Rooftop Gardens", "exterior", "Elevated corner view at sunset, life on balconies, canal and trees.",
+        "Elevated three-quarter view from about the height of the roof, warm low sunset light raking across the facades; a pale peach sky with "
+        "a flock of birds; balconies and terraces full of life: people dining and talking, outdoor furniture, umbrellas, potted trees and "
+        "flowering plants spilling over the rails; green and wildflower roofs; a tree-lined canal or promenade below with people walking; "
+        "the city and treetops fading into warm haze behind; 28 mm lens, rich, inviting mood."),
+    "urban_drone_sunset": ("Urban Drone, Soft Sunset", "exterior", "Real drone photo look, mature park trees, city and hills behind.",
+        "Looks like a real drone photograph at about 40 degrees in soft, low sunset light with a pale hazy sky; the building surrounded by "
+        "mature park trees with full, irregular canopies; a wide road with young street trees, lamp posts and one or two cars; neat verges and "
+        "paths; the existing city of mixed roofs and a forested hill behind, fading in haze; natural, slightly muted photographic colour, "
+        "no stylised lighting, 35 mm lens."),
+    "parkland_pines": ("Parkland Aerial, Umbrella Pines", "exterior", "Building set in rolling lawn with umbrella pines, bright day.",
+        "High three-quarter drone view in bright, warm daylight; the building set in rolling, well-kept lawn with natural colour variation; "
+        "groups of mature umbrella pines and broadleaf trees with soft shadows; planters with trailing greenery on every terrace edge; a "
+        "winding footpath and a broad entrance stair; open, calm parkland feel, 24 mm aerial lens."),
+    "green_campus": ("Green Campus, Summer Sun", "estate", "Buildings among dense deciduous trees, curving paths, crisp sun.",
+        "Steep aerial view at about 55 degrees in crisp, clear summer sun with defined but soft shadows; buildings spread among dense, "
+        "full-canopy deciduous trees of varied heights and greens; green and solar roofs; curving stone paths and plazas with lamp posts, "
+        "benches and lawns; a hedge-lined road and parking at the edge; vivid but natural colour, 35 mm aerial lens."),
+    "hillside_forest": ("Hillside Forest Sunset", "exterior", "Building on a slope against dense forest, warm sun flare, tropical plants.",
+        "Slightly elevated view from across a sloping hillside at sunset; the sun low on the right with a soft warm flare and glowing peach "
+        "clouds; a dense backdrop of tall, layered forest trees; lush tropical planting, banana plants, ferns and wild grass on the slope; "
+        "rocks half-buried in the grass; warm interiors and small uplights glowing; dark foreground shrubs framing the bottom of the frame; "
+        "24 mm lens, cinematic, serene mood."),
+    "waterfront_topdown": ("Waterfront Top-down, Late Sun", "estate", "Near-vertical view over a canal, boats, warm low light shafts.",
+        "Near top-down drone view, about 75 degrees, in warm late-afternoon light with soft shafts of sun through the trees; a canal or "
+        "water channel with small boats and jetties; patterned promenades, green strips and clipped trees; people walking; parked cars and "
+        "cafe umbrellas; buildings with glowing amber windows and planted roof terraces; deep, rich contrast, 35 mm lens."),
+    "suburb_sunset": ("Tropical Suburb Sunset Drone", "estate", "Drone over a leafy neighbourhood at sunset, palms and hedges.",
+        "Drone view at about 45 degrees at sunset with a warm orange sky; a leafy neighbourhood of houses with hip roofs and pools; "
+        "tall palms and dense, varied tropical trees stretching to the horizon; clipped hedges and neat lawns along curving streets with "
+        "white kerbs; soft warm light on the roofs; real photographic colour, 28 mm aerial lens."),
+    "terraced_green_city": ("Terraced Green City, Daylight", "exterior", "Aerial of a tower and podium with planted terraces, plaza.",
+        "High three-quarter aerial in clear, warm daylight with a light haze; stepped terraces and roofs planted with trees, lawns and "
+        "shrubs; a busy plaza with a fountain and people; palm-lined road and parking with cars; the city spreading behind to the horizon "
+        "in haze; 28 mm aerial lens, bright and optimistic mood."),
     # ---------------------------------------------------------------- interior (Ollic starters)
     "interior_morning": ("Soft Morning Living Room", "interior", "Soft daylight through sheer curtains, calm neutral styling.",
         "Soft morning daylight through sheer curtains, gentle shadows; neutral, calm styling with a linen sofa, timber and stone accents, a rug, "
@@ -136,9 +178,18 @@ def scene_text(scene_id: str | None, custom: str = "") -> str:
     return s[3] if s else ""
 
 
+# Every outdoor render: planting is what most often gives an AI render away, so it is spelt out every time.
+GREENERY = ("PLANTING must look like a real photograph: mature trees with irregular, natural canopies of different species, heights and "
+            "shades of green (never identical clone trees or one flat saturated green); light passing through the leaves and soft shadows "
+            "under every canopy; lawns with natural colour variation and edges; shrubs, grasses and ground cover layered and slightly "
+            "overgrown, spilling over planters and kerbs; trees partly overlapping roads, paths and the edges of buildings without hiding "
+            "the architecture; distant trees softening into atmospheric haze.")
+
+
 def type_rule(render_type: str | None) -> str:
-    t = RENDER_TYPES.get(render_type or "exterior")
-    return t["rule"] if t else ""
+    kind = render_type if render_type in RENDER_TYPES else ("interior" if render_type == "interior" else "exterior")
+    rule = RENDER_TYPES[kind]["rule"]
+    return rule if kind == "interior" else rule + " " + GREENERY
 
 
 # ---------------------------------------------------------------- Claude reads a scene from a reference picture
