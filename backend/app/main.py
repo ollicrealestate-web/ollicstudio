@@ -124,5 +124,15 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
 
     # The backend also serves the website, so one service hosts both.
     if settings.web_dir and os.path.isdir(settings.web_dir):
-        app.mount("/", StaticFiles(directory=settings.web_dir, html=True), name="web")
+        class _Fresh(StaticFiles):
+            """Pages, scripts and styles are re-checked on every load (a cheap ETag check), so after an update every
+            browser runs the new version; pictures, fonts and the 3D libraries may be kept for a day."""
+            async def get_response(self, path, scope):
+                resp = await super().get_response(path, scope)
+                if path == "" or path.endswith((".html", ".js", ".mjs", ".css")) and "vendor/" not in path:
+                    resp.headers["Cache-Control"] = "no-cache"
+                elif resp.status_code == 200:
+                    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+                return resp
+        app.mount("/", _Fresh(directory=settings.web_dir, html=True), name="web")
     return app

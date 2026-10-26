@@ -343,3 +343,12 @@ def test_an_exact_shot_has_approved_ends_and_follows_the_models_depth(film_app, 
     film_q = [cnt for s_, cnt in checker.calls if "walkthrough video" in s_]
     assert film_q and sum(b["type"] == "image" for b in film_q[0]) == 5          # the model at both ends and three frames of the shot
     assert not [p for p in storage.buckets["videos"] if "/guides/" in p]
+
+
+def test_scripts_are_rechecked_after_an_update(render_settings, repo, storage, tmp_path):
+    from dataclasses import replace
+    web = tmp_path / "web"; (web / "assets").mkdir(parents=True); (web / "vendor").mkdir()
+    (web / "app.html").write_text("<p>app</p>"); (web / "assets" / "app.js").write_text("1"); (web / "vendor" / "three.js").write_text("3")
+    c = TestClient(create_app(replace(render_settings, web_dir=str(web)), repo=repo, storage=storage, image_client=FakeImages(), runner=InlineRunner()))
+    assert c.get("/assets/app.js").headers["cache-control"] == "no-cache" and c.get("/app.html").headers["cache-control"] == "no-cache"
+    assert "max-age" in c.get("/vendor/three.js").headers["cache-control"]
