@@ -340,16 +340,36 @@ def finish_prompt(check: dict, look_ctx: dict | None) -> str:
 
 
 def needs_another(check: dict, tier: str = "") -> bool:
-    """Below the target on shape or materials, or Claude saw a floor, opening or element out of place.
-    An Exact picture is corrected only when Claude has named what to fix: a vague correction does more harm."""
+    """When Claude checked the picture, its verdict decides (it counts floors and openings and tells glass from
+    timber, which an edge measure cannot); otherwise the shape and materials scores do. An Exact picture is
+    corrected only when Claude has named what to fix: a vague correction does more harm."""
+    claude = check.get("claude")
     if tier == "exact":
-        return bool((check.get("claude") or {}).get("ok") is False and (check.get("claude") or {}).get("issues"))
-    return overall(check) < GOOD_MATCH or (check.get("claude") or {}).get("ok") is False
+        return bool(claude and claude.get("ok") is False and claude.get("issues"))
+    if claude:
+        m = (check.get("materials") or {}).get("score")
+        return claude.get("ok") is False or (m is not None and m < GOOD_MATCH)
+    return overall(check) < GOOD_MATCH
+
+
+def verdict_band(check: dict) -> str:
+    """good / fair / poor: Claude's verdict when there is one, else the scores."""
+    claude = check.get("claude")
+    if claude:
+        n = len(claude.get("issues") or [])
+        band = "good" if claude.get("ok") else "fair" if n <= 2 else "poor"
+        m = (check.get("materials") or {}).get("score")
+        if band == "good" and m is not None and m < GOOD_MATCH:
+            band = "fair"
+        return band
+    from .geometry import band as score_band
+    return score_band(overall(check))
 
 
 def rank(check: dict) -> tuple:
-    """Which of two tries to keep: Claude's verdict first, then the scores."""
-    return ((check.get("claude") or {}).get("ok") is not False, overall(check))
+    """Which of two tries to keep: Claude's verdict first (fewer differences is better), then the scores."""
+    claude = check.get("claude") or {}
+    return (claude.get("ok") is not False, -len(claude.get("issues") or []), overall(check))
 
 
 def fix_rule(check: dict) -> tuple[str, str]:
@@ -462,6 +482,7 @@ def geometry_check(state, user: CurrentUser, job: dict, inp: dict, result, image
                                                    "raw_usage": seen.get("usage")})
                 except BackendUnavailable:
                     pass
+        check["band"] = verdict_band(check)
         return check, result
     except Exception:
         log.exception("geometry check failed for job %s", job["id"])

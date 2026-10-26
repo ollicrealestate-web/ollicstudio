@@ -751,12 +751,15 @@ function checkChip(v) {
   const c = (v.script || {}).check;
   if (!c || c.score === undefined) return "";
   const word = { good: "Matches the model", fair: "Mostly matches the model", poor: "Drifted from the model" }[c.band] || "Checked";
+  const n = c.claude ? (c.claude.issues || []).length : null;
+  const label = c.claude ? `${word} · ${c.claude.ok ? "checked by Claude" : `${n} difference${n === 1 ? "" : "s"} found`}` : `${word} · ${Math.round(c.score * 100)}%`;
   const why = [c.framing === "corrected" ? "The AI reframed the building; Ollic put it back in your model's camera." : "",
     c.claude ? (c.claude.ok ? "Claude checked floors and openings: no differences found." : "Claude found: " + c.claude.issues.join("; ")) : "",
     c.retried ? "Rendered twice, model first; the better one is kept." : "",
     c.materials ? "Materials: " + c.materials.materials.map(m => `${m.name} ${m.ok ? "as approved" : `off (looks ${m.seen})`}`).join("; ") + "." : ""].filter(Boolean).join(" ");
-  const chip = el("span", { class: `chip check-${c.band}`, title: why || `Shape and camera match ${Math.round(c.score * 100)}%` },
-    `${word} · ${Math.round(c.score * 100)}%${c.framing === "corrected" ? " · framing fixed" : ""}`);
+  const chip = el("span", { class: `chip check-${c.band}`, title: [why, `Edge match ${Math.round(c.score * 100)}%.`].filter(Boolean).join(" ") },
+    `${label}${c.framing === "corrected" ? " · framing fixed" : ""}`);
+  if (c.claude && !c.claude.ok && n) chip.title = "Claude found: " + c.claude.issues.join(" · ") + "  " + chip.title;
   if (!c.materials) return chip;
   const mb = c.materials.score >= 0.8 ? "good" : c.materials.score >= 0.65 ? "fair" : "poor";
   const off = c.materials.materials.filter(m => !m.ok).map(m => m.name);
@@ -876,6 +879,9 @@ function setupTiers(out) {
   }));
   syncModelOnly();
   if (!$("#tierPick input[name=tier]:checked")) stdInput.checked = true;
+  // renders of a model: the best engine that can be used here is chosen to start with (the architect can change it)
+  const ultra = tierInfo.ultra;
+  if (SERVICES[service]?.modes && ultra?.available && ultra?.allowed && !tierPickedByHand && $("#tierPick input[value=ultra]")) $("#tierPick input[value=ultra]").checked = true;
   tierChanged();
   updateClipEngines(out.video_engines || {});
 }
@@ -887,6 +893,8 @@ function syncModelOnly() {
     const i = l.querySelector("input"); if (!onModel && i.checked) { $("#tierPick input[value=standard]").checked = true; tierChanged(); }
   });
 }
+let tierPickedByHand = false;
+document.addEventListener("change", e => { if (e.isTrusted && e.target?.name === "tier") tierPickedByHand = true; });
 function chosenTier() { return $("#tierPick input[name=tier]:checked")?.value || "standard"; }
 /* AI version: a dropdown. Closed, it shows only the chosen one; open, the list; picking one closes it. */
 function tierToggle() {
