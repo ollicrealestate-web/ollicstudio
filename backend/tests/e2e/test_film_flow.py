@@ -156,3 +156,42 @@ def test_a_revit_file_is_converted_and_opens_in_3d(stack, tmp_path):
     (job,) = [j for j in repo.jobs.values() if j["type"] == "revit_translate"]
     assert job["status"] == "succeeded"
     assert any(m["source_file_id"] == job["result"]["ifc_file_id"] for m in repo.models.values())
+
+
+def test_full_film_moves_are_drawn_from_the_model(stack, tmp_path):
+    """Every new camera move (side pass, top-down, through the door, through a room) gives a real view of the model."""
+    ifc = tmp_path / "house.ifc"; ifc.write_bytes(build_ifc(sample_house(), seed="full"))
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(args=GL_ARGS)
+        page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+        page.route("**/fonts.googleapis.com/**", lambda r: r.abort()); page.route("**/fonts.gstatic.com/**", lambda r: r.abort())
+        errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(stack["url"] + "/app.html#sign-up")
+        page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@fullfilm.test"); page.fill("#upPassword", "correct-horse-1")
+        page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
+        page.fill("#newProjectName", "Full film"); page.click("#newProjectForm button[type=submit]")
+        page.click(".svc-card:has-text('AI walkthrough')"); page.wait_for_selector("#svcStart:not([hidden])")
+        page.set_input_files("#fileInput", str(ifc))
+        page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
+        page.wait_for_selector("#filmSection:not([hidden])")
+        page.wait_for_function("document.querySelector('#modelBadge')?.textContent.includes('Ready')", timeout=60000)
+        for kind in ("sidepass", "topdown", "entry", "interior"):
+            page.select_option("#shotKind", kind)
+            page.click("#addShot")
+        page.wait_for_function("document.querySelectorAll('#filmShots .film-shot').length === 4", timeout=30000)
+        # each first frame shows the model: not one flat colour
+        spread = page.evaluate("""async () => Promise.all([...document.querySelectorAll('#filmShots img')].map(img => new Promise(ok => {
+            const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); c.width = 64; c.height = 36; const g = c.getContext('2d');
+              g.drawImage(i, 0, 0, 64, 36); const d = g.getImageData(0, 0, 64, 36).data; let lo = 255, hi = 0;
+              for (let k = 0; k < d.length; k += 4) { const v = (d[k] + d[k + 1] + d[k + 2]) / 3; lo = Math.min(lo, v); hi = Math.max(hi, v); } ok(hi - lo); };
+            i.src = img.src; })))""")
+        names = page.eval_on_selector_all("#filmShots .film-shot .hint", "els => els.map(e => e.textContent)")
+        import base64 as _b, os as _os
+        if _os.environ.get("OLLIC_DUMP"):
+            for i, src in enumerate(page.eval_on_selector_all("#filmShots img", "els => els.map(e => e.src)")):
+                open(f"{_os.environ['OLLIC_DUMP']}/thumb{i}.jpg", "wb").write(_b.b64decode(src.split(",", 1)[1]))
+        page.screenshot(path=str(stack["dir"].parent / "e2e-fullfilm.png"), full_page=True)
+        assert errors == [], errors
+        browser.close()
+    assert all(s > 40 for s in spread[:3]) and spread[3] > 12, (spread, names)      # inside, the clay walls are close in tone
+    assert names[3] == "Through a room: Living" and any("front door" in n for n in names), names

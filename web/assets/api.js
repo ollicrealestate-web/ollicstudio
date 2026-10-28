@@ -58,6 +58,7 @@ export const api = {
   // AI walkthroughs: Claude plans the shots; the options for filming them
   planFilm: (projectId, body) => request("POST", `/projects/${projectId}/film-plan`, body),
   filmEngines: () => request("GET", "/film/engines"),
+  joinFilm: (projectId, body) => request("POST", `/projects/${projectId}/films/join`, body),
 };
 
 export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);

@@ -354,3 +354,49 @@ def test_scripts_are_rechecked_after_an_update(render_settings, repo, storage, t
     c = TestClient(create_app(replace(render_settings, web_dir=str(web)), repo=repo, storage=storage, image_client=FakeImages(), runner=InlineRunner()))
     assert c.get("/assets/app.js").headers["cache-control"] == "no-cache" and c.get("/app.html").headers["cache-control"] == "no-cache"
     assert "max-age" in c.get("/vendor/three.js").headers["cache-control"]
+
+
+def test_the_full_film_plan_has_the_door_and_the_rooms(film_app, alice, repo):
+    body = {"description": "white render", "storeys": ["Ground", "First"], "rooms": ["Living Room", "Kitchen", "Bedroom 1", "Store"],
+            "width_m": 14, "depth_m": 10, "height_m": 8, "full": True, "seconds": 60}
+    c, _ = film_app(writer=None)
+    pid = new_project(c, alice)
+    plan = c.post(f"/api/projects/{pid}/film-plan", json=body, headers=alice["headers"]).json()
+    kinds = [s["kind"] for s in plan["shots"]]
+    assert kinds[:5] == ["aerial", "orbit", "sidepass", "approach", "entry"] and kinds[-1] == "topdown"
+    assert [s["room"] for s in plan["shots"] if s["kind"] == "interior"] == ["Living Room", "Kitchen", "Bedroom 1"]
+    # Claude: only rooms that are in the model are kept; the full-film brief and the scene reach it
+    planner = FakePlanner({"shots": [{"name": "In", "kind": "entry", "seconds": 6}, {"name": "Lounge", "kind": "interior", "room": "living room", "seconds": 6},
+                                     {"name": "Cinema", "kind": "interior", "room": "Home cinema", "seconds": 6}], "notes": "ok"})
+    c2, _ = film_app(writer=planner)
+    plan = c2.post(f"/api/projects/{pid}/film-plan", json=body, headers=alice["headers"]).json()
+    assert [(s["kind"], s["room"]) for s in plan["shots"]] == [("entry", ""), ("interior", "Living Room")]
+    assert "FULL PROPERTY FILM" in planner.calls[0][1][0]["text"]
+
+
+@needs_ffmpeg
+def test_the_shots_are_joined_into_one_film_with_title_cards(film_app, alice, bob, repo, storage):
+    from app.video import probe
+    import tempfile, os
+    c, app = film_app()
+    pid = new_project(c, alice)
+    user = app.state.verifier.verify(alice["headers"]["Authorization"].split()[1])
+    ids = []
+    for i, secs in enumerate((3, 2)):
+        vid = f"00000000-0000-4000-8000-00000000000{i}"
+        path = f"{alice['id']}/{pid}/{vid}.mp4"
+        storage.upload(user, path, mp4(secs, "1280x720"), "video/mp4", bucket="videos")
+        repo.create_video(user, {"id": vid, "project_id": pid, "storage_path": path, "title": f"Shot {i}", "format": "16:9", "kind": "film", "script": {}})
+        ids.append(vid)
+    assert c.post(f"/api/projects/{pid}/films/join", json={"video_ids": ids}, headers=bob["headers"]).status_code == 404
+    r = c.post(f"/api/projects/{pid}/films/join", json={"video_ids": ids, "title": "Chief Ben Residence", "subtitle": "Lekki, Lagos"}, headers=alice["headers"])
+    assert r.status_code == 202, r.text
+    job = repo.jobs[r.json()["id"]]
+    assert job["status"] == "succeeded", job["error"]
+    v = repo.videos[job["result"]["video_id"]]
+    assert v["script"]["joined"] and v["title"] == "Chief Ben Residence" and [x["video_id"] for x in v["items"]] == ids
+    with tempfile.TemporaryDirectory() as d:
+        f = os.path.join(d, "f.mp4"); open(f, "wb").write(storage.download(user, v["storage_path"], bucket="videos"))
+        info = probe(f)
+    # 3 s card + 3 s + 2 s + 3 s card, less three 0.6 s cross-fades
+    assert (info.width, info.height) == (1280, 720) and abs(info.duration_s - 9.2) < 0.3

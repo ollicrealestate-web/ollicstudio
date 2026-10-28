@@ -745,14 +745,17 @@ function guideFor(fileId, kind = "lines") {
 }
 
 /* ---------- AI walkthrough: Claude plans the shots, the model gives the exact camera moves ---------- */
-const SHOT_NAME = { approach: "Approach from the street", orbit: "Orbit around the building", aerial: "Aerial over the site", rise: "Rise up the facade", push: "Slow move in", custom: "Your move" };
+const SHOT_NAME = { approach: "Approach from the street", orbit: "Orbit around the building", aerial: "Aerial over the site", rise: "Rise up the facade", push: "Slow move in",
+  sidepass: "Low drone pass along the front", topdown: "Straight down from above", entry: "Through the front door", interior: "Through a room", custom: "Your move" };
 const FILM_PRICE = { exact: 0.10, path: 0.28, path_plus: 0.17 };
 let shots = [], filmEngines = {}, filming = null;
 function newShot(kind, seconds, extra = {}) {
   if (!viewer) { toast("Open your model first."); return null; }
-  const poses = viewer.shotPath(kind);
+  const poses = viewer.shotPath(kind, { room: extra.room });
+  if (!poses) { toast(kind === "interior" ? "This model has no rooms to walk through." : "That camera move does not fit this model."); return null; }
   const thumb = viewer.guides(320, 180, ["clay"], viewer.along(poses, 0)).clay;
-  return { id: newKey(), kind, seconds, name: extra.name || SHOT_NAME[kind], poses, thumb, frame_prompt: extra.frame_prompt || "", motion_prompt: extra.motion_prompt || "", life: extra.life ?? null };
+  const room = kind === "interior" ? (poses[0].room || extra.room || "") : "";
+  return { id: newKey(), kind, seconds, room, name: extra.name || (room || SHOT_NAME[kind]), poses, thumb, frame_prompt: extra.frame_prompt || "", motion_prompt: extra.motion_prompt || "", life: extra.life ?? null };
 }
 function drawShots() {
   $("#filmShots").replaceChildren(...shots.map((s, i) => {
@@ -763,7 +766,7 @@ function drawShots() {
     return el("li", { class: "film-shot" },
       el("img", { src: s.thumb, alt: `First frame of ${s.name}`, width: "160", height: "90" }),
       el("div", { class: "film-shot-body" }, el("span", { class: "num" }, String(i + 1)), name,
-        el("span", { class: "hint" }, SHOT_NAME[s.kind] + (s.frame_prompt ? " · prompts by Claude" : "")), secs,
+        el("span", { class: "hint" }, SHOT_NAME[s.kind] + (s.room ? `: ${s.room}` : "") + (s.frame_prompt ? " · prompts by Claude" : "")), secs,
         el("div", { class: "film-shot-tools" },
           el("button", { class: "btn sm", type: "button", onclick: () => previewShot(s) }, "Preview"),
           el("button", { class: "btn sm", type: "button", "aria-label": `Move ${s.name} earlier`, ...(i === 0 ? { disabled: "" } : {}), onclick: () => { [shots[i - 1], shots[i]] = [shots[i], shots[i - 1]]; drawShots(); } }, "↑"),
@@ -788,7 +791,18 @@ async function previewShot(s) {
   $("#viewer").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
   void n; requestAnimationFrame(step);
 }
-$("#addShot").onclick = () => { const s = newShot($("#shotKind").value, Number($("#shotSecs").value)); if (s) { shots.push(s); drawShots(); } };
+$("#addShot").onclick = () => {
+  const kind = $("#shotKind").value, s = newShot(kind, Number($("#shotSecs").value), kind === "interior" ? { room: $("#shotRoom").value } : {});
+  if (s) { shots.push(s); drawShots(); }
+};
+$("#shotKind").addEventListener("change", () => {
+  const inside = $("#shotKind").value === "interior";
+  $("#shotRoomWrap").hidden = !inside;
+  if (inside) {
+    const list = viewer?.rooms() || [];
+    $("#shotRoom").replaceChildren(el("option", { value: "" }, "The main room"), ...list.map(r => el("option", { value: r.name }, r.storey ? `${r.name} · ${r.storey}` : r.name)));
+  }
+});
 $("#addShotView").onclick = () => { const s = newShot("push", 6, { name: viewer?.mode === "walk" ? (viewer.room || "Inside") : "This view" }); if (s) { shots.push(s); drawShots(); toast("Shot added from this view. Find it under AI walkthrough."); } };
 $("#filmEngine").addEventListener("change", () => {
   const e = filmEngines[$("#filmEngine").value]; $("#filmEngineNote").textContent = e ? `${e.blurb} ${e.price}.` : ""; drawFilmEstimate();
@@ -801,16 +815,49 @@ async function loadFilmEngines() {
   $("#filmEngine").value = filmEngines[keep]?.available ? keep : (Object.keys(filmEngines).find(k => filmEngines[k].available) || "path");
   $("#filmEngine").dispatchEvent(new Event("change"));
 }
-$("#planBtn").onclick = async () => {
+async function planFilm(full) {
   if (!viewer || !current) { toast("Open your model first."); return; }
-  const btn = $("#planBtn"); btn.disabled = true; btn.textContent = "Claude is planning…";
+  const btn = full ? $("#planFullBtn") : $("#planBtn"), label = btn.textContent; btn.disabled = true; btn.textContent = "Claude is planning…";
   try {
-    const plan = await api.planFilm(current.id, { ...viewer.facts, description: $("#filmDesc").value.trim(), seconds: 24 });
+    const plan = await api.planFilm(current.id, { ...viewer.facts, rooms: (viewer.rooms() || []).map(r => r.name), description: $("#filmDesc").value.trim(),
+      seconds: full ? 60 : 24, full });
+    if (viewer.mode === "walk" || viewer.mode === "interior") setViewMode("exterior");
     shots = plan.shots.map(s => newShot(s.kind, s.seconds, s)).filter(Boolean);
     drawShots();
     $("#planNoteFilm").textContent = plan.notes || (plan.by === "claude" ? "Planned by Claude." : "A ready-made plan.");
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
-  finally { btn.disabled = false; btn.textContent = "Plan the shots with Claude"; }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
+$("#planBtn").onclick = () => planFilm(false);
+$("#planFullBtn").onclick = () => planFilm(true);
+
+/* the full film: finished shots joined into one video, in the order ticked */
+let joinPick = [];
+function drawJoin() {
+  const shotsDone = videos.filter(v => v.kind === "film" && !(v.script || {}).joined).slice().reverse();   // oldest first: the order they were filmed
+  $("#joinBox").hidden = shotsDone.length < 2;
+  joinPick = joinPick.filter(id => shotsDone.some(v => v.id === id));
+  if (!$("#joinTitle").value && current) $("#joinTitle").value = current.name;
+  $("#joinList").replaceChildren(...shotsDone.map(v => {
+    const on = joinPick.includes(v.id);
+    const box = el("input", { type: "checkbox", ...(on ? { checked: "" } : {}), "aria-label": `Use ${v.title || "shot"}` });
+    box.onchange = () => { joinPick = box.checked ? [...joinPick, v.id] : joinPick.filter(x => x !== v.id); drawJoin(); };
+    return el("li", { class: `join-item${on ? " on" : ""}` }, el("label", { class: "check" }, box,
+      el("span", {}, on ? `${joinPick.indexOf(v.id) + 1} · ` : "", v.title || "Shot", el("small", { class: "muted" }, ` ${Math.round(v.duration_s)} s · ${fmtDate(v.created_at)}`))));
+  }));
+  const secs = shotsDone.filter(v => joinPick.includes(v.id)).reduce((a, v) => a + v.duration_s, 0);
+  $("#joinGo").disabled = joinPick.length < 2;
+  $("#joinNote").textContent = joinPick.length < 2 ? "Tick at least two shots." : `${joinPick.length} shots, about ${Math.round(secs + 6 - (joinPick.length + 1) * 0.6)} s with the title cards.`;
+}
+$("#joinGo").onclick = async () => {
+  if (joinPick.length < 2 || !current) return;
+  const btn = $("#joinGo"); btn.disabled = true;
+  try {
+    await api.joinFilm(current.id, { video_ids: joinPick, title: $("#joinTitle").value.trim(), subtitle: $("#joinSub").value.trim() });
+    $("#joinNote").textContent = "Joining the film. It appears below in a minute or two.";
+    joinPick = []; loadOutputs();
+  } catch (err) { if (err.status === 401) return handle(err); $("#joinNote").textContent = err.message; }
+  finally { btn.disabled = false; }
 };
 $("#filmGo").onclick = async () => {
   if (!shots.length || filming || !viewer) return;
@@ -876,7 +923,7 @@ function checkChip(v) {
 }
 
 /* ---------- concept renders (Phase 2) ---------- */
-const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading your model", animation_export: "Animation video", cinematic_clip: "Cinematic clip", film_shot: "Walkthrough shot", revit_translate: "Converting Revit to IFC" };
+const JOB_NAME = { concept_render: "New concept", concept_edit: "Revision", ifc_import: "Reading your model", animation_export: "Animation video", cinematic_clip: "Cinematic clip", film_shot: "Walkthrough shot", video_export: "Joining the film", revit_translate: "Converting Revit to IFC" };
 const LIGHT_NAME = { morning: "Morning", midday: "Midday", "golden hour": "Golden hour", dusk: "Dusk", night: "Night" };
 let pollTimer = null, outputsFor = null, seenFailed = new Set(), seenDone = new Set(), outputsLoadedOnce = false;
 function stopPolling() { clearTimeout(pollTimer); pollTimer = null; }
@@ -890,16 +937,16 @@ async function loadOutputs() {
   if (outputsFor !== pid || $("#projectView").hidden) return;
   $("#studioOff").hidden = out.renders_enabled; $("#renderForm").hidden = !out.renders_enabled;
   setupTiers(out); lastJobs = out.jobs;
-  const IMAGE_JOBS = ["concept_render", "concept_edit"], VIDEO_JOBS = ["animation_export", "cinematic_clip", "film_shot"];
+  const IMAGE_JOBS = ["concept_render", "concept_edit"], VIDEO_JOBS = ["animation_export", "cinematic_clip", "film_shot", "video_export"];
   drawJobs(out.jobs.filter(j => IMAGE_JOBS.includes(j.type)), "#jobList");
   drawJobs(out.jobs.filter(j => j.type === "ifc_import" || j.type === "revit_translate"), "#modelJobs");
-  drawJobs(out.jobs.filter(j => j.type === "film_shot"), "#filmJobs");
+  drawJobs(out.jobs.filter(j => j.type === "film_shot" || j.type === "video_export"), "#filmJobs");
   drawJobs(out.jobs.filter(j => j.type === "animation_export" || j.type === "cinematic_clip"), "#iaJobs");
   drawGallery(out.images);
   images = out.images; drawIA();
   const vids = out.jobs.filter(j => VIDEO_JOBS.includes(j.type) && j.status === "succeeded" && !seenDone.has(j.id));
   vids.forEach(j => seenDone.add(j.id));
-  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "film_shot") ? "A walkthrough shot is ready." : vids.some(j => j.type === "cinematic_clip") ? "Your cinematic clip is ready." : "Your animation video is ready."); }
+  if (vids.length && outputsLoadedOnce) { loadVideos(); toast(vids.some(j => j.type === "video_export") ? "Your full film is ready." : vids.some(j => j.type === "film_shot") ? "A walkthrough shot is ready." : vids.some(j => j.type === "cinematic_clip") ? "Your cinematic clip is ready." : "Your animation video is ready."); }
   const read = out.jobs.filter(j => j.type === "ifc_import" && j.status === "succeeded" && !seenDone.has(j.id));
   read.forEach(j => seenDone.add(j.id));
   if (read.length && outputsLoadedOnce) { loadModels(); current = await api.getProject(current.id).catch(() => current); renderProject(); }
@@ -1144,13 +1191,14 @@ function drawVideos() {
         v.url ? el("video", { src: v.url, controls: "", preload: "metadata", playsinline: "", "aria-label": `Video: ${v.title || "untitled"}` }) : el("span", { class: "muted" }, "Video link unavailable")),
       el("div", { class: "body" },
         el("h3", {}, v.title || (v.kind === "cinematic" ? "Cinematic clip" : v.kind === "construction" ? "Construction sequence" : "Walkthrough")),
-        v.kind === "film" ? el("div", { class: "tags" }, checkChip(v)) : "",
+        v.kind === "film" && !(v.script || {}).joined ? el("div", { class: "tags" }, checkChip(v)) : "",
         el("div", { class: "tags" }, el("span", { class: "chip" }, v.format), el("span", { class: "chip" }, `${Math.round(v.duration_s)} s`), el("span", { class: "chip" }, v.kind === "cinematic" ? "AI video" : v.kind === "construction" ? "Construction" : `${(v.items || []).length} shot${(v.items || []).length === 1 ? "" : "s"}`), el("span", { class: "chip" }, v.label)),
         el("p", { class: "hint" }, fmtDate(v.created_at)),
         el("div", { class: "actions" }, v.download_url ? el("a", { class: "btn primary", href: v.download_url, download: "" }, "Download MP4") : "",
           deleteButton("this video", async () => { await api.deleteVideo(v.id); toast("Video deleted."); loadVideos(); }, false))));
   };
   $("#filmVideos").replaceChildren(...videos.filter(v => v.kind === "film").map(card));
+  drawJoin();
   $("#iaVideos").replaceChildren(...videos.filter(v => v.kind === "construction" || v.kind === "cinematic").map(card));
   $("#libVideos").replaceChildren(...videos.map(card));
   $("#libVideosEmpty").hidden = videos.length > 0;

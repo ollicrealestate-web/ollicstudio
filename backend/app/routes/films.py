@@ -49,7 +49,7 @@ def _to_h264(src) -> bytes:
 
 class ShotMeta(BaseModel):
     name: str = Field(default="Shot", max_length=80)
-    kind: Literal["push", "orbit", "approach", "aerial", "rise", "custom"] = "custom"
+    kind: Literal["push", "orbit", "approach", "aerial", "rise", "sidepass", "topdown", "entry", "interior", "custom"] = "custom"
     engine: Literal["exact", "path", "path_plus"] = "exact"
     tier: Literal["standard", "premium", "swift", "ultra", "vs"] = "standard"   # the picture option for the first (and last) frame
     format: Literal["16:9", "9:16", "1:1"] = "16:9"
@@ -174,28 +174,57 @@ class PlanIn(BaseModel):
     depth_m: float = Field(default=0, ge=0, le=5000)
     height_m: float = Field(default=0, ge=0, le=1000)
     seconds: int = Field(default=24, ge=5, le=120)
+    full: bool = False          # the full property film: outside, through the door, the rooms, and out again
 
 
 PLAN_SYSTEM = (
-    "You plan short architectural films for architects, shot by shot. The building comes from the architect's model; each shot is a "
+    "You plan architectural films for architects, shot by shot. The building comes from the architect's model; each shot is a "
     "camera move that Ollic records exactly from the model and an AI then films photoreal, so the geometry stays true. Use only these "
     "camera moves: approach (walk up to the building from the street at eye level), orbit (slow arc around the building at mid height), "
-    "aerial (high arc showing the whole site), rise (from eye level up the facade to the roof), push (slow move in on the current view, "
-    "good for a detail or an interior). Each shot is 4 to 10 seconds. Order the shots like a short film: arrival, the building, the "
-    "detail, the reveal. For each shot write a look prompt for the first frame (materials, light, setting from the architect's description; "
-    "tell the image model to keep the geometry exactly) and a motion prompt for the video (keep the camera move and the building exactly; "
-    "add the life and light asked for). Never invent floors or features. "
-    'Answer with JSON only: {"shots": [{"name": "...", "kind": "approach|orbit|aerial|rise|push", "seconds": 4-10, "frame_prompt": "...", '
-    '"motion_prompt": "...", "life": true|false}], "notes": "one sentence for the architect"}'
+    "aerial (high arc showing the whole site), topdown (straight down from high above, turning slowly), sidepass (low drone pass along the "
+    "front, beside the street), rise (from eye level up the facade to the roof), push (slow move in on the current view), entry (to the "
+    "front door and through it into the house), interior (a slow walk through one room; give the room's name exactly as listed). "
+    "Each shot is 4 to 10 seconds. Order the shots like a film: arrival, the building, the detail, inside, the reveal. Interior shots "
+    "only for rooms in the list; if the model has no rooms, no interior shots. For each shot write a look prompt for the first frame "
+    "(materials, light, setting from the architect's description; for interiors, furnish and light the room to suit its name; tell the "
+    "image model to keep the geometry exactly) and a motion prompt for the video (keep the camera move and the building exactly; add "
+    "the life asked for: cars moving and people walking outside, people living inside). Never invent floors, rooms or features. "
+    'Answer with JSON only: {"shots": [{"name": "...", "kind": "approach|orbit|aerial|topdown|sidepass|rise|push|entry|interior", '
+    '"room": "room name for interior shots, else empty", "seconds": 4-10, "frame_prompt": "...", "motion_prompt": "...", "life": true|false}], '
+    '"notes": "one sentence for the architect"}'
 )
+FULL_FILM = ("Plan the FULL PROPERTY FILM, about {secs} seconds in 7 to 10 shots: an aerial or top-down opening, a 360-degree orbit, a low "
+             "side pass with cars moving on the street, the approach, the entry through the front door, then the main rooms inside "
+             "(living, kitchen, a bedroom, others that are listed), and a closing aerial.")
 
 
 def default_plan(body: PlanIn) -> dict:
     tall = body.height_m > 15
+    if body.full:
+        shots = [{"name": "Opening from above", "kind": "aerial", "seconds": 8, "life": True},
+                 {"name": "Around the building", "kind": "orbit", "seconds": 8, "life": True},
+                 {"name": "Along the street", "kind": "sidepass", "seconds": 6, "life": True},
+                 {"name": "Arrival", "kind": "approach", "seconds": 6, "life": True},
+                 {"name": "Through the front door", "kind": "entry", "seconds": 6, "life": False}]
+        for room in _main_rooms(body.rooms):
+            shots.append({"name": room, "kind": "interior", "room": room, "seconds": 6, "life": False})
+        shots.append({"name": "The roof and the site", "kind": "topdown", "seconds": 6, "life": False})
+        return {"shots": shots, "notes": "The full film: the site, the building, the street, through the door, the rooms and out. Edit any shot before filming.", "by": "ollic"}
     shots = [{"name": "Arrival", "kind": "approach", "seconds": 8, "life": True},
              {"name": "Around the building", "kind": "orbit", "seconds": 8, "life": False},
              {"name": "Up the facade" if tall else "From above", "kind": "rise" if tall else "aerial", "seconds": 6, "life": False}]
     return {"shots": shots, "notes": "A three-shot film: arrival, the building, the reveal. Edit any shot before filming.", "by": "ollic"}
+
+
+def _main_rooms(rooms: list[str]) -> list[str]:
+    """Up to four rooms for the film, the living spaces first."""
+    order = ("living", "lounge", "sitting", "family", "kitchen", "dining", "master", "bed", "suite", "lobby", "reception", "study", "office")
+    seen, out = set(), []
+    for word in order:
+        for r in rooms:
+            if word in r.lower() and r.lower() not in seen and len(out) < 4:
+                seen.add(r.lower()); out.append(r)
+    return out
 
 
 @router.post("/projects/{project_id}/film-plan")
@@ -208,14 +237,22 @@ def plan_film(project_id: uuid.UUID, body: PlanIn, request: Request, user: Curre
     facts = (f"Model facts: {len(body.storeys)} storeys ({', '.join(body.storeys[:20])}); about {body.width_m:.0f} m wide, {body.depth_m:.0f} m deep, "
              f"{body.height_m:.0f} m tall; rooms: {', '.join(body.rooms[:40]) or 'none in the file'}.")
     text = f"{facts}\nArchitect's description: {body.description.strip() or '(none: choose a tasteful, realistic look)'}\nTotal length: about {body.seconds} seconds."
+    if body.full:
+        text += "\n" + FULL_FILM.format(secs=body.seconds)
+    from ..look import with_scene
+    text = with_scene(text, _owned_project(request, user, project_id))
     try:
-        out = writer.ask_json(PLAN_SYSTEM, [{"type": "text", "text": text}], max_tokens=2500)
+        out = writer.ask_json(PLAN_SYSTEM, [{"type": "text", "text": text}], max_tokens=6000)
     except PromptWriterFailed:
         return default_plan(body)
     shots = []
-    for s in (out["answer"].get("shots") or [])[:8]:
+    known = {r.lower(): r for r in body.rooms}
+    for s in (out["answer"].get("shots") or [])[:12 if body.full else 8]:
         kind = s.get("kind") if s.get("kind") in SHOT_KINDS else "push"
-        shots.append({"name": str(s.get("name") or "Shot")[:80], "kind": kind, "seconds": int(max(4, min(10, int(s.get("seconds") or 6)))),
+        room = known.get(str(s.get("room") or "").strip().lower(), "")
+        if kind == "interior" and not room:
+            continue          # only rooms that are in the model
+        shots.append({"name": str(s.get("name") or "Shot")[:80], "kind": kind, "room": room, "seconds": int(max(4, min(10, int(s.get("seconds") or 6)))),
                       "frame_prompt": str(s.get("frame_prompt") or "")[:6000], "motion_prompt": str(s.get("motion_prompt") or "")[:2000], "life": bool(s.get("life"))})
     if not shots:
         return default_plan(body)
@@ -235,3 +272,28 @@ def film_engines(request: Request):
     on = lambda k: getattr(st, "film_exact" if k == "exact" else "runway", None) is not None  # noqa: E731
     return {k: {**{x: v[x] for x in ("name", "blurb", "price")}, "available": on(k)} for k, v in FILM_ENGINES.items()} | {
         "_pictures": {k: v["name"] for k, v in IMAGE_ENGINES.items()}}
+
+
+# ---------------------------------------------------------------- the full film: the shots joined into one video
+class JoinIn(BaseModel):
+    video_ids: list[uuid.UUID] = Field(min_length=2, max_length=20)
+    title: str = Field(default="", max_length=80)
+    subtitle: str = Field(default="", max_length=120)
+
+
+@router.post("/projects/{project_id}/films/join", status_code=status.HTTP_202_ACCEPTED)
+def join_film(project_id: uuid.UUID, body: JoinIn, request: Request, response: Response, user: CurrentUser = Depends(get_current_user)):
+    """Joins finished walkthrough shots, in the order given, into one film with title cards (on Ollic's server; no AI cost)."""
+    from ..film_join import run_join_job
+    project = _owned_project(request, user, project_id)
+    repo = _repo(request)
+    fmt = None
+    for vid in body.video_ids:
+        v = repo.get_video(user, str(vid))
+        if not v or v.get("owner_id") != user.id or v.get("project_id") != str(project_id) or v.get("kind") != "film":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "A shot is not in this project.")
+        fmt = fmt or v.get("format")
+    title = body.title.strip() or project.get("name") or "Full film"
+    return _start_job(request, user, str(project_id), "video_export", {"join": True, "video_ids": [str(v) for v in body.video_ids], "title": title,
+                                                                       "subtitle": body.subtitle.strip(), "format": fmt or "16:9"},
+                      None, response, run=run_join_job)

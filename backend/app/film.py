@@ -38,7 +38,8 @@ log = logging.getLogger("ollic.film")
 POLL_SECONDS = 10
 MAX_WAIT = 30 * 60
 ENGINE_MODEL = {"path": "aleph2", "path_plus": "klingO3_pro"}
-SHOT_KINDS = ("push", "orbit", "approach", "aerial", "rise", "custom")
+SHOT_KINDS = ("push", "orbit", "approach", "aerial", "rise", "sidepass", "topdown", "entry", "interior", "custom")
+INSIDE_AT = {"interior": ("start", "end"), "entry": ("end",)}     # which ends of a shot are inside the house
 
 
 def frame_prompt(description: str) -> str:
@@ -281,8 +282,8 @@ def _render_frame(state, user, pid: str, inp: dict, end: str, prompt: str, hero:
                                             "guide_file_id": inp[f"{end}_lines_id"], "depth_file_id": inp[f"{end}_depth_id"],
                                             "material_file_id": inp.get(f"{end}_materials_id"), "model_id": inp.get("model_id"),
                                             "hero_render_id": hero, "tier": inp.get("frame_tier") or "standard", "aspect": inp["aspect"], "rounds": 2,
-                                            "quality": "high", "view": "exterior", "time_of_day": "midday",
-                                            "film_shot": f"{inp.get('name') or 'Shot'} ({end})"}})
+                                            "quality": "high", "view": "interior" if end in INSIDE_AT.get(inp.get("kind"), ()) else "exterior",
+                                            "time_of_day": "midday", "film_shot": f"{inp.get('name') or 'Shot'} ({end})"}})
     run_render_job(state, user, rjob["id"])
     r = repo.get_job(user, rjob["id"]) or {}
     if r.get("status") != "succeeded":
@@ -349,7 +350,17 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
         try:
             start = _render_frame(state, user, pid, inp, "start", fprompt, None)
             repo.update_job(user, job_id, {"stage": "Rendering the last frame, matching the first", "result": {"first_frame": start["id"]}})
-            last = _render_frame(state, user, pid, inp, "end", fprompt, start["id"])
+            if inp.get("kind") == "entry":    # the shot ends inside the house: its own picture, its own prompt
+                eprompt = ""
+                if writer is not None:
+                    from .render_prompt import PromptUnavailable, write_with_claude
+                    try:
+                        eprompt = write_with_claude(writer, [(views["end"], "image/jpeg")], ["model"], (inp.get("description") or "") + "\nThis is inside the house, just through the front door.", "")["prompt"]
+                    except PromptUnavailable:
+                        eprompt = ""
+                last = _render_frame(state, user, pid, inp, "end", eprompt or frame_prompt("Inside the house, just through the front door. " + (inp.get("description") or "")), None)
+            else:
+                last = _render_frame(state, user, pid, inp, "end", fprompt, start["id"])
         except _FrameFailed as exc:
             return fail(f"A frame of the shot could not be rendered: {exc}")
         img = lambda r: Image.open(io.BytesIO(storage.download(user, r.get("base_path") or r["storage_path"], bucket=settings.renders_bucket)))  # noqa: E731

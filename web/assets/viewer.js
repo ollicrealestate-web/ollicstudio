@@ -626,8 +626,21 @@ export function createViewer(host, { onSelect } = {}) {
   /** Draws one guide frame (optionally from a pose) and returns the canvas holding it. */
   function guideFrame(pose) {
     if (pose) { camera.position.fromArray(pose.position); camera.fov = pose.fov || camera.fov; camera.lookAt(new THREE.Vector3().fromArray(pose.target)); }
+    if (pose?.near) camera.near = pose.near;
+    if (pose?.inside && guide && !guide.whole) {   // inside the house: every floor, wall and ceiling, no section cut
+      guide.whole = { clip: renderer.clippingPlanes, vis: new Map(elements.map(e => [e, e.visible])) };
+      renderer.clippingPlanes = [];
+      elements.forEach(e => { if (e.userData.ifcType !== "IfcSpace") e.visible = true; });
+      if (guide.kind === "clay") elements.forEach(e => { if (e.visible && e.userData.ifcType !== "IfcSpace") e.material = e.userData.cls === "glass" ? clayGlass : clayMat; });
+      if (guide.kind === "lines") elements.forEach(e => { if (e.visible && e.userData.ifcType !== "IfcSpace") e.material = inkMat; });
+      if (guide.kind === "materials") {
+        const colour = new Map(materialGroups().map(g => [g.key, g.map]));
+        elements.forEach(e => { if (e.visible && e.userData.ifcType !== "IfcSpace") e.material = mapMatFor(colour.get(materialKey(e)) || "#808080"); });
+      }
+    }
     camera.updateProjectionMatrix(); camera.updateMatrixWorld();
-    if (guide?.kind === "depth") {   // the depth range fits the building as seen from this camera
+    if (guide?.kind === "depth" && pose?.inside) { depthMat.uniforms.near.value = 0.1; depthMat.uniforms.far.value = 18; }
+    else if (guide?.kind === "depth") {   // the depth range fits the building as seen from this camera
       const b = frameBox, c = new THREE.Vector3(), d = [];
       for (let i = 0; i < 8; i++) { c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z); d.push(c.applyMatrix4(camera.matrixWorldInverse).z * -1); }
       depthMat.uniforms.near.value = Math.max(0.1, Math.min(...d)); depthMat.uniforms.far.value = Math.max(depthMat.uniforms.near.value + 1, Math.max(...d) * 1.05);
@@ -637,6 +650,7 @@ export function createViewer(host, { onSelect } = {}) {
   }
   function endGuide() {
     if (!guide) return;
+    if (guide.whole) { renderer.clippingPlanes = guide.whole.clip; guide.whole.vis.forEach((v, e) => { e.visible = v; }); }
     guide.mats.forEach((m, e) => { e.material = m; });
     scene.overrideMaterial = null; scene.background = guide.bg; scene.environment = guide.env; renderer.toneMapping = guide.tone;
     sky.visible = guide.sky; ground.visible = guide.ground; ground.material = guide.groundMat; if (edgesGroup) edgesGroup.visible = false;
@@ -676,10 +690,50 @@ export function createViewer(host, { onSelect } = {}) {
     const T = new THREE.CatmullRomCurve3(poses.map(p => new THREE.Vector3().fromArray(p.target)), false, "centripetal");
     const k = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;   // ease in and out
     const i = Math.min(poses.length - 2, Math.floor(k * (poses.length - 1))), f = k * (poses.length - 1) - i;
-    return { position: P.getPoint(k).toArray(), target: T.getPoint(k).toArray(), fov: poses[i].fov + (poses[i + 1].fov - poses[i].fov) * f };
+    const inside = (f < 0.5 ? poses[i] : poses[i + 1]).inside;
+    return { position: P.getPoint(k).toArray(), target: T.getPoint(k).toArray(), fov: poses[i].fov + (poses[i + 1].fov - poses[i].fov) * f,
+             ...(inside ? { inside: true } : {}), ...(poses[0].near ? { near: poses[0].near } : {}) };
+  }
+  /** The front door: the door on the ground floor nearest the outside, and the way into the house through it. */
+  function entryPath() {
+    const c = frameBox.getCenter(new THREE.Vector3());
+    const low = storeys.length ? storeys[0] : null;
+    const doors = elements.filter(e => e.userData.ifcType === "IfcDoor" && (!low || e.userData.storey === low || storeys.indexOf(e.userData.storey) <= 1));
+    if (!doors.length) return null;
+    const edge = b => Math.min(b.min.x - frameBox.min.x, frameBox.max.x - b.max.x, b.min.z - frameBox.min.z, frameBox.max.z - b.max.z);
+    const boxes = doors.map(e => new THREE.Box3().setFromObject(e)).filter(b => b.min.y < groundY + 2.5);
+    if (!boxes.length) return null;
+    const door = boxes.reduce((a, b) => (edge(b) < edge(a) ? b : a));
+    const p = door.getCenter(new THREE.Vector3()), feet = door.min.y;
+    // which way is outside: the door's thin side faces in and out; outside is away from the building's middle
+    const sz = door.getSize(new THREE.Vector3());
+    const out = sz.x < sz.z ? new THREE.Vector3(Math.sign(p.x - c.x) || 1, 0, 0) : new THREE.Vector3(0, 0, Math.sign(p.z - c.z) || 1);
+    const eye = feet + EYE, at = (k, look) => ({ position: [p.x + out.x * k, eye, p.z + out.z * k], target: [p.x + out.x * look, eye - 0.1, p.z + out.z * look], fov: 60, inside: k < 0.5, near: 0.05 });
+    return [at(14, -10), at(6, -10), at(1.2, -10), at(-3.5, -12)];
+  }
+  /** A slow walk through a room at eye height, facing its most open view. */
+  function roomPath(which) {
+    const all = rooms();
+    let r = typeof which === "number" ? all[which] : which ? all.find(x => x.name.toLowerCase() === String(which).toLowerCase()) || all.find(x => x.name.toLowerCase().includes(String(which).toLowerCase())) : null;
+    if (!r) {
+      const area = x => (x.box.max.x - x.box.min.x) * (x.box.max.z - x.box.min.z) * (/living|lounge|sitting|family|salon|parlou?r/i.test(x.name) ? 3 : 1);
+      r = all.length ? all.reduce((a, b) => (area(b) > area(a) ? b : a)) : null;
+    }
+    let x, z, feet, yw;
+    const spot = r ? openSpot(r.box.min.y, null, r.box) : openSpot(storeys.length ? storeyLow[planStorey()] : groundY);
+    if (spot) { x = spot.x; z = spot.z; feet = spot.feet; yw = spot.yaw; }
+    else if (r) { const c = r.box.getCenter(new THREE.Vector3()); x = c.x; z = c.z; feet = r.box.min.y; yw = 0; }
+    else return null;
+    const dir = new THREE.Vector3(-Math.sin(yw), 0, -Math.cos(yw)), side = new THREE.Vector3(dir.z, 0, -dir.x), eye = feet + EYE;
+    const pose = (k, pan) => {
+      const pos = new THREE.Vector3(x, eye, z).addScaledVector(dir, k);
+      const look = pos.clone().addScaledVector(dir, 5).addScaledVector(side, pan); look.y = eye - 0.15;
+      return { position: pos.toArray(), target: look.toArray(), fov: 68, inside: true, near: 0.05, room: r ? r.name : "Inside" };
+    };
+    return [pose(-0.6, -1.2), pose(0.6, 0), pose(1.6, 1.2)];
   }
   /** Ready-made camera moves around the model: what an architectural film usually shows. */
-  function shotPath(kind) {
+  function shotPath(kind, opts = {}) {
     const b = frameBox, size = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
     const r = Math.hypot(size.x, size.z) / 2, d = fitDistance(size.length() / 2) * 0.95, fov = 45;
     const at = (ang, dist, h, look = c) => ({ position: [c.x + Math.cos(ang) * dist, h, c.z + Math.sin(ang) * dist], target: look.toArray(), fov });
@@ -688,6 +742,20 @@ export function createViewer(host, { onSelect } = {}) {
     if (kind === "aerial") return [0, 1, 2].map(i => at(0.3 + i * 0.45, d * 1.05, b.max.y + size.y * 0.9 + r * 0.4));
     if (kind === "approach") return [at(Math.PI / 2, d * 1.7, eye, mid), at(Math.PI / 2, d * 0.75, eye, mid)];
     if (kind === "rise") return [at(0.75, d * 0.9, eye, mid), at(0.75, d * 0.95, b.max.y + size.y * 0.5, c)];
+    // a low drone pass along the front, as if flying beside the street
+    if (kind === "sidepass") {
+      const z = c.z + d * 0.85, h = groundY + Math.max(4, size.y * 0.3), w = Math.max(size.x * 0.75, 12);
+      return [{ position: [c.x - w, h, z], target: [c.x - w * 0.35, mid.y, c.z], fov }, { position: [c.x + w, h, z], target: [c.x + w * 0.35, mid.y, c.z], fov }];
+    }
+    // straight down from high above, turning slowly: the roof, the plot and the site
+    if (kind === "topdown") {
+      const h = b.max.y + Math.max(size.x, size.z) * 1.25 + 10;
+      return [0, 1, 2].map(i => ({ position: [c.x + Math.cos(i * 0.35) * 0.6, h, c.z + Math.sin(i * 0.35) * 0.6], target: [c.x, groundY, c.z], fov: 50 }));
+    }
+    // to the front door and in: from the street to the door, through it, a few steps into the house
+    if (kind === "entry") return entryPath() || [at(Math.PI / 2, d * 1.4, eye, mid), at(Math.PI / 2, d * 0.45, eye, mid)];
+    // a slow glide through one room (opts.room: its name or index; none: the main room)
+    if (kind === "interior") return roomPath(opts.room);
     // "push": a slow move in from the current view
     const p = currentPose(), from = new THREE.Vector3().fromArray(p.position), to = new THREE.Vector3().fromArray(p.target);
     return [p, { ...p, position: from.clone().lerp(to, mode === "walk" ? 0.6 : 0.18).toArray() }];
@@ -695,7 +763,9 @@ export function createViewer(host, { onSelect } = {}) {
   /** Shows a pose in the live view (for previewing a path). */
   function showPose(p) {
     if (mode === "walk") leaveWalk();
-    camera.position.fromArray(p.position); controls.target.fromArray(p.target); camera.fov = p.fov || 45; camera.updateProjectionMatrix(); controls.update(); redraw();
+    camera.position.fromArray(p.position); controls.target.fromArray(p.target); camera.fov = p.fov || 45;
+    if (p.near) camera.near = Math.min(camera.near, p.near);
+    camera.updateProjectionMatrix(); controls.update(); redraw();
   }
 
   return {
