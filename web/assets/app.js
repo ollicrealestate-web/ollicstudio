@@ -207,7 +207,8 @@ function goTo(svc, st) {
   if (service) { q.set("service", service); q.set("step", step); }
   if (chosenIfc && SERVICES[service]?.modes) q.set("model", chosenIfc);
   history.replaceState(null, "", `${location.pathname}?${q}`);
-  applyView(); syncModelOnly(); if (SERVICES[service]?.modes || SERVICES[service]?.sections?.includes("studio")) loadLook();
+  applyView(); syncModelOnly(); drawScene();   // the scene list shows in every service with a render form
+  if (SERVICES[service]?.modes || SERVICES[service]?.sections?.includes("studio")) loadLook();
   if (!reduceMotion()) window.scrollTo({ top: 0 }); else window.scrollTo(0, 0);
 }
 function chooseService(k) { svcPicked = []; goTo(k, k === "library" ? "work" : "start"); }
@@ -553,7 +554,7 @@ async function loadLook() {
   if (!current) return;
   const pid = current.id;
   try { const l = await api.look(pid); if (current?.id !== pid) return; look = l; lookFor = pid; drawLook(); }
-  catch (err) { if (err.status === 401) return handle(err); }
+  catch (err) { if (err.status === 401) return handle(err); drawScene(); }
 }
 async function syncLook(legend) {
   if (!legend?.length || !current) return;
@@ -589,11 +590,13 @@ let sceneList = null;
 const TYPE_NAMES = { exterior: "Exterior", interior: "Interior", site_plan: "Site plan", estate: "Estate layout" };
 async function loadScenes() {
   if (sceneList) return sceneList;
-  try { sceneList = (await api.scenes()).scenes; } catch { sceneList = []; }
+  try { sceneList = (await api.scenes()).scenes; } catch { return []; }   // not cached on failure: tried again next time
   return sceneList;
 }
 async function drawScene() {
   const list = await loadScenes(), sel = $("#rScene");
+  if (!sel) return;
+  if (look && current && lookFor !== current.id) look = null;   // never show another project's scene
   const groups = Object.keys(TYPE_NAMES).map(t => el("optgroup", { label: TYPE_NAMES[t] }, ...list.filter(x => x.type === t).map(x => el("option", { value: x.id }, x.name))));
   const mine = look?.scene_text && !look?.scene_id ? [el("option", { value: "custom" }, `★ ${look.scene_name || "My scene"} (from your picture)`)] : [];
   sel.replaceChildren(el("option", { value: "" }, "No scene (the prompt decides)"), ...mine, ...groups);
