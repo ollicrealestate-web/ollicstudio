@@ -243,3 +243,22 @@ def apply_suggestions(look: Look, answer: dict) -> Look:
     if not look.setting and answer.get("setting"):
         look.setting = " ".join(str(answer["setting"]).split())[:500]
     return look
+
+
+def project_scene(project: dict | None) -> str:
+    """The project's chosen scene as one line for a prompt writer or a video prompt, or ""."""
+    from .scenes import SCENES, scene_text
+    try:
+        look = Look.model_validate((project or {}).get("look") or {})
+    except ValueError:
+        return ""
+    text = scene_text(look.scene_id, look.scene_text)
+    if not text:
+        return ""
+    name = look.scene_name or (SCENES[look.scene_id][0] if look.scene_id in SCENES else "")
+    return f"Project scene{f' ({name})' if name else ''}, for light, sky, setting and mood only: {text}"
+
+
+def with_scene(description: str, project: dict | None) -> str:
+    scene = project_scene(project)
+    return (description.strip() + "\n" + scene).strip() if scene else description

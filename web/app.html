@@ -192,8 +192,10 @@
           <label class="field">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
           <label class="field">Format <select id="filmFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
         </div>
+        <div class="scene-slot" id="sceneSlotFilm"></div>
         <label class="field">Describe the look <span class="hint">Materials, light, time of day, setting. Claude uses it for every shot.</span>
-          <textarea id="filmDesc" rows="2" maxlength="1500" placeholder="e.g. White render and bronze glass, warm evening light, palm trees, interlocking paving"></textarea></label>
+          <textarea id="filmDesc" rows="3" maxlength="1500" placeholder="e.g. White render and bronze glass, warm evening light, palm trees, interlocking paving"></textarea></label>
+        <div class="rwrite"><button type="button" class="btn" id="filmLookBtn">Read the model and write the look</button><span class="hint" id="filmLookNote">Claude studies the view on screen, your scene and your notes.</span></div>
         <label class="check"><input type="checkbox" id="filmLife"> Add life: people walking and cars passing</label>
         <div class="rwrite"><button type="button" class="btn" id="planBtn">Plan the shots with Claude</button><span class="hint" id="planNoteFilm">Or frame a view in the model and add shots yourself.</span></div>
         <div class="shot-add">
@@ -230,8 +232,11 @@
             <div><b>Photoreal views</b> <span class="hint">Each image uses two renders: its photoreal version and a clean line drawing of it, which becomes the gold wireframe. Tick “already photoreal” to use an image as it is.</span></div>
             <button type="button" class="btn primary" id="iaMake">Make photoreal views</button>
           </div>
+          <div class="scene-slot" id="sceneSlotIA"></div>
           <label class="field">Look of the finished building <span class="hint">Materials, colours, landscaping, mood</span>
             <input type="text" id="iaLook" maxlength="400" placeholder="e.g. white render, dark bronze glass, palm trees, warm uplights"></label>
+          <div class="rwrite"><button type="button" class="btn" id="iaWriteBtn">Read images and write prompts</button><span class="hint" id="iaWriteNote">Claude studies each ticked image, your scene and your notes. You can edit each prompt.</span></div>
+          <div class="ia-prompts" id="iaPrompts"></div>
           <div class="clip-opts" id="iaClipOpts"></div>
         </div>
         <div class="ia-stage" id="iaStage" hidden>
@@ -273,7 +278,7 @@
           <label class="tier"><input type="radio" name="tier" value="standard" checked><span><b>Standard render</b><small id="stdNote">Free</small></span></label>
           <label class="tier" id="premiumTier"><input type="radio" name="tier" value="premium"><span><b>Premium render</b><small id="premNote">Paid plans</small></span></label>
         </fieldset></div>
-        <div class="span2 rbox scene-box">
+        <div class="span2" id="sceneHome"><div class="rbox scene-box" id="sceneBox">
           <div class="rtype" role="radiogroup" aria-label="What are you rendering?"><b>What are you rendering?</b>
             <label><input type="radio" name="rtype" value="exterior" checked><span>Exterior</span></label>
             <label><input type="radio" name="rtype" value="interior"><span>Interior</span></label>
@@ -283,7 +288,7 @@
             <select id="rScene"><option value="">No scene (the prompt decides)</option></select></label>
             <label class="btn sm" style="cursor:pointer" title="Upload a render you like: Claude copies its scene (never its building)">Copy a scene from a picture<input type="file" id="rSceneUpload" accept=".png,.jpg,.jpeg" hidden></label></div>
           <p class="hint" id="rSceneText"></p>
-        </div>
+        </div></div>
         <div class="span2 rbox">
           <div class="rbox-head"><b>Picture to render</b> <span class="hint" id="rPicHint">Capture a view of your model, or upload a sketch, 3D image, photo or plan.</span>
             <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rPicUpload" accept=".png,.jpg,.jpeg,.pdf" hidden></label></div>

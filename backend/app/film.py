@@ -120,6 +120,11 @@ def run_film_job(state, user: CurrentUser, job_id: str) -> None:
         repo.update_job(user, job_id, {"status": "running", "stage": "Rendering the first frame from your model", "started_at": now_iso(),
                                        "attempts": int(job.get("attempts") or 0) + 1, "worker": WORKER_NAME})
         writer = getattr(state, "prompt_writer", None)
+        from .look import with_scene
+        try:
+            inp = {**inp, "description": with_scene(inp.get("description") or "", repo.get_project(user, pid))}   # the project's scene, in every prompt
+        except BackendUnavailable:
+            pass
 
         # 1. the first frame, photoreal, from the exact clay view (counted as one render of the chosen option)
         clay = repo.get_source_file(user, inp["clay_file_id"])
@@ -312,6 +317,11 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
         repo.update_job(user, job_id, {"status": "running", "stage": "Rendering the first frame from your model", "started_at": now_iso(),
                                        "attempts": int(job.get("attempts") or 0) + 1, "worker": WORKER_NAME})
         writer = getattr(state, "prompt_writer", None)
+        from .look import with_scene
+        try:
+            inp = {**inp, "description": with_scene(inp.get("description") or "", repo.get_project(user, pid))}   # the project's scene, in every prompt
+        except BackendUnavailable:
+            pass
         views = {}
         for end in ("start", "end"):
             f = repo.get_source_file(user, inp[f"{end}_view_id"])

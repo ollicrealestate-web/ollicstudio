@@ -621,3 +621,7 @@ tr:last-child td { border-bottom: 0; }
 
 .guide-clear { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 0.86rem; }
 .ia-item .thumb .rpic-del { top: 8px; right: 8px; }
+.scene-slot:empty { display: none; }
+.scene-slot { margin: 4px 0 12px; }
+.ia-prompts { display: grid; gap: 10px; }
+.ia-prompts textarea { width: 100%; }

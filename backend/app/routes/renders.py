@@ -369,6 +369,8 @@ class RenderPromptIn(BaseModel):
     references: list[Reference] = Field(default_factory=list, max_length=4)
     description: str = Field(default="", max_length=1500)
     model_id: uuid.UUID | None = None
+    view_image: str | None = Field(default=None, max_length=6_000_000)   # a JPEG of the model view on screen (base64), not saved
+    purpose: Literal["render", "look"] = "render"                          # "look": a short description of the look, for videos
 
     @field_validator("references")
     @classmethod
@@ -379,13 +381,41 @@ class RenderPromptIn(BaseModel):
         return refs
 
 
+LOOK_SYSTEM = (
+    "You are an architectural visualisation director. Study the pictures of the architect's building and write the LOOK for a "
+    "photoreal video of it, in 50-110 words of plain, concrete language: facade materials and colours exactly as seen, glazing, "
+    "roof, railings, ground and paving, landscaping and planting, setting, time of day and light. Follow the project scene and the "
+    "architect's notes if given. Never invent floors, wings or features, and never describe camera moves. "
+    'Answer with JSON only: {"look": "...", "notes": "one short sentence on what you could not see clearly, or empty"}'
+)
+
+
+def write_look(claude, images, description: str, facts: str) -> dict:
+    from ..prompt_writer import PromptWriterFailed, _image_block
+    from ..render_prompt import PromptUnavailable
+    content = []
+    for i, (data, _mime) in enumerate(images[:4], 1):
+        content += [{"type": "text", "text": f"Image {i}:"}, _image_block(data)]
+    content.append({"type": "text", "text": (f"Model facts: {facts}\n" if facts else "") + (f"Architect's notes and scene: {description}" if description.strip() else "No notes.")})
+    try:
+        out = claude.ask_json(LOOK_SYSTEM, content, 6000)
+    except PromptWriterFailed as exc:
+        raise PromptUnavailable(str(exc)) from exc
+    data = out.get("answer") or {}
+    look = str(data.get("look") or "").strip()
+    if not look:
+        raise PromptUnavailable("no look")
+    return {"prompt": look[:1500], "notes": str(data.get("notes") or "")[:300], "provider": "anthropic",
+            "model": out.get("model"), "usage": out.get("usage"), "cost_usd": out.get("cost_usd")}
+
+
 @router.post("/projects/{project_id}/render-prompt")
 def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Request, user: CurrentUser = Depends(get_current_user)):
     """Studies the pictures (and the model's facts) and writes the rendering prompt; nothing is rendered or charged to the customer."""
     from ..render_prompt import PromptUnavailable, facts_text, write_with_claude, write_with_cloudflare
     from ..renders import ROLE_ORDER, _as_image
     _owned_project(request, user, project_id)
-    if not body.references and len(body.description.strip()) < 3:
+    if not body.references and not body.view_image and len(body.description.strip()) < 3:
         raise HTTPException(422, {"code": "nothing_to_read", "reason": "Capture a view or choose a picture first, or describe the building."})
     repo, storage = _repo(request), _storage(request)
     profile = repo.get_profile(user) or {}
@@ -400,6 +430,15 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
         if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id) or src.get("detected_type") not in ("png", "jpeg", "pdf"):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Picture not found in this project.")
         images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"])); roles.append(r.role)
+    if body.view_image:
+        import base64
+        try:
+            raw = base64.b64decode(body.view_image.split(",", 1)[-1], validate=True)
+            images.insert(0, _as_image(raw, "jpeg")); roles.insert(0, "model")
+        except Exception:
+            raise HTTPException(422, {"code": "bad_view", "reason": "The view of the model could not be read. Try again."})
+    from ..look import with_scene
+    description = with_scene(body.description, repo.get_project(user, str(project_id)))
     model = None
     if body.model_id:
         model = repo.get_model(user, str(body.model_id))
@@ -410,12 +449,17 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
     if claude is None and (vision is None or not images):
         raise HTTPException(503, {"code": "not_configured", "reason": "AI prompt writing is not switched on for this site yet. Write the prompt yourself."})
     try:
-        out = write_with_claude(claude, images, roles, body.description, facts) if claude is not None else write_with_cloudflare(vision, images, roles, body.description, facts)
+        if body.purpose == "look":
+            if claude is None:
+                raise HTTPException(503, {"code": "not_configured", "reason": "AI writing is not switched on for this site yet. Describe the look yourself."})
+            out = write_look(claude, images, description, facts)
+        else:
+            out = write_with_claude(claude, images, roles, description, facts) if claude is not None else write_with_cloudflare(vision, images, roles, description, facts)
     except PromptUnavailable as exc:
         log.warning("OWNER: render prompt failed: %s", exc)
-        if claude is not None and vision is not None and images:
+        if claude is not None and vision is not None and images and body.purpose == "render":
             try:
-                out = write_with_cloudflare(vision, images, roles, body.description, facts)
+                out = write_with_cloudflare(vision, images, roles, description, facts)
             except PromptUnavailable:
                 raise HTTPException(502, {"code": "prompt_failed", "reason": "The AI could not write the prompt this time. Try again, or write it yourself."}) from exc
         else:

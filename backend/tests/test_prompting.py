@@ -171,3 +171,32 @@ def test_the_ai_writes_the_prompt_from_the_captured_view_and_references(render_s
     assert c.post(f"/api/projects/{pid}/render-prompt", json={}, headers=alice["headers"]).status_code == 422
     proj = c.get(f"/api/projects/{pid}", headers=alice["headers"]).json()
     assert all(f["preview_url"] for f in proj["source_files"])     # thumbnails for the render box
+
+
+def test_the_project_scene_reaches_the_writer_and_claude_writes_a_look_from_the_screen(render_settings, repo, storage, alice):
+    import base64
+    from app.auth import TokenVerifier
+    from fastapi.testclient import TestClient
+    from .test_studio import new_project
+
+    class Writer(FakeRenderPrompter):
+        def ask_json(self, system, content, max_tokens=1800, **kw):
+            self.calls.append((system, content))
+            return {"answer": {"look": "White render, bronze glass, palms, warm evening light.", "notes": ""}, "usage": {}, "cost_usd": None, "model": self.model}
+
+    writer = Writer()
+    c = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner(),
+                              vision=None, prompt_writer=writer))
+    pid = new_project(c, alice)
+    look = c.get(f"/api/projects/{pid}/look", headers=alice["headers"]).json(); look["scene_id"] = "blue_hour"
+    assert c.put(f"/api/projects/{pid}/look", json=look, headers=alice["headers"]).status_code == 200
+    # a still prompt: the scene goes to Claude with the architect's words
+    assert c.post(f"/api/projects/{pid}/render-prompt", json={"description": "office block"}, headers=alice["headers"]).status_code == 200
+    assert "Blue Hour Glow" in writer.calls[-1][1][-1]["text"] and "office block" in writer.calls[-1][1][-1]["text"]
+    # a video look, from the model view on screen (not saved as a file)
+    shot = "data:image/jpeg;base64," + base64.b64encode(jpeg_bytes(320, 200)).decode()
+    r = c.post(f"/api/projects/{pid}/render-prompt", json={"view_image": shot, "purpose": "look"}, headers=alice["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["prompt"].startswith("White render") and "LOOK" in writer.calls[-1][0]
+    assert sum(1 for b in writer.calls[-1][1] if b["type"] == "image") == 1 and "Blue Hour Glow" in writer.calls[-1][1][-1]["text"]
+    assert c.get(f"/api/projects/{pid}", headers=alice["headers"]).json()["source_files"] == []

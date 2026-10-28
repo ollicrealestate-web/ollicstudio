@@ -91,7 +91,7 @@ async function openProject(id) {
   applyView();
   try {
     current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadVideos(); applyView();
-    drawScene(); if (SERVICES[service]?.modes || SERVICES[service]?.sections?.includes("studio")) loadLook();   // also when opened from a link or a reload
+    drawScene(); if (service && service !== "library") loadLook();   // also when opened from a link or a reload
   }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
@@ -235,7 +235,7 @@ function goTo(svc, st) {
   if (chosenIfc && SERVICES[service]?.modes) q.set("model", chosenIfc);
   history.replaceState(null, "", `${location.pathname}?${q}`);
   applyView(); syncModelOnly(); drawScene();   // the scene list shows in every service with a render form
-  if (SERVICES[service]?.modes || SERVICES[service]?.sections?.includes("studio")) loadLook();
+  if (service && service !== "library") loadLook();
   if (!reduceMotion()) window.scrollTo({ top: 0 }); else window.scrollTo(0, 0);
 }
 function chooseService(k) { svcPicked = []; goTo(k, k === "library" ? "work" : "start"); }
@@ -259,6 +259,10 @@ function applyView() {
   $("#addShotView").hidden = service !== "film";
   const slot = service === "imageanim" ? "#tierSlotIA" : service === "film" ? "#tierSlotFilm" : "#tierHome";
   if ($("#tierPick").parentElement !== $(slot)) $(slot).append($("#tierPick"));
+  // the scene sits in every service that makes pictures or video
+  const sSlot = service === "imageanim" ? "#sceneSlotIA" : service === "film" ? "#sceneSlotFilm" : "#sceneHome";
+  if ($("#sceneBox").parentElement !== $(sSlot)) $(sSlot).append($("#sceneBox"));
+  document.querySelectorAll("input[name=rtype][value=site_plan], input[name=rtype][value=estate]").forEach(r => { r.closest("label").hidden = service === "imageanim"; });
   // renders: in the studio, or in the Library
   const gHome = service === "library" ? $("#libGallery") : $("#studio");
   if ($("#gallery").parentElement !== gHome) gHome.append($("#gallery"), $("#galleryEmpty"));
@@ -1221,6 +1225,7 @@ function drawIA() {
             $("#iaFormat").value, $("#iaTitle2").value.trim() || current.name, "ia", e.currentTarget) }, "Cinematic clip") : ""));
     }) : [el("span", { class: "hint" }, "Choose the images in step 1 of this service.")]));
   }
+  drawIAPrompts();
   buildIA();
 }
 
@@ -1302,21 +1307,70 @@ $("#iaMake").onclick = async () => {
   }
   const redo = todo.length ? todo : iaSel.filter(fid => !iaAsIs.has(fid));
   if (!redo.length) { toast("These images are used as they are."); return; }
-  const look = $("#iaLook").value.trim();
+  const lookText = $("#iaLook").value.trim();
   const aspect = { "16:9": "landscape", "9:16": "portrait", "1:1": "square" }[$("#iaFormat").value];
-  const prompt = `${look ? look + ". " : ""}Photorealistic luxury architectural visualisation of this exact building at night: blue hour sky with stars, warm light glowing from every window, `
-    + "subtle warm facade uplighting, refined landscaping, cinematic low-angle architectural photography. Keep the building's exact shape, floors, roof and window positions from the 3D image.";
+  const hasScene = !!(look && lookFor === current.id && (look.scene_id || look.scene_text));
+  const KEEP = "Keep the building's exact shape, floors, roof and window positions from the 3D image.";
+  const prompt = hasScene ? `${lookText ? lookText + ". " : ""}Photorealistic luxury architectural visualisation of this exact building, staged in the project scene. ${KEEP}`
+    : `${lookText ? lookText + ". " : ""}Photorealistic luxury architectural visualisation of this exact building at night: blue hour sky with stars, warm light glowing from every window, `
+    + `subtle warm facade uplighting, refined landscaping, cinematic low-angle architectural photography. ${KEEP}`;
   const btn = $("#iaMake"); btn.disabled = true;
   try {
     for (const fid of redo) {
       const looks = tickedLooks().filter(id => id !== fid).slice(0, 3).map(id => ({ file_id: id, role: "style" }));
-      await api.startRender(current.id, { prompt, view: "exterior", time_of_day: "night", aspect, style: "luxury contemporary", tier: chosenTier(),
+      const written = (iaPrompts[fid] || "").trim();
+      await api.startRender(current.id, { prompt: written ? `${written} ${KEEP}` : prompt, ...(written ? { prompt_ready: true } : {}), view: "exterior",
+        time_of_day: hasScene ? undefined : "night", aspect, style: "luxury contemporary", tier: chosenTier(),
         quality: $("#rQuality").value, references: [{ file_id: fid, role: "model" }, ...looks], anim_hero: { index: Math.max(0, iaSel.indexOf(fid)), key: `img-${fid}` } }, newKey());
       iaPending.add(`img-${fid}`); iaLineWanted.add(fid);
     }
     toast(`Making ${redo.length} photoreal view${redo.length > 1 ? "s" : ""}. Each takes about a minute.`);
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
   finally { btn.disabled = false; drawIA(); loadOutputs(); }
+};
+
+$("#filmLookBtn").onclick = async () => {
+  if (!current) return;
+  const btn = $("#filmLookBtn"), note = $("#filmLookNote");
+  let view = null;
+  if (viewer && viewerModelId) {
+    try { const g = viewer.guides(1280, 853, ["view"]); if (g.coverage === undefined || g.coverage >= 0.03) view = g.view; } catch { view = null; }
+  }
+  if (!view && $("#filmDesc").value.trim().length < 3) { toast("Open your model and frame the building, or write a few words first."); return; }
+  btn.disabled = true; btn.textContent = "Studying your model…"; note.textContent = "Claude is reading the view, your scene and your notes. About 10–30 seconds.";
+  try {
+    const r = await api.writePrompt(current.id, { purpose: "look", description: $("#filmDesc").value.trim(), ...(view ? { view_image: view } : {}),
+      ...(viewerModelId ? { model_id: viewerModelId } : {}) });
+    $("#filmDesc").value = r.prompt; note.textContent = r.notes ? `Claude: ${r.notes} Edit the look if you like.` : "Look written. Edit it if you like; every shot uses it.";
+  } catch (err) { if (err.status === 401) return handle(err); note.textContent = err.message; }
+  finally { btn.disabled = false; btn.textContent = "Read the model and write the look"; }
+};
+
+/* image animation: Claude reads each ticked image and writes its prompt; the architect can edit each one */
+const iaPrompts = {};
+function drawIAPrompts() {
+  const box = $("#iaPrompts"); if (!box) return;
+  const ids = iaSel.filter(fid => iaPrompts[fid] !== undefined);
+  box.replaceChildren(...ids.map(fid => {
+    const f = iaFiles().find(x => x.id === fid);
+    const ta = el("textarea", { rows: "3", maxlength: "4000", "aria-label": `Prompt for ${f?.original_name || "image"}` });
+    ta.value = iaPrompts[fid]; ta.oninput = () => { iaPrompts[fid] = ta.value; };
+    return el("label", { class: "field" }, el("span", {}, `${iaSel.indexOf(fid) + 1} · ${f?.original_name || "Image"}`), ta);
+  }));
+}
+$("#iaWriteBtn").onclick = async () => {
+  if (!current) return;
+  if (!iaSel.length) { toast("Tick the images to animate first."); return; }
+  const btn = $("#iaWriteBtn"), note = $("#iaWriteNote");
+  btn.disabled = true; btn.textContent = "Studying the images…";
+  let done = 0;
+  for (const fid of iaSel) {
+    note.textContent = `Claude is reading image ${iaSel.indexOf(fid) + 1} of ${iaSel.length}…`;
+    try { const r = await api.writePrompt(current.id, { references: [{ file_id: fid, role: "model" }], description: $("#iaLook").value.trim() }); iaPrompts[fid] = r.prompt; done++; drawIAPrompts(); }
+    catch (err) { if (err.status === 401) return handle(err); note.textContent = err.message; break; }
+  }
+  if (done) note.textContent = `${done} prompt${done > 1 ? "s" : ""} written. Edit any of them, then press “Make photoreal views”.`;
+  btn.disabled = false; btn.textContent = "Read images and write prompts";
 };
 
 $("#iaExport").onclick = async () => {
