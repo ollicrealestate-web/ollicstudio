@@ -89,7 +89,10 @@ async function openProject(id) {
   step = service ? (q.get("step") === "start" && service !== "library" ? "start" : "work") : null;
   chosenIfc = same ? q.get("model") : null;
   applyView();
-  try { current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadVideos(); applyView(); }
+  try {
+    current = await api.getProject(id); renderProject(); loadOutputs(); loadModels(); loadVideos(); applyView();
+    drawScene(); if (SERVICES[service]?.modes || SERVICES[service]?.sections?.includes("studio")) loadLook();   // also when opened from a link or a reload
+  }
   catch (err) { if (err.status === 404) { toast("That project does not exist or is not yours."); listProjects(); } else handle(err); }
 }
 function renderProject() {
