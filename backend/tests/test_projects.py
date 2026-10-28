@@ -113,3 +113,29 @@ def test_files_renders_and_videos_can_be_deleted(render_settings, repo, storage,
     assert c.delete(f"/api/videos/{vid}", headers=alice["headers"]).status_code == 204
     assert repo.videos == {} and storage.buckets["videos"] == {}
     assert c.delete(f"/api/videos/{vid}", headers=alice["headers"]).status_code == 404
+
+
+def test_deleting_a_captured_view_takes_its_guides_and_clears_the_look(render_settings, repo, storage, alice):
+    from fastapi.testclient import TestClient
+    from app.auth import TokenVerifier
+    from app.jobs import InlineRunner
+    from app.main import create_app
+    from .conftest import FakeImages
+    from .test_studio import new_project, upload
+    c = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner()))
+    pid = new_project(c, alice)
+    view = upload(c, alice, pid, "3D view 1.png", samples.png(64, 48))
+    guides = [upload(c, alice, pid, f"Guide - 3D view 1 - {k}.png", samples.png(64, 48)) for k in ("lines", "depth", "materials")]
+    other = upload(c, alice, pid, "Guide - 3D view 2 - depth.png", samples.png(64, 48))
+    ref = upload(c, alice, pid, "scene I like.png", samples.png(64, 48))
+    look = c.get(f"/api/projects/{pid}/look", headers=alice["headers"]).json()
+    look["scene_ref_file_id"] = ref["id"]; look["scene_text"] = "golden light"
+    assert c.put(f"/api/projects/{pid}/look", json=look, headers=alice["headers"]).status_code == 200
+    assert c.delete(f"/api/projects/{pid}/files/{view['id']}", headers=alice["headers"]).status_code == 204
+    left = {f["original_name"] for f in c.get(f"/api/projects/{pid}", headers=alice["headers"]).json()["source_files"]}
+    assert left == {"Guide - 3D view 2 - depth.png", "scene I like.png"} and all(g["id"] not in repo.files for g in guides) and other["id"] in repo.files
+    # the reference picture of the scene: deleted, the scene recipe stays and the look no longer points at it
+    assert c.delete(f"/api/projects/{pid}/files/{ref['id']}", headers=alice["headers"]).status_code == 204
+    look = c.get(f"/api/projects/{pid}/look", headers=alice["headers"]).json()
+    assert look["scene_ref_file_id"] is None and look["scene_text"] == "golden light"
+    assert c.put(f"/api/projects/{pid}/look", json=look, headers=alice["headers"]).status_code == 200

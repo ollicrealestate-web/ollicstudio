@@ -119,8 +119,31 @@ const picRole = f => (service === "plan" || f.detected_type === "pdf") ? "plan" 
 function picTile(f, on, onclick, kind) {
   const img = f.preview_url ? el("img", { src: f.preview_url, alt: "", loading: "lazy" }) : el("span", { class: "rpic-doc" }, f.detected_type.toUpperCase());
   const tag = /^3D view/i.test(f.original_name) ? "Captured view" : f.detected_type === "pdf" ? "Drawing" : service === "plan" ? "Floor plan" : "Picture";
-  return el("button", { type: "button", class: `rpic${on ? " on" : ""}`, role: kind === "radio" ? "radio" : "checkbox", "aria-checked": String(on), title: f.original_name, onclick },
-    img, el("span", { class: "rpic-name" }, kind === "radio" ? tag : f.original_name));
+  return el("div", { class: "rpic-wrap" },
+    el("button", { type: "button", class: `rpic${on ? " on" : ""}`, role: kind === "radio" ? "radio" : "checkbox", "aria-checked": String(on), title: f.original_name, onclick },
+      img, el("span", { class: "rpic-name" }, kind === "radio" ? tag : f.original_name)),
+    removeButton(f));
+}
+/** A small × on a picture: tap once to arm ("Delete?"), again to delete the file (a captured view's guides go with it). */
+function removeButton(f) {
+  const what = /^3D view/i.test(f.original_name) ? "capture" : ["png", "jpeg"].includes(f.detected_type) ? "picture" : "file";
+  const b = el("button", { type: "button", class: "rpic-del", "aria-label": `Delete ${what} ${f.original_name}`, title: `Delete this ${what}` }, "×");
+  let armed = null;
+  b.onclick = async e => {
+    e.stopPropagation(); e.preventDefault();
+    if (!armed) { b.textContent = "Delete?"; b.classList.add("armed"); armed = setTimeout(() => { armed = null; b.textContent = "×"; b.classList.remove("armed"); }, 4000); return; }
+    clearTimeout(armed); armed = null; b.disabled = true; b.textContent = "…";
+    try {
+      await api.deleteFile(current.id, f.id);
+      if (rPick === f.id) rPick = null;
+      rRefSel = rRefSel.filter(x => x !== f.id); svcPicked = svcPicked.filter(x => x !== f.id);
+      current = await api.getProject(current.id); renderProject();
+      if (look?.scene_ref_file_id === f.id) look.scene_ref_file_id = null;
+      toast(what === "capture" ? "Capture deleted, with its guides." : f.detected_type === "ifc" ? "File and its 3D model deleted." : `${what[0].toUpperCase() + what.slice(1)} deleted.`);
+      if (f.detected_type === "ifc") loadModels();
+    } catch (err) { if (err.status === 401) return handle(err); toast(err.message); b.disabled = false; b.textContent = "×"; b.classList.remove("armed"); }
+  };
+  return b;
 }
 function drawRenderBox() {
   const pics = renderPics();
@@ -273,7 +296,8 @@ function drawStart() {
     const order = svc.multi > 1 && on ? el("span", { class: "chip" }, String(svcPicked.indexOf(f.id) + 1)) : "";
     const model = modelsNow.find(m => m.source_file_id === f.id);
     const note = f.detected_type === "ifc" ? (model ? "3D model ready" : "not read into 3D yet") : (TYPE[f.detected_type] || f.detected_type);
-    return el("label", { class: `svc-file${on ? " on" : ""}` }, box, el("span", { class: "svc-file-name" }, f.original_name, el("small", { class: "muted" }, ` ${note} · ${fmtDate(f.created_at)}`)), order);
+    const del = removeButton(f); del.classList.add("inline");
+    return el("label", { class: `svc-file${on ? " on" : ""}` }, box, el("span", { class: "svc-file-name" }, f.original_name, el("small", { class: "muted" }, ` ${note} · ${fmtDate(f.created_at)}`)), order, del);
   }));
   $("#svcLib").classList.toggle("empty-lib", !files.length);
   $("#svcGo").disabled = !svcPicked.length;

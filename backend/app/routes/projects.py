@@ -92,12 +92,19 @@ def delete_project(project_id: uuid.UUID, request: Request, user: CurrentUser = 
 @router.delete("/projects/{project_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_source_file(project_id: uuid.UUID, file_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
     """Deletes an uploaded file. A 3D model made from it goes too, and so do walkthrough shots
-    whose picture it is; renders made from it stay (they are finished work)."""
-    _owned_project(request, user, project_id)
+    whose picture it is, and a captured view's guides (lines, depth, material map); renders made
+    from it stay (they are finished work). The project look stops pointing at it."""
+    project = _owned_project(request, user, project_id)
     repo, storage, settings = _repo(request), _storage(request), request.app.state.settings
     f = repo.get_source_file(user, str(file_id))
     if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found in this project.")
+    name = f.get("original_name") or ""
+    guides = []
+    if not name.startswith("Guide - "):
+        prefix = "Guide - " + name.rsplit(".", 1)[0] + " - "
+        guides = [g for g in repo.list_source_files(user, str(project_id))
+                  if g.get("id") != f["id"] and g.get("owner_id") == user.id and (g.get("original_name") or "").startswith(prefix)]
     models = [m for m in repo.list_models(user, str(project_id)) if m.get("owner_id") == user.id and m.get("source_file_id") == f["id"]]
     shots = [s for s in repo.list_shots(user, str(project_id)) if s.get("owner_id") == user.id and s.get("source_file_id") == f["id"]]
     # files first, as for projects: if storage fails, the records stay and nothing is orphaned
@@ -110,6 +117,21 @@ def delete_source_file(project_id: uuid.UUID, file_id: uuid.UUID, request: Reque
     for s in shots:
         repo.delete_shot(user, s["id"])
     repo.delete_source_file(user, f["id"])
+    for g in guides:
+        if g.get("storage_path"):
+            storage.remove(user, [g["storage_path"]])
+        repo.delete_source_file(user, g["id"])
+    gone = {f["id"], *(g["id"] for g in guides)}
+    look = dict(project.get("look") or {})
+    if look:
+        changed = False
+        if look.get("scene_ref_file_id") in gone:
+            look["scene_ref_file_id"], changed = None, True
+        for m in look.get("materials") or []:
+            if m.get("sample_file_id") in gone:
+                m["sample_file_id"], changed = None, True
+        if changed:
+            repo.update_project(user, str(project_id), {"look": look})
 
 
 @router.post("/projects/{project_id}/uploads", status_code=status.HTTP_201_CREATED)

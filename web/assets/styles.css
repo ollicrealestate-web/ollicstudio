@@ -401,6 +401,13 @@ tr:last-child td { border-bottom: 0; }
 .rbox:hover { border-color: #4a4a52; }
 .rbox-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
 .rbox-head .btn { margin-left: auto; }
+.rpic-wrap { position: relative; flex: none; }
+.rpic-del { position: absolute; top: 10px; right: 10px; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.25);
+  background: rgba(10,10,12,.78); color: #fff; font: 700 0.95rem/1 var(--f-ui); cursor: pointer; backdrop-filter: blur(4px); }
+.rpic-del:hover, .rpic-del:focus-visible { border-color: var(--red); }
+.rpic-del.armed { background: var(--red); border-color: var(--red); font-size: 0.78rem; }
+.rpic-del.inline { position: static; margin-left: auto; background: transparent; color: var(--muted); }
+.rpic-del.inline.armed { background: var(--red); color: #fff; }
 .rpics { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px; scrollbar-width: thin; }
 .rpic { flex: none; width: 132px; display: grid; gap: 6px; padding: 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink);
   font: inherit; text-align: left; cursor: pointer; transition: border-color 160ms var(--ease), transform 220ms var(--ease-out), box-shadow 220ms var(--ease); }
