@@ -105,6 +105,7 @@ function renderProject() {
     el("td", {}, details(f)), el("td", {}, fmtDate(f.created_at)), el("td", { class: "mono", title: f.checksum_sha256 }, f.checksum_sha256.slice(0, 12) + "…"),
     el("td", {}, el("div", { class: "file-actions" }, ...fileActions(f))))));
   $("#filesWrap").hidden = current.source_files.length === 0;
+  drawGuideClear();
   $("#libFilesEmpty").hidden = current.source_files.length > 0;
   if (step === "start") drawStart();
   drawRenderBox(); drawIA();
@@ -136,7 +137,7 @@ function removeButton(f) {
     try {
       await api.deleteFile(current.id, f.id);
       if (rPick === f.id) rPick = null;
-      rRefSel = rRefSel.filter(x => x !== f.id); svcPicked = svcPicked.filter(x => x !== f.id);
+      rRefSel = rRefSel.filter(x => x !== f.id); svcPicked = svcPicked.filter(x => x !== f.id); iaSel = iaSel.filter(x => x !== f.id);
       current = await api.getProject(current.id); renderProject();
       if (look?.scene_ref_file_id === f.id) look.scene_ref_file_id = null;
       toast(what === "capture" ? "Capture deleted, with its guides." : f.detected_type === "ifc" ? "File and its 3D model deleted." : `${what[0].toUpperCase() + what.slice(1)} deleted.`);
@@ -332,18 +333,37 @@ function useFiles(ids) {
 }
 
 /** A delete button that asks once ("Delete?" then "Yes, delete") before acting. */
-function deleteButton(what, onDelete, small = true) {
-  const b = el("button", { class: `btn danger${small ? " sm" : ""}`, type: "button", "aria-label": `Delete ${what}` }, "Delete");
+function deleteButton(what, onDelete, small = true, label = "Delete") {
+  const b = el("button", { class: `btn danger${small ? " sm" : ""}`, type: "button", "aria-label": `Delete ${what}` }, label);
   let armed = null;
   b.onclick = async () => {
-    if (!armed) { b.textContent = "Yes, delete"; b.classList.add("solid"); armed = setTimeout(() => { armed = null; b.textContent = "Delete"; b.classList.remove("solid"); }, 4000); return; }
+    if (!armed) { b.textContent = "Yes, delete"; b.classList.add("solid"); armed = setTimeout(() => { armed = null; b.textContent = label; b.classList.remove("solid"); }, 4000); return; }
     clearTimeout(armed); armed = null; b.disabled = true; b.textContent = "Deleting…";
     try { await onDelete(); }
-    catch (err) { if (err.status === 401) return handle(err); toast(err.message); b.disabled = false; b.textContent = "Delete"; b.classList.remove("solid"); }
+    catch (err) { if (err.status === 401) return handle(err); toast(err.message); b.disabled = false; b.textContent = label; b.classList.remove("solid"); }
   };
   return b;
 }
 
+/** Library: delete every behind-the-scenes guide file (from captures and walkthrough shots) at once. */
+function drawGuideClear() {
+  // only guides no captured view still needs: a capture's own guides stay until the capture is deleted (they go with it)
+  const all = current?.source_files || [], bases = new Set(all.filter(f => !/^Guide - /.test(f.original_name)).map(f => f.original_name.replace(/\.[^.]+$/, "")));
+  const guides = all.filter(f => /^Guide - /.test(f.original_name) && !bases.has(f.original_name.slice(8, f.original_name.lastIndexOf(" - "))));
+  const box = $("#guideClear"); if (!box) return;
+  box.hidden = !guides.length;
+  if (!guides.length) return;
+  const filming = lastJobs.some(j => j.type === "film_shot" && ["queued", "running"].includes(j.status));
+  const b = deleteButton(`${guides.length} guide files`, async () => {
+    let done = 0;
+    for (const g of guides) { try { await api.deleteFile(current.id, g.id); done++; } catch (err) { if (err.status !== 404) throw err; } }
+    toast(`${done} guide file${done === 1 ? "" : "s"} deleted.`);
+    current = await api.getProject(current.id); renderProject(); loadOutputs();
+  }, false, `Delete ${guides.length} guide file${guides.length === 1 ? "" : "s"}`);
+  b.disabled = filming;
+  box.replaceChildren(el("span", { class: "muted" }, filming ? "A walkthrough shot is filming: its guide files are in use. " :
+    "Guide files are the line, depth and material pictures Ollic made for walkthrough shots and deleted captures. Finished renders and videos stay. "), b);
+}
 function fileActions(f) {
   const del = deleteButton(f.original_name, async () => {
     await api.deleteFile(current.id, f.id);
@@ -1152,7 +1172,7 @@ async function sourceLink(fid) {
   if (!linkCache.has(fid)) linkCache.set(fid, api.fileLink(current.id, fid).then(r => r.url).catch(() => null));
   return linkCache.get(fid);
 }
-const iaFiles = () => (current?.source_files || []).filter(f => (f.detected_type === "png" || f.detected_type === "jpeg") && !/^(Photoreal view|Cinematic start view) \d/.test(f.original_name));
+const iaFiles = () => (current?.source_files || []).filter(f => (f.detected_type === "png" || f.detected_type === "jpeg") && !HIDDEN_FILE.test(f.original_name));
 const iaRender = fid => images.find(i => (i.options || {}).anim_hero?.key === `img-${fid}` && (i.base_url || i.url));
 const iaLine = fid => images.find(i => (i.options || {}).anim_line?.key === `img-${fid}` && (i.base_url || i.url));
 const LINE_PROMPT = "Turn this picture into a clean architectural wireframe line drawing of the building only: thin, crisp, bright white lines on a pure black background, "
@@ -1194,7 +1214,7 @@ function drawIA() {
       const ln = iaLine(f.id);
       const badge = asIs ? (ln ? "As it is · lines ready" : "Used as it is") : r ? (ln ? "Photoreal + lines ready" : iaLinePending.has(f.id) ? "Drawing lines…" : "Photoreal ready") : pending ? "Rendering…" : "3D image";
       return el("div", { class: `ia-item${on ? " on" : ""}` },
-        el("div", { class: "thumb" }, thumb, el("span", { class: "badge" }, on ? `${iaSel.indexOf(f.id) + 1} · ${badge}` : badge)),
+        el("div", { class: "thumb" }, thumb, el("span", { class: "badge" }, on ? `${iaSel.indexOf(f.id) + 1} · ${badge}` : badge), removeButton(f)),
         el("div", { class: "body" }, el("span", { class: "name", title: f.original_name }, f.original_name),
           el("label", { class: "check" }, use, "Animate this"), el("label", { class: "check" }, real, "Already photoreal"),
           (r || asIs) && ln ? el("button", { class: "btn clip", type: "button", onclick: e => startClip({ kind: "lines", id: ln.id }, asIs ? { kind: "file", id: f.id } : { kind: "render", id: r.id },
