@@ -548,6 +548,52 @@ export function createViewer(host, { onSelect } = {}) {
   const clayGround = new THREE.MeshStandardMaterial({ color: "#c8cac4", roughness: 1 });
   const inkMat = new THREE.MeshBasicMaterial({ color: "#000000", side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   const lineMat = new THREE.LineBasicMaterial({ color: "#ffffff" });
+  const goldMat = new THREE.LineBasicMaterial({ color: "#ffd47e" });
+  // ---------------------------------------------------------------- the build (4D): when each part of the model is built, 0 to 1
+  // Foundations first; then floor by floor the frame (columns, beams, slabs, stairs) with the walls one floor behind;
+  // then the roof, the windows and doors, and last the fittings. Within a stage, from the bottom up.
+  let schedule = null;
+  const PHASE = [[/^Ifc(Footing|Pile|Foundation)/, 0], [/^Ifc(Column|Beam|Slab|Stair|StairFlight|Ramp|RampFlight|Member|Structural)/, 1],
+    [/^Ifc(Roof)$/, 3], [/^Ifc(Window|Door)$/, 4], [/^Ifc(Furnishing|Furniture|FlowTerminal|DistributionElement|Covering|Transport)/, 5]];
+  function buildSchedule() {
+    if (schedule) return schedule;
+    const items = [];
+    const storeyOf = (e, b) => {
+      const i = storeys.indexOf(e.userData.storey);
+      if (i >= 0) return i;
+      let k = 0; storeys.forEach((s, j) => { if (b.min.y >= (storeyLow[s] ?? Infinity) - 0.3) k = j; }); return k;
+    };
+    for (const e of elements) {
+      if (e.userData.ifcType === "IfcSpace") continue;
+      const b = e.geometry.boundingBox ? e.geometry.boundingBox.clone().applyMatrix4(e.matrixWorld) : new THREE.Box3().setFromObject(e);
+      let phase = 2;
+      for (const [re, ph] of PHASE) if (re.test(e.userData.ifcType || "")) { phase = ph; break; }
+      if (b.max.y <= groundY + 0.15 && phase !== 5) phase = 0;
+      items.push({ e, phase, s: storeyOf(e, b), y: b.min.y, x: b.min.x });
+    }
+    const S = Math.max(1, storeys.length), groups = new Map(), add = (key, it) => { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(it); };
+    for (const it of items) {
+      if (it.phase === 0) add(0, it);
+      else if (it.phase === 1) add(1 + it.s * 2, it);              // the frame of floor s
+      else if (it.phase === 2) add(1 + Math.min(it.s + 1, S) * 2 + 1, it);   // its walls, once the floor above is framed
+      else add(1000 + it.phase, it);                                 // roof, openings, fittings
+    }
+    const keys = [...groups.keys()].sort((a, b) => a - b), weight = keys.map(k => Math.sqrt(groups.get(k).length));
+    const total = weight.reduce((a, b) => a + b, 0) || 1;
+    schedule = new Map(); let at = 0;
+    keys.forEach((k, i) => {
+      const list = groups.get(k).sort((a, b) => a.y - b.y || a.x - b.x), span = weight[i] / total;
+      list.forEach((it, j) => schedule.set(it.e, at + span * 0.9 * (j / Math.max(1, list.length))));
+      at += span;
+    });
+    return schedule;
+  }
+  /** Shows the model as built at time t (0: bare site, 1: finished). Only parts shown when the guide began. */
+  function applyBuild(t) {
+    const sch = buildSchedule();
+    for (const [e, v] of guide.vis) if (e.userData.ifcType !== "IfcSpace") e.visible = v && t >= (sch.get(e) ?? 0);
+    if (edgesGroup && (guide.kind === "lines" || guide.kind === "gold")) edgesGroup.children.forEach(l => { l.visible = l.userData.of.visible; });
+  }
   const depthMat = new THREE.ShaderMaterial({
     uniforms: { near: { value: 1 }, far: { value: 100 } }, side: THREE.DoubleSide, clipping: true,
     vertexShader: "varying float vz;\n#include <clipping_planes_pars_vertex>\nvoid main(){ vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); vz = -mvPosition.z; gl_Position = projectionMatrix * mvPosition;\n#include <clipping_planes_vertex>\n}",
@@ -608,13 +654,19 @@ export function createViewer(host, { onSelect } = {}) {
     renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
     const shown = elements.filter(e => e.visible && e.userData.ifcType !== "IfcSpace");
     elements.forEach(e => guide.mats.set(e, e.material));
+    guide.vis = new Map(elements.map(e => [e, e.visible])); guide.clip = renderer.clippingPlanes;
     if (kind === "clay") {
       shown.forEach(e => { e.material = e.userData.cls === "glass" ? clayGlass : clayMat; });
       sky.visible = false; scene.background = new THREE.Color("#eceef0"); ground.material = clayGround;
     } else if (kind === "lines") {
       shown.forEach(e => { e.material = inkMat; });
+      if (edgesGroup) edgesGroup.children.forEach(l => { l.material = lineMat; });
       sky.visible = false; scene.background = new THREE.Color("#000000"); ground.visible = false; scene.environment = null; renderer.toneMapping = THREE.NoToneMapping;
       edges().children.forEach(l => { l.visible = l.userData.of.visible; }); edgesGroup.visible = true;
+    } else if (kind === "gold") {    // glowing gold lines on black: the construction animation
+      shown.forEach(e => { e.material = inkMat; });
+      sky.visible = false; scene.background = new THREE.Color("#050507"); ground.visible = false; scene.environment = null; renderer.toneMapping = THREE.NoToneMapping;
+      edges().children.forEach(l => { l.material = goldMat; l.visible = l.userData.of.visible; }); edgesGroup.visible = true;
     } else if (kind === "materials") {
       const colour = new Map(materialGroups().map(g => [g.key, g.map]));
       shown.forEach(e => { e.material = mapMatFor(colour.get(materialKey(e)) || "#808080"); });
@@ -638,6 +690,11 @@ export function createViewer(host, { onSelect } = {}) {
         elements.forEach(e => { if (e.visible && e.userData.ifcType !== "IfcSpace") e.material = mapMatFor(colour.get(materialKey(e)) || "#808080"); });
       }
     }
+    if (guide && pose?.build !== undefined) applyBuild(pose.build);
+    if (guide && pose?.rise !== undefined) {   // the gold lines trace up from the foundations: everything above the line is not drawn yet
+      const top = frameBox.max.y + 0.5, y = groundY - 1 + (top - groundY + 1) * pose.rise;
+      renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), y)];
+    }
     camera.updateProjectionMatrix(); camera.updateMatrixWorld();
     if (guide?.kind === "depth" && pose?.inside) { depthMat.uniforms.near.value = 0.1; depthMat.uniforms.far.value = 18; }
     else if (guide?.kind === "depth") {   // the depth range fits the building as seen from this camera
@@ -651,6 +708,7 @@ export function createViewer(host, { onSelect } = {}) {
   function endGuide() {
     if (!guide) return;
     if (guide.whole) { renderer.clippingPlanes = guide.whole.clip; guide.whole.vis.forEach((v, e) => { e.visible = v; }); }
+    renderer.clippingPlanes = guide.clip; guide.vis.forEach((v, e) => { e.visible = v; });
     guide.mats.forEach((m, e) => { e.material = m; });
     scene.overrideMaterial = null; scene.background = guide.bg; scene.environment = guide.env; renderer.toneMapping = guide.tone;
     sky.visible = guide.sky; ground.visible = guide.ground; ground.material = guide.groundMat; if (edgesGroup) edgesGroup.visible = false;
@@ -688,11 +746,13 @@ export function createViewer(host, { onSelect } = {}) {
     if (poses.length === 1) return poses[0];
     const P = new THREE.CatmullRomCurve3(poses.map(p => new THREE.Vector3().fromArray(p.position)), false, "centripetal");
     const T = new THREE.CatmullRomCurve3(poses.map(p => new THREE.Vector3().fromArray(p.target)), false, "centripetal");
-    const k = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;   // ease in and out
+    const k = poses[0].linear ? t : t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;   // ease in and out (a long move in parts: steady)
     const i = Math.min(poses.length - 2, Math.floor(k * (poses.length - 1))), f = k * (poses.length - 1) - i;
     const inside = (f < 0.5 ? poses[i] : poses[i + 1]).inside;
     return { position: P.getPoint(k).toArray(), target: T.getPoint(k).toArray(), fov: poses[i].fov + (poses[i + 1].fov - poses[i].fov) * f,
-             ...(inside ? { inside: true } : {}), ...(poses[0].near ? { near: poses[0].near } : {}) };
+             ...(inside ? { inside: true } : {}), ...(poses[0].near ? { near: poses[0].near } : {}),
+             ...(poses[0].build !== undefined ? { build: poses[0].build + (poses[poses.length - 1].build - poses[0].build) * t } : {}),
+             ...(poses[0].rise !== undefined ? { rise: poses[0].rise + (poses[poses.length - 1].rise - poses[0].rise) * t } : {}) };
   }
   /** The front door: the door on the ground floor nearest the outside, and the way into the house through it. */
   function entryPath() {
@@ -751,6 +811,18 @@ export function createViewer(host, { onSelect } = {}) {
     if (kind === "topdown") {
       const h = b.max.y + Math.max(size.x, size.z) * 1.25 + 10;
       return [0, 1, 2].map(i => ({ position: [c.x + Math.cos(i * 0.35) * 0.6, h, c.z + Math.sin(i * 0.35) * 0.6], target: [c.x, groundY, c.z], fov: 50 }));
+    }
+    // part of a steady circle around the building (angles in degrees), with the build or the gold tracing moving on
+    if (kind === "arc") {
+      const a0 = (opts.from ?? 0) * Math.PI / 180, a1 = (opts.to ?? 90) * Math.PI / 180, n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / (Math.PI / 6)) + 1);
+      const h = c.y + size.y * (opts.high ? 0.75 : 0.35), dist = d * (opts.far || 1);
+      return Array.from({ length: n }, (_, i) => {
+        const f = i / (n - 1), p = at(a0 + (a1 - a0) * f, dist, h);
+        if (opts.build) p.build = opts.build[0] + (opts.build[1] - opts.build[0]) * f;
+        if (opts.rise) p.rise = opts.rise[0] + (opts.rise[1] - opts.rise[0]) * f;
+        p.linear = true;
+        return p;
+      });
     }
     // to the front door and in: from the street to the door, through it, a few steps into the house
     if (kind === "entry") return entryPath() || [at(Math.PI / 2, d * 1.4, eye, mid), at(Math.PI / 2, d * 0.45, eye, mid)];

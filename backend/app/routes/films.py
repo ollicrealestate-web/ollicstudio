@@ -49,7 +49,7 @@ def _to_h264(src) -> bytes:
 
 class ShotMeta(BaseModel):
     name: str = Field(default="Shot", max_length=80)
-    kind: Literal["push", "orbit", "approach", "aerial", "rise", "sidepass", "topdown", "entry", "interior", "custom"] = "custom"
+    kind: Literal["push", "orbit", "approach", "aerial", "rise", "sidepass", "topdown", "entry", "interior", "arc", "construct", "custom"] = "custom"
     engine: Literal["exact", "path", "path_plus"] = "exact"
     tier: Literal["standard", "premium", "swift", "ultra", "vs"] = "standard"   # the picture option for the first (and last) frame
     format: Literal["16:9", "9:16", "1:1"] = "16:9"
@@ -69,6 +69,14 @@ class ShotMeta(BaseModel):
     end_depth_id: uuid.UUID | None = None
     end_materials_id: uuid.UUID | None = None
     model_id: uuid.UUID | None = None
+    # a cinematic made of several shots, joined into one film when the last is done
+    hero_render_id: uuid.UUID | None = None      # the approved render whose look the frames follow
+    hero_at: Literal["", "start", "end", "both"] = ""
+    stage: str = Field(default="", max_length=400)   # construction: what is being built in this shot
+    seq_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{8,40}$")
+    seq_index: int = Field(default=0, ge=0, le=30)
+    seq_count: int = Field(default=0, ge=0, le=30)
+    seq_title: str = Field(default="", max_length=80)
 
 
 def _may_film(request: Request, user: CurrentUser, repo) -> str | None:
@@ -103,6 +111,10 @@ async def make_shot(project_id: uuid.UUID, request: Request, response: Response,
     if why:
         raise HTTPException(403, {"code": "premium_only", "reason": why})
     _require_tier(request, user, m.tier)
+    if m.hero_render_id:
+        r = repo.get_rendered_image(user, str(m.hero_render_id))
+        if not r or r.get("owner_id") != user.id or r.get("project_id") != str(project_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "The render for the look is not in this project.")
     for fid in [x for x in needed + [m.start_materials_id, m.end_materials_id] if x]:
         f = repo.get_source_file(user, str(fid))
         if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
@@ -297,3 +309,46 @@ def join_film(project_id: uuid.UUID, body: JoinIn, request: Request, response: R
     return _start_job(request, user, str(project_id), "video_export", {"join": True, "video_ids": [str(v) for v in body.video_ids], "title": title,
                                                                        "subtitle": body.subtitle.strip(), "format": fmt or "16:9"},
                       None, response, run=run_join_job)
+
+
+# ---------------------------------------------------------------- the gold lines of a cinematic, drawn in the browser from the model
+@router.post("/projects/{project_id}/films/gold", status_code=status.HTTP_201_CREATED)
+async def save_gold(project_id: uuid.UUID, request: Request, file: UploadFile = File(...), meta: str = Form(...),
+                    user: CurrentUser = Depends(get_current_user)):
+    """The gold-line construction drawn from the model in the browser (no AI, no cost): saved as a shot of its film."""
+    from ..film_join import maybe_join
+    from ..video import finish_upload
+    _owned_project(request, user, project_id)
+    try:
+        m = ShotMeta.model_validate(json.loads(meta))
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(422, {"code": "bad_settings", "reason": "The settings were not valid. Reload the page and try again."}) from exc
+    tmp = upload_path(f"{uuid.uuid4()}.gold")
+    size = 0
+    try:
+        with open(tmp, "wb") as fh:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_GUIDE:
+                    raise HTTPException(413, {"code": "too_large", "reason": "The gold-line video is larger than 30 MB. Make it shorter."})
+                fh.write(chunk)
+        try:
+            info = probe(tmp)
+            if not 2 <= info.duration_s <= 30.5:
+                raise HTTPException(422, {"code": "bad_video", "reason": "The gold-line part is 2 to 30 seconds long."})
+            data = await run_in_threadpool(finish_upload, tmp, info)
+        except VideoFailed as exc:
+            raise HTTPException(422, {"code": "bad_video", "reason": exc.message}) from exc
+    finally:
+        tmp.unlink(missing_ok=True)
+    repo, settings = _repo(request), request.app.state.settings
+    vid = str(uuid.uuid4())
+    path = f"{user.id}/{project_id}/{vid}.mp4"
+    _storage(request).upload(user, path, data, "video/mp4", bucket=settings.videos_bucket)
+    seq = {"id": m.seq_id, "index": m.seq_index, "count": m.seq_count, "title": m.seq_title} if m.seq_id else None
+    v = repo.create_video(user, {"id": vid, "project_id": str(project_id), "storage_path": path, "title": m.name, "format": m.format,
+                                 "width": info.width, "height": info.height, "fps": round(info.fps) or 24, "duration_s": round(info.duration_s, 2),
+                                 "items": [], "kind": "film", "script": {"gold": True, **({"seq": seq} if seq else {})}, "label": "Drawn from your model"})
+    if seq:
+        maybe_join(request.app.state, user, str(project_id), seq)
+    return v

@@ -73,7 +73,10 @@ def test_animation_from_3d_images(stack, tmp_path):  # noqa: F811
         uid = next(p["owner_id"] for p in stack["repo"].projects.values() if p["name"] == "Lekki tower")
         stack["repo"].roles[uid] = "admin"
         assert "$0.84" in page.inner_text("#iaClipOpts")
-        page.click("#iaPick .ia-item >> nth=0 >> button:has-text('Cinematic clip')")
+        page.click("#iaPick .ia-item >> nth=0 >> button:has-text('Cinematic')")
+        page.wait_for_selector("#cineChoose:not([hidden])")
+        assert "Full construction" in page.inner_text("#cineChoose")
+        page.check("input[name=cineOpt][value=quick]"); page.click("#cineNext")
         page.wait_for_function("[...document.querySelectorAll('#iaVideos .video-card')].some(c => c.textContent.toUpperCase().includes('AI VIDEO'))", timeout=60000)
         clip = next(v for v in stack["repo"].videos.values() if v["kind"] == "cinematic")
         assert clip["title"] == "Lekki tower" and clip["items"][0]["kind"] == "lines"

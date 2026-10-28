@@ -1,4 +1,4 @@
-import { api, uploadFile, uploadAnimation, saveBrowserModel, sendShot, ApiError, newKey } from "./api.js";
+import { api, uploadFile, uploadAnimation, saveBrowserModel, sendShot, sendGold, ApiError, newKey } from "./api.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -269,6 +269,7 @@ function applyView() {
   if (step === "start") drawStart();
   if (step === "work" && svc?.modes && viewer && !modelLoading && viewerModelId && viewer.mode === "walk" && !svc.modes.includes("walk")) setViewMode("exterior");
   if (service === "film" && step === "work") loadFilmEngines();
+  drawCine();
 }
 
 /* step 1: upload a file for this service, or pick one already in the project */
@@ -507,6 +508,7 @@ async function loadModels() {
     $("#storeyPick").hidden = info.storeys.length < 2;
     showElement(null);
     if (step === "work" && SERVICES[service]?.modes) setViewMode(SERVICES[service].modes[0]);
+    drawCine();
   } catch (err) {
     $("#viewer").append(el("div", { class: "viewer-msg" }, "The 3D view could not start on this device. You can still download the model."));
   }
@@ -1269,8 +1271,7 @@ function drawIA() {
         el("div", { class: "thumb" }, thumb, el("span", { class: "badge" }, on ? `${iaSel.indexOf(f.id) + 1} · ${badge}` : badge), removeButton(f)),
         el("div", { class: "body" }, el("span", { class: "name", title: f.original_name }, f.original_name),
           el("label", { class: "check" }, use, "Animate this"), el("label", { class: "check" }, real, "Already photoreal"),
-          (r || asIs) && ln ? el("button", { class: "btn clip", type: "button", onclick: e => startClip({ kind: "lines", id: ln.id }, asIs ? { kind: "file", id: f.id } : { kind: "render", id: r.id },
-            $("#iaFormat").value, $("#iaTitle2").value.trim() || current.name, "ia", e.currentTarget) }, "Cinematic clip") : ""));
+          r || asIs ? el("button", { class: "btn clip", type: "button", onclick: () => openCine(f, r, asIs, ln) }, "Cinematic") : ""));
     }) : [el("span", { class: "hint" }, "Choose the images in step 1 of this service.")]));
   }
   drawIAPrompts();
@@ -1419,6 +1420,118 @@ $("#iaWriteBtn").onclick = async () => {
   }
   if (done) note.textContent = `${done} prompt${done > 1 ? "s" : ""} written. Edit any of them, then press “Make photoreal views”.`;
   btn.disabled = false; btn.textContent = "Read images and write prompts";
+};
+
+/* ---------- cinematic: 1 fly-around, 2 gold-line construction, 3 full construction (4D); from the model, in the picture's look ---------- */
+const CINE = {
+  1: { name: "Cinematic 1 · Fly-around", steps: "Four steady quarter turns around the photoreal building, all four sides, joined into one film.", est: 4 * 6 * 0.10 + 8 * 0.15 },
+  2: { name: "Cinematic 2 · Lite construction", steps: "Gold lines trace the building up from the foundations while the camera circles it (drawn from your model, free); then light sweeps up into the photoreal building as the camera carries on around.", est: 2 * 6 * 0.10 + 4 * 0.15 },
+  3: { name: "Cinematic 3 · Full construction (4D)", steps: "Excavation and foundations, the frame rising floor by floor, walls and roof, then windows, finishes and landscaping to the finished building, the camera flying all the way around.", est: 4 * 8 * 0.10 + 8 * 0.15 },
+};
+// var, not let: applyView reads these and can run before this line
+var cine = (() => { try { return JSON.parse(sessionStorage.getItem("ollic-cine") || "null"); } catch { return null; } })();
+var cineFor = null;
+function saveCine() { try { cine ? sessionStorage.setItem("ollic-cine", JSON.stringify(cine)) : sessionStorage.removeItem("ollic-cine"); } catch { /* private mode */ } }
+function openCine(f, r, asIs, ln) {
+  cineFor = { f, r, asIs, ln };
+  $("#cineFor").textContent = `for ${f.original_name}`;
+  const quick = document.querySelector("input[name=cineOpt][value=quick]");
+  quick.disabled = !ln; $("#cineQuickOpt").classList.toggle("off", !ln);
+  $("#cineQuickOpt").title = ln ? "" : "Make the photoreal view and its line drawing first.";
+  $("#cineChoose").hidden = false; $("#cineChoose").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
+}
+$("#cineCancel").onclick = () => { $("#cineChoose").hidden = true; cineFor = null; };
+$("#cineNext").onclick = e => {
+  if (!cineFor || !current) return;
+  const opt = document.querySelector("input[name=cineOpt]:checked")?.value, { f, r, asIs, ln } = cineFor;
+  if (opt === "quick") {
+    $("#cineChoose").hidden = true;
+    return startClip({ kind: "lines", id: ln.id }, asIs ? { kind: "file", id: f.id } : { kind: "render", id: r.id }, $("#iaFormat").value, $("#iaTitle2").value.trim() || current.name, "ia", e.currentTarget);
+  }
+  cine = { opt: Number(opt), hero: r && !asIs ? r.id : null, heroName: f.original_name, project: current.id, format: $("#iaFormat").value,
+    title: $("#iaTitle2").value.trim() || current.name, look: $("#iaLook").value.trim() };
+  saveCine(); $("#cineChoose").hidden = true;
+  const ifc = current.source_files.some(x => x.detected_type === "ifc" || x.detected_type === "rvt");
+  toast(ifc ? "Choose your model: the cinematic is made from it." : "Upload your IFC or Revit model: the cinematic is made from it.");
+  goTo("film", "start");
+};
+function drawCine() {
+  const on = !!(cine && current && cine.project === current.id && service === "film" && step === "work");
+  $("#cinePanel").hidden = !on;
+  if (!on) return;
+  const c = CINE[cine.opt];
+  $("#cineTitle").textContent = c.name;
+  $("#cineLook").textContent = cine.hero ? `in the look of your render of ${cine.heroName}` : "in your project's look and scene";
+  $("#cineSteps").textContent = c.steps;
+  $("#cineEst").textContent = viewerModelId && !modelLoading ? `About $${c.est.toFixed(2)} in all (video and renders); ready in about 10–25 minutes. You can leave the page.` : "Waiting for your model to open…";
+  $("#cineGo").disabled = !viewerModelId || !!modelLoading || !!filming;
+}
+$("#cineDrop").onclick = () => { cine = null; saveCine(); drawCine(); };
+function cinePlan(opt) {
+  const look = cine.look ? `${cine.look}. ` : "";
+  const arc = (from, to, extra = {}) => viewer.shotPath("arc", { from, to, ...extra });
+  if (opt === 1) return [90, 180, 270, 360].map((a, i) => ({ kind: "arc", poses: arc(a, a + 90), seconds: 6, name: `Around the building ${i + 1} of 4`, hero_at: "both", life: true }));
+  if (opt === 2) return [
+    { kind: "gold", poses: arc(90, 270, { rise: [0, 1], far: 0.85 }), seconds: 10, name: "Gold lines from the foundations" },
+    { kind: "arc", poses: arc(270, 360), seconds: 6, name: "The finished building", hero_at: "both", life: true },
+    { kind: "arc", poses: arc(360, 450), seconds: 6, name: "All the way around", hero_at: "both", life: true },
+  ];
+  const stages = [
+    [[0, 0.22], "excavation of the site, earthworks and trenches, concrete foundations and footings being cast, the ground floor frame starting; excavators, workers, rebar"],
+    [[0.22, 0.6], "the reinforced concrete frame rising floor by floor: columns, beams and slabs, formwork and props, scaffolding, a tower crane, workers on the slabs"],
+    [[0.6, 0.88], "blockwork walls going up between the frame, the roof being built, scaffolding all around, materials on site"],
+    [[0.88, 1], "scaffolding coming down, windows and doors fitted, render and paint, the site cleaned and landscaped, ending as the finished building"],
+  ];
+  return stages.map(([b, stage], i) => ({ kind: "construct", poses: arc(90 + i * 90, 180 + i * 90, { build: b }), seconds: 8, name: ["Foundations", "The frame rises", "Walls and roof", "Finishing"][i],
+    stage: look + stage, hero_at: i === 3 ? "end" : "", life: true }));
+}
+$("#cineGo").onclick = async () => {
+  if (!cine || !viewer || !viewerModelId || filming) return;
+  const { canRecord, recordShot } = await import("./guidevideo.js");
+  if (!canRecord()) { message($("#filmMsg"), "This browser cannot record from the model. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
+  if (!filmEngines.exact?.available) { message($("#filmMsg"), "Ollic Path Exact is not connected yet."); return; }
+  message($("#filmMsg"), "");
+  if (viewer.mode === "walk" || viewer.mode === "interior") setViewMode("exterior");
+  const plan = cinePlan(cine.opt), fmt = cine.format || "16:9", seqId = "cine-" + newKey().replace(/[^A-Za-z0-9]/g, "").slice(0, 24);
+  const ctl = new AbortController(); filming = ctl; drawFilmEstimate(); drawCine();
+  const say = (f, text) => { $("#filmProgress").hidden = false; $("#filmBar").style.width = `${Math.round(f * 100)}%`; $("#filmProgText").textContent = text; };
+  const desc = [$("#filmDesc").value.trim(), cine.look].filter(Boolean).join(". ");
+  let sent = 0;
+  try {
+    for (const [i, s] of plan.entries()) {
+      const part = 1 / plan.length, at = i * part, label = `Part ${i + 1} of ${plan.length}`;
+      const seq = { seq_id: seqId, seq_index: i, seq_count: plan.length, seq_title: cine.title };
+      if (s.kind === "gold") {
+        say(at, `${label}: drawing the gold lines from your model…`);
+        const rec = await recordShot(viewer, s.poses, s.seconds, fmt, { signal: ctl.signal, kind: "gold", stills: [],
+          onProgress: f => say(at + part * 0.8 * f, `${label}: drawing the gold lines… ${Math.round(f * 100)}%`) });
+        await sendGold(current.id, rec.blob, { name: s.name, format: fmt, ...seq }, f => say(at + part * (0.8 + 0.2 * f), `${label}: saving… ${Math.round(f * 100)}%`));
+        sent++; continue;
+      }
+      say(at, `${label}: recording the exact camera move from your model…`);
+      const rec = await recordShot(viewer, s.poses, s.seconds, fmt, { signal: ctl.signal, kind: "depth", stills: ["view", "lines", "depth", "materials"],
+        onProgress: f => say(at + part * 0.6 * f, `${label}: recording… ${Math.round(f * 100)}%`) });
+      const stamp = stampNow(), up = async (url, name, type) => uploadFile(current.id, new File([await dataBlob(url)], name, { type }), () => {});
+      const meta = { name: s.name, kind: s.kind, engine: "exact", tier: chosenTier(), format: fmt, description: desc, life: !!s.life, stage: s.stage || "",
+        hero_at: cine.hero ? (s.hero_at || "") : "", ...(cine.hero ? { hero_render_id: cine.hero } : {}), model_id: viewerModelId, ...seq };
+      say(at + part * 0.62, `${label}: saving the views of your model…`);
+      for (const [end, st] of [["start", rec.first], ["end", rec.last]]) {
+        meta[`${end}_view_id`] = (await up(st.view, `Guide - ${s.name} ${stamp} ${end} - view.jpg`, "image/jpeg")).id;
+        for (const k of ["lines", "depth", "materials"]) meta[`${end}_${k}_id`] = (await up(st[k], `Guide - ${s.name} ${stamp} ${end} - ${k}.png`, "image/png")).id;
+      }
+      await sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `${label}: sending… ${Math.round(f * 100)}%`));
+      sent++;
+    }
+    say(1, `All ${sent} parts sent. Each is rendered, filmed and checked against your model, then Ollic joins them into one film. It appears below when ready.`);
+    toast("Your cinematic is being made. You can leave this page.");
+    cine = null; saveCine();
+    current = await api.getProject(current.id).catch(() => current); renderProject(); loadOutputs();
+  } catch (err) {
+    if (err.name === "AbortError") message($("#filmMsg"), "Stopped.", "ok");
+    else if (err.status === 401) handle(err);
+    else message($("#filmMsg"), (sent ? `${sent} part${sent > 1 ? "s were" : " was"} sent. ` : "") + (err.message || "The cinematic could not be recorded."));
+    if (sent) loadOutputs();
+  } finally { filming = null; drawFilmEstimate(); drawCine(); }
 };
 
 $("#iaExport").onclick = async () => {

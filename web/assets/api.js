@@ -137,6 +137,12 @@ export function saveBrowserModel(projectId, glb, meta, onProgress) {
 }
 
 /** Sends the exact guide video of one walkthrough shot with its settings; resolves with the job. */
+export function sendGold(projectId, blob, meta, onProgress) {
+  const form = new FormData();
+  form.append("file", blob, "gold.mp4");
+  form.append("meta", JSON.stringify(meta));
+  return postForm(`/projects/${projectId}/films/gold`, form, onProgress, "The gold lines could not be sent");
+}
 export function sendShot(projectId, blob, meta, onProgress) {
   const form = new FormData();
   form.append("file", blob, "guide.mp4");

@@ -45,8 +45,9 @@ def title_card(w: int, h: int, title: str, subtitle: str) -> Image.Image:
     return img
 
 
-def join(clips: list[Path], out: Path, w: int, h: int, title: str, subtitle: str, end_title: str, beat=lambda: None) -> None:
-    """Title card, the clips in order, end card; cross-faded, H.264 with a silent AAC track, index first."""
+def join(clips: list[Path], out: Path, w: int, h: int, title: str, subtitle: str, end_title: str, beat=lambda: None, reveals: set[int] = frozenset()) -> None:
+    """Title card, the clips in order, end card; cross-faded, H.264 with a silent AAC track, index first.
+    reveals: clip numbers (from 0) that come in with a light sweep up from the ground (the gold lines becoming the building)."""
     tmp = out.parent
     start, end = tmp / "start.png", tmp / "end.png"
     title_card(w, h, title, subtitle).save(start)
@@ -63,8 +64,10 @@ def join(clips: list[Path], out: Path, w: int, h: int, title: str, subtitle: str
     last, acc = "v0", durs[0]
     for i in range(1, n):
         lbl = f"x{i}"
-        parts.append(f"[{last}][v{i}]xfade=transition=fade:duration={FADE}:offset={acc - FADE:.3f}[{lbl}]")
-        last, acc = lbl, acc + durs[i] - FADE
+        sweep = (i - 1) in reveals
+        dur = 1.2 if sweep else FADE
+        parts.append(f"[{last}][v{i}]xfade=transition={'wipeup' if sweep else 'fade'}:duration={dur}:offset={acc - dur:.3f}[{lbl}]")
+        last, acc = lbl, acc + durs[i] - dur
     cmd += ["-filter_complex", ";".join(parts), "-map", f"[{last}]", "-map", f"{n}:a", "-t", f"{acc:.3f}",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high", "-pix_fmt", "yuv420p",
             "-filter_threads", THREADS, "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)]
@@ -110,7 +113,8 @@ def run_join_job(state, user: CurrentUser, job_id: str) -> None:
             w, h = first.width - first.width % 2, first.height - first.height % 2
             out = tmp / "film.mp4"
             repo.update_job(user, job_id, {"stage": "Joining the shots into one film"})
-            join(clips, out, w, h, inp.get("title") or "", inp.get("subtitle") or "", inp.get("end_title") or inp.get("title") or "", beat)
+            reveals = {i for i in range(1, len(vids)) if (vids[i - 1].get("script") or {}).get("gold") and not (vids[i].get("script") or {}).get("gold")}
+            join(clips, out, w, h, inp.get("title") or "", inp.get("subtitle") or "", inp.get("end_title") or inp.get("title") or "", beat, reveals)
             info = probe(out)
             data = out.read_bytes()
         repo.update_job(user, job_id, {"stage": "Saving the film"})
@@ -121,7 +125,8 @@ def run_join_job(state, user: CurrentUser, job_id: str) -> None:
             repo.create_video(user, {"id": new, "project_id": pid, "job_id": job_id, "storage_path": path, "title": inp.get("title") or "Full film",
                                      "format": inp.get("format") or "16:9", "width": info.width, "height": info.height, "fps": FPS,
                                      "duration_s": round(info.duration_s, 2), "items": [{"video_id": v["id"], "caption": v.get("title") or ""} for v in vids],
-                                     "kind": "film", "script": {"joined": True, "shots": len(vids)}, "label": "AI video — not to scale"})
+                                     "kind": "film", "script": {"joined": True, "shots": len(vids), **({"seq_id": inp["seq_id"]} if inp.get("seq_id") else {})},
+                                     "label": "AI video — not to scale"})
         except BackendUnavailable:
             storage.remove(user, [path], bucket=settings.videos_bucket)
             raise
@@ -137,3 +142,26 @@ def run_join_job(state, user: CurrentUser, job_id: str) -> None:
     except Exception:
         log.exception("unexpected error in join job %s", job_id)
         fail("Something went wrong while joining the film. Try again.")
+
+
+def maybe_join(state, user: CurrentUser, project_id: str, seq: dict) -> dict | None:
+    """When every shot of a cinematic is in, starts the job that joins them (once)."""
+    repo = state.repo
+    count = int(seq.get("count") or 0)
+    if count < 2:
+        return None
+    parts = {}
+    for v in repo.list_videos(user, project_id):
+        s = (v.get("script") or {}).get("seq") or {}
+        if s.get("id") == seq["id"]:
+            parts[int(s.get("index") or 0)] = v
+    if len(parts) < count:
+        return None
+    key = f"film-{seq['id']}"
+    if repo.find_job_by_key(user, key):
+        return None
+    job = repo.create_job(user, {"project_id": project_id, "type": "video_export", "status": "queued", "stage": "Waiting to start", "idempotency_key": key,
+                                 "input": {"join": True, "video_ids": [parts[i]["id"] for i in sorted(parts)], "title": seq.get("title") or "",
+                                           "subtitle": "", "seq_id": seq["id"], "format": parts[min(parts)].get("format") or "16:9"}})
+    state.runner.submit(run_join_job, state, user, job["id"])
+    return job

@@ -630,3 +630,11 @@ tr:last-child td { border-bottom: 0; }
 .join-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .join-item { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 .join-item.on { border-color: var(--red); background: var(--red-tint); }
+
+.cine-choose, .cine-panel { display: grid; gap: 12px; padding: 14px; margin: 0 0 14px; border: 1px solid var(--red); border-radius: 12px; background: var(--red-tint); }
+.cine-opts { display: grid; gap: 8px; }
+.cine-opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: var(--surface-2); }
+.cine-opt b { display: block; }
+.cine-opt small { color: var(--muted); }
+.cine-opt:has(input:checked) { border-color: var(--red); }
+.cine-opt.off { opacity: .5; }

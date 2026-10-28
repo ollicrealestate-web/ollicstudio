@@ -400,3 +400,51 @@ def test_the_shots_are_joined_into_one_film_with_title_cards(film_app, alice, bo
         info = probe(f)
     # 3 s card + 3 s + 2 s + 3 s card, less three 0.6 s cross-fades
     assert (info.width, info.height) == (1280, 720) and abs(info.duration_s - 9.2) < 0.3
+
+
+@needs_ffmpeg
+def test_a_cinematic_gold_lines_then_the_building_is_joined_when_the_last_shot_is_in(film_app, alice, repo, storage):
+    video, checker = FakeDepthVideo(), FilmChecker()
+    c, app = film_app(runway=None, writer=checker, exact=video)
+    repo.roles[alice["id"]] = "admin"
+    pid = new_project(c, alice)
+    # the approved render whose look the cinematic follows
+    sketch = upload(c, alice, pid, "front.png", samples.png(64, 48))
+    c.post(f"/api/projects/{pid}/architectural-render", json={"prompt": "white villa", "references": [{"file_id": sketch["id"], "role": "base"}]},
+           headers={**alice["headers"], "Idempotency-Key": "cine-hero-01"})
+    (hero,) = [i["id"] for i in repo.images.values()]
+    seq = {"seq_id": "cine-abc12345", "seq_count": 2, "seq_title": "Chief Ben"}
+    # 1. the gold lines, drawn in the browser from the model: saved as it is (no AI)
+    g = c.post(f"/api/projects/{pid}/films/gold", files={"file": ("gold.mp4", mp4(3, "1280x720"), "video/mp4")},
+               data={"meta": json.dumps({"name": "Gold lines", "format": "16:9", **seq, "seq_index": 0})}, headers=alice["headers"])
+    assert g.status_code == 201, g.text
+    assert not [j for j in repo.jobs.values() if j["type"] == "video_export"]          # not all in yet
+    # 2. the photoreal orbit: its frames follow the approved render
+    meta = {"name": "Around", "kind": "arc", "engine": "exact", "format": "16:9", "hero_render_id": hero, "hero_at": "both",
+            "stage": "", "frame_prompt": "photoreal villa", **seq, "seq_index": 1} | exact_views(c, alice, pid)
+    r = c.post(f"/api/projects/{pid}/films", files={"file": ("guide.mp4", mp4(4, "1280x720"), "video/mp4")}, data={"meta": json.dumps(meta)}, headers=alice["headers"])
+    assert r.status_code == 202, r.text
+    assert repo.jobs[r.json()["id"]]["status"] == "succeeded", repo.jobs[r.json()["id"]]["error"]
+    frames = [j for j in repo.jobs.values() if j["type"] == "concept_render" and (j["input"].get("film_shot") or "").startswith("Around")]
+    assert len(frames) == 2 and all(j["input"]["hero_render_id"] == hero for j in frames)
+    # 3. both in: joined once, gold first, with the sweep into the building
+    (join,) = [j for j in repo.jobs.values() if j["type"] == "video_export"]
+    assert join["status"] == "succeeded", join["error"]
+    film = repo.videos[join["result"]["video_id"]]
+    assert film["title"] == "Chief Ben" and film["script"]["joined"] and len(film["items"]) == 2
+    assert repo.videos[film["items"][0]["video_id"]]["script"]["gold"] is True
+    from app.film_join import maybe_join
+    assert maybe_join(app.state, app.state.verifier.verify(alice["headers"]["Authorization"].split()[1]), pid, {"id": "cine-abc12345", "count": 2}) is None
+
+
+@needs_ffmpeg
+def test_a_construction_stage_is_described_to_every_prompt(film_app, alice, repo, storage):
+    video, checker = FakeDepthVideo(), FilmChecker()
+    c, app = film_app(runway=None, writer=checker, exact=video)
+    repo.roles[alice["id"]] = "admin"
+    pid = new_project(c, alice)
+    meta = {"name": "Foundations", "kind": "construct", "engine": "exact", "format": "16:9", "stage": "excavation and foundations, concrete footings", "frame_prompt": "site"} | exact_views(c, alice, pid)
+    r = c.post(f"/api/projects/{pid}/films", files={"file": ("guide.mp4", mp4(4, "1280x720"), "video/mp4")}, data={"meta": json.dumps(meta)}, headers=alice["headers"])
+    assert repo.jobs[r.json()["id"]]["status"] == "succeeded", repo.jobs[r.json()["id"]]["error"]
+    (call,) = video.calls
+    assert "excavation and foundations" in call["prompt"]

@@ -187,6 +187,12 @@
           <p class="muted">Let Claude plan the shots, or frame them yourself in the model. Ollic records each camera move exactly from your model, the AI films it photoreal, and every shot is checked against the model.</p></div>
       </div>
       <div class="card film-card">
+        <div class="cine-panel" id="cinePanel" hidden>
+          <div class="rbox-head"><b id="cineTitle">Cinematic video</b> <span class="hint" id="cineLook"></span></div>
+          <p class="hint" id="cineSteps"></p>
+          <div class="render-go"><button type="button" class="btn primary big" id="cineGo">Make the cinematic video</button><button type="button" class="btn" id="cineDrop">Cancel</button>
+            <span class="hint" id="cineEst"></span></div>
+        </div>
         <div class="tier-slot" id="tierSlotFilm"></div>
         <div class="film-grid">
           <label class="field">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
@@ -238,6 +244,17 @@
         <div class="tier-slot" id="tierSlotIA"></div>
         <fieldset class="field"><legend>Images to animate <span class="hint">Tick up to 3, in order</span></legend>
           <div class="ia-pick" id="iaPick"><span class="hint">Choose the images in step 1 of this service.</span></div></fieldset>
+        <div class="cine-choose" id="cineChoose" hidden>
+          <div class="rbox-head"><b>Cinematic video</b> <span class="hint" id="cineFor"></span></div>
+          <div class="cine-opts" role="radiogroup" aria-label="Kind of cinematic">
+            <label class="cine-opt"><input type="radio" name="cineOpt" value="1" checked><span><b>1 · Fly-around</b><small>The photoreal building with the camera flying around all four sides. From your model, so it stays exact. About $2–3.</small></span></label>
+            <label class="cine-opt"><input type="radio" name="cineOpt" value="2"><span><b>2 · Lite construction</b><small>Gold lines trace the building up from the foundations while the camera circles it, then light sweeps up and it becomes the real building. About $1–2.</small></span></label>
+            <label class="cine-opt"><input type="radio" name="cineOpt" value="3"><span><b>3 · Full construction (4D)</b><small>Excavation, foundations, the frame floor by floor, walls, roof, windows and the finished building, with the camera flying around. About $5–8.</small></span></label>
+            <label class="cine-opt" id="cineQuickOpt"><input type="radio" name="cineOpt" value="quick"><span><b>Quick clip from this picture</b><small>One short AI shot from the gold drawing to the finished picture. No model needed.</small></span></label>
+          </div>
+          <div class="render-go"><button type="button" class="btn primary" id="cineNext">Continue</button><button type="button" class="btn" id="cineCancel">Cancel</button>
+            <span class="hint">Options 1–3 use your IFC model for the exact building, and this picture's render for the look and scene.</span></div>
+        </div>
         <div class="anim-heroes">
           <div class="anim-heroes-head">
             <div><b>Photoreal views</b> <span class="hint">Each image uses two renders: its photoreal version and a clean line drawing of it, which becomes the gold wireframe. Tick “already photoreal” to use an image as it is.</span></div>

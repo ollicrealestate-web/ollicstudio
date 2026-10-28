@@ -215,13 +215,20 @@ def run_film_job(state, user: CurrentUser, job_id: str) -> None:
             repo.create_video(user, {"id": vid, "project_id": pid, "job_id": job_id, "storage_path": path, "title": inp.get("name") or None,
                                      "format": inp["format"], "width": info.width, "height": info.height, "fps": round(info.fps) or 24,
                                      "duration_s": round(info.duration_s, 2), "items": [{"render_id": render["id"], "caption": inp.get("name") or ""}], "kind": "film",
-                                     "script": {"engine": inp["engine"], "shot": inp.get("kind"), "seconds": inp["seconds"], "check": check, "life": bool(inp.get("life"))},
+                                     "script": {"engine": inp["engine"], "shot": inp.get("kind"), "seconds": inp["seconds"], "check": check, "life": bool(inp.get("life")),
+                                                **({"seq": _seq(inp)} if inp.get("seq_id") else {})},
                                      "label": "AI video — not to scale"})
         except BackendUnavailable:
             storage.remove(user, [path], bucket=settings.videos_bucket)
             raise
         repo.update_job(user, job_id, {"status": "succeeded", "stage": "Done", "finished_at": now_iso(),
                                        "result": {"video_id": vid, "first_frame": render["id"], "provider_task": task, "cost_usd": str(cost), "check": check}})
+        if inp.get("seq_id"):     # the last shot of a cinematic in: join them into one film
+            from .film_join import maybe_join
+            try:
+                maybe_join(state, user, pid, _seq(inp))
+            except Exception:
+                log.exception("could not start the join of film %s", inp.get("seq_id"))
     except VideoProviderError as exc:
         from .renders import _owner_note
         fail(exc.message + _owner_note(repo, user, exc))
@@ -271,6 +278,10 @@ def film_check(writer, start_view: bytes, end_view: bytes, frames: list[Image.Im
         return {"error": str(exc)[:200]}
     a = out["answer"]
     return {"ok": bool(a.get("ok")), "issues": [str(x)[:200] for x in (a.get("issues") or [])][:8], "cost_usd": out.get("cost_usd"), "usage": out.get("usage")}
+
+
+def _seq(inp: dict) -> dict:
+    return {"id": inp["seq_id"], "index": int(inp.get("seq_index") or 0), "count": int(inp.get("seq_count") or 0), "title": inp.get("seq_title") or ""}
 
 
 def _render_frame(state, user, pid: str, inp: dict, end: str, prompt: str, hero: str | None) -> dict:
@@ -324,6 +335,8 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
             inp = {**inp, "description": with_scene(inp.get("description") or "", repo.get_project(user, pid))}   # the project's scene, in every prompt
         except BackendUnavailable:
             pass
+        if inp.get("stage"):    # a construction shot: what is being built
+            inp = {**inp, "description": (inp.get("description") or "") + "\nCONSTRUCTION STAGE (show it as a real building site at this stage): " + inp["stage"]}
         views = {}
         for end in ("start", "end"):
             f = repo.get_source_file(user, inp[f"{end}_view_id"])
@@ -348,7 +361,8 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
                 fprompt = ""
         fprompt = fprompt or frame_prompt(inp.get("description") or "")
         try:
-            start = _render_frame(state, user, pid, inp, "start", fprompt, None)
+            hero, at = inp.get("hero_render_id"), inp.get("hero_at") or ""
+            start = _render_frame(state, user, pid, inp, "start", fprompt, hero if at in ("start", "both") else None)
             repo.update_job(user, job_id, {"stage": "Rendering the last frame, matching the first", "result": {"first_frame": start["id"]}})
             if inp.get("kind") == "entry":    # the shot ends inside the house: its own picture, its own prompt
                 eprompt = ""
@@ -360,7 +374,7 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
                         eprompt = ""
                 last = _render_frame(state, user, pid, inp, "end", eprompt or frame_prompt("Inside the house, just through the front door. " + (inp.get("description") or "")), None)
             else:
-                last = _render_frame(state, user, pid, inp, "end", fprompt, start["id"])
+                last = _render_frame(state, user, pid, inp, "end", fprompt, hero if at in ("end", "both") else start["id"])
         except _FrameFailed as exc:
             return fail(f"A frame of the shot could not be rendered: {exc}")
         img = lambda r: Image.open(io.BytesIO(storage.download(user, r.get("base_path") or r["storage_path"], bucket=settings.renders_bucket)))  # noqa: E731
@@ -437,13 +451,20 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
                                      "format": inp["format"], "width": info.width, "height": info.height, "fps": round(info.fps) or 24,
                                      "duration_s": round(info.duration_s, 2), "kind": "film",
                                      "items": [{"render_id": start["id"], "caption": "first frame"}, {"render_id": last["id"], "caption": "last frame"}],
-                                     "script": {"engine": "exact", "shot": inp.get("kind"), "seconds": inp["seconds"], "check": check, "life": bool(inp.get("life"))},
+                                     "script": {"engine": "exact", "shot": inp.get("kind"), "seconds": inp["seconds"], "check": check, "life": bool(inp.get("life")),
+                                                **({"seq": _seq(inp)} if inp.get("seq_id") else {})},
                                      "label": "AI video — not to scale"})
         except BackendUnavailable:
             storage.remove(user, [path], bucket=settings.videos_bucket)
             raise
         repo.update_job(user, job_id, {"status": "succeeded", "stage": "Done", "finished_at": now_iso(),
                                        "result": {"video_id": vid, "first_frame": start["id"], "last_frame": last["id"], "cost_usd": str(cost), "check": check}})
+        if inp.get("seq_id"):     # the last shot of a cinematic in: join them into one film
+            from .film_join import maybe_join
+            try:
+                maybe_join(state, user, pid, _seq(inp))
+            except Exception:
+                log.exception("could not start the join of film %s", inp.get("seq_id"))
     except VideoProviderError as exc:
         from .renders import _owner_note
         fail(exc.message + _owner_note(repo, user, exc))

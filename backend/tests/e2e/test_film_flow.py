@@ -63,7 +63,7 @@ def stack(tmp_path_factory):
     for s in servers:
         while not s.started:
             time.sleep(0.05)
-    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "runway": runway, "depth": depth, "uploads": uploads, "dir": web}
+    yield {"url": f"http://127.0.0.1:{api_port}", "repo": repo, "runway": runway, "depth": depth, "uploads": uploads, "dir": web, "storage": storage}
     for s in servers:
         s.should_exit = True
 
@@ -195,3 +195,79 @@ def test_full_film_moves_are_drawn_from_the_model(stack, tmp_path):
         browser.close()
     assert all(s > 40 for s in spread[:3]) and spread[3] > 12, (spread, names)      # inside, the clay walls are close in tone
     assert names[3] == "Through a room: Living" and any("front door" in n for n in names), names
+
+
+@pytest.mark.skipif(not __import__("os").environ.get("OLLIC_DUMP"), reason="a look at the construction stages, on request")
+def test_cinematic_three_stage_views(stack, tmp_path):
+    import os
+    ifc = tmp_path / "villa3.ifc"; ifc.write_bytes(build_ifc(sample_house(), seed="cine3"))
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(args=GL_ARGS)
+        page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+        page.route("**/fonts.googleapis.com/**", lambda r: r.abort()); page.route("**/fonts.gstatic.com/**", lambda r: r.abort())
+        page.goto(stack["url"] + "/app.html#sign-up")
+        page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@cine3.test"); page.fill("#upPassword", "correct-horse-1")
+        page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
+        page.fill("#newProjectName", "Cine 3"); page.click("#newProjectForm button[type=submit]")
+        page.click(".svc-card:has-text('AI walkthrough')"); page.wait_for_selector("#svcStart:not([hidden])")
+        pid = page.evaluate("new URLSearchParams(location.search).get('project')")
+        page.evaluate("""pid => sessionStorage.setItem('ollic-cine', JSON.stringify({ opt: 3, hero: null, heroName: 'x', project: pid, format: '16:9', title: 'Cine 3', look: '' }))""", pid)
+        page.reload(); page.wait_for_selector("#svcStart:not([hidden])")
+        page.set_input_files("#fileInput", str(ifc))
+        page.wait_for_function("!document.querySelector('#cineGo').disabled", timeout=60000)
+        page.click("#cineGo")
+        page.wait_for_function("document.querySelector('#filmProgText')?.textContent.includes('All 4 parts sent')", timeout=900000)
+        browser.close()
+    for path, data in stack["uploads"]:
+        if path.endswith(".jpg") and "/guides/" not in path:
+            pass
+    names = {f["storage_path"]: f["original_name"] for f in stack["repo"].files.values()}
+    for path, data in stack["uploads"]:
+        n = names.get(path, "")
+        if n.endswith("view.jpg") and "Cine" not in n:
+            open(os.path.join(os.environ["OLLIC_DUMP"], "stage-" + n.replace(" ", "_")), "wb").write(data)
+
+
+def test_cinematic_two_gold_lines_then_the_building(stack, tmp_path):
+    """Cinematic 2 from the image animation: gold lines drawn from the model, then the photoreal building, joined into one film."""
+    ifc = tmp_path / "villa.ifc"; ifc.write_bytes(build_ifc(sample_house(), seed="cine"))
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(args=GL_ARGS)
+        page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+        page.route("**/fonts.googleapis.com/**", lambda r: r.abort()); page.route("**/fonts.gstatic.com/**", lambda r: r.abort())
+        errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(stack["url"] + "/app.html#sign-up")
+        page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@cine.test"); page.fill("#upPassword", "correct-horse-1")
+        page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
+        page.fill("#newProjectName", "Cine villa"); page.click("#newProjectForm button[type=submit]")
+        page.click(".svc-card:has-text('AI walkthrough')"); page.wait_for_selector("#svcStart:not([hidden])")
+        pid = page.evaluate("new URLSearchParams(location.search).get('project')")
+        assert pid
+        # what the image animation's "Cinematic" button leaves for the walkthrough (as if chosen there, then reloaded)
+        page.evaluate("""pid => sessionStorage.setItem('ollic-cine', JSON.stringify({ opt: 2, hero: null, heroName: 'front.jpg', project: pid, format: '16:9', title: 'Cine villa', look: 'white render' }))""", pid)
+        page.reload(); page.wait_for_selector("#svcStart:not([hidden])")
+        page.set_input_files("#fileInput", str(ifc))
+        page.wait_for_selector("#cinePanel:not([hidden])", timeout=60000)
+        page.wait_for_function("!document.querySelector('#cineGo').disabled", timeout=60000)
+        assert "Lite construction" in page.inner_text("#cineTitle")
+        calls_before = len(stack["depth"].calls)
+        page.click("#cineGo")
+        page.wait_for_function("document.querySelector('#filmProgText')?.textContent.includes('All 3 parts sent')", timeout=600000)
+        assert errors == [], errors
+        browser.close()
+    repo = stack["repo"]
+    for _ in range(120):
+        joins = [j for j in repo.jobs.values() if j["type"] == "video_export"]
+        if joins and joins[0]["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(1)
+    (join,) = joins
+    assert join["status"] == "succeeded", (join["error"], [(j["type"], j["status"], j.get("error")) for j in repo.jobs.values()])
+    film = repo.videos[join["result"]["video_id"]]
+    parts = [repo.videos[x["video_id"]] for x in film["items"]]
+    assert parts[0]["script"]["gold"] and [v["title"] for v in parts] == ["Gold lines from the foundations", "The finished building", "All the way around"]
+    assert len(stack["depth"].calls) - calls_before == 2         # only the photoreal parts went to the video service
+    import os as _os
+    if _os.environ.get("OLLIC_DUMP"):
+        for v in parts[:1] + [film]:
+            open(f"{_os.environ['OLLIC_DUMP']}/{'gold' if v is parts[0] else 'film'}.mp4", "wb").write(stack["storage"].buckets["videos"][v["storage_path"]][0])
