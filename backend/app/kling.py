@@ -34,9 +34,9 @@ PRICE_SOURCE = "Kling API price list (kling.ai/document-api pricing, units at $0
 class VideoProviderError(Exception):
     """`message` is safe to show the customer."""
 
-    def __init__(self, message: str, *, code: int | None = None, retry: bool = False):
+    def __init__(self, message: str, *, code: int | None = None, retry: bool = False, owner_detail: str | None = None):
         super().__init__(message)
-        self.message, self.code, self.retry = message, code, retry
+        self.message, self.code, self.retry, self.owner_detail = message, code, retry, owner_detail
 
 
 @dataclass
@@ -85,7 +85,8 @@ class KlingVideo:
             code = int(code) if isinstance(code, (int, str)) and str(code).isdigit() else None
             log.warning("OWNER: Kling error http %s code %s: %s (request %s)", res.status_code, code, str(body.get("message"))[:300], body.get("request_id"))
             retry = res.status_code >= 500 or code in (1302, 1303, 5000, 5001, 5002)
-            raise VideoProviderError(NEUTRAL.get(code, "The video could not be made this time. Try again later."), code=code, retry=retry)
+            raise VideoProviderError(NEUTRAL.get(code, "The video could not be made this time. Try again later."), code=code, retry=retry,
+                                     owner_detail=f"Kling http {res.status_code} code {code}: {str(body.get('message'))[:200]}")
         return body
 
     def create(self, *, first_frame: bytes, last_frame: bytes | None, prompt: str, seconds: int = 10, resolution: str = "720p",

@@ -211,7 +211,8 @@ def run_clip_job(state, user: CurrentUser, job_id: str) -> None:
         repo.update_job(user, job_id, {"status": "succeeded", "stage": "Done", "finished_at": now_iso(),
                                        "result": {"video_id": vid, "provider_task": task, "cost_usd": str(cost)}})
     except VideoProviderError as exc:
-        fail(exc.message)
+        from .renders import _owner_note
+        fail(exc.message + _owner_note(repo, user, exc))
     except VideoFailed as exc:
         log.error("clip job %s: %s", job_id, exc.__cause__)
         fail("The finished clip could not be prepared. Try again.")

@@ -222,7 +222,8 @@ def run_film_job(state, user: CurrentUser, job_id: str) -> None:
         repo.update_job(user, job_id, {"status": "succeeded", "stage": "Done", "finished_at": now_iso(),
                                        "result": {"video_id": vid, "first_frame": render["id"], "provider_task": task, "cost_usd": str(cost), "check": check}})
     except VideoProviderError as exc:
-        fail(exc.message)
+        from .renders import _owner_note
+        fail(exc.message + _owner_note(repo, user, exc))
     except VideoFailed as exc:
         log.error("film job %s: %s", job_id, exc.__cause__)
         fail("The finished shot could not be prepared. Try again.")
@@ -433,7 +434,8 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
         repo.update_job(user, job_id, {"status": "succeeded", "stage": "Done", "finished_at": now_iso(),
                                        "result": {"video_id": vid, "first_frame": start["id"], "last_frame": last["id"], "cost_usd": str(cost), "check": check}})
     except VideoProviderError as exc:
-        fail(exc.message)
+        from .renders import _owner_note
+        fail(exc.message + _owner_note(repo, user, exc))
     except VideoFailed as exc:
         log.error("film job %s: %s", job_id, exc.__cause__)
         fail("The finished shot could not be prepared. Try again.")

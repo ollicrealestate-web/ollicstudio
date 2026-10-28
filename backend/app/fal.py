@@ -241,7 +241,8 @@ class FalVideo(_Fal):
         try:
             sub = self.submit(VIDEO_MODEL, body)
         except _Failed as exc:
-            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429) from exc
+            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429,
+                                     owner_detail=f"fal http {exc.status}: {str(exc.detail)[:200]}") from exc
         except httpx.HTTPError as exc:
             raise VideoProviderError("Could not reach the video service. Try again in a moment.", retry=True) from exc
         return f"{sub['request_id']}|{sub['status_url']}|{sub['response_url']}"
@@ -258,7 +259,8 @@ class FalVideo(_Fal):
         except _Failed as exc:
             if exc.status == 422:      # fal reports a failed generation on the result URL
                 return ClipStatus(status="failed", message=exc.detail[:300])
-            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429) from exc
+            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429,
+                                     owner_detail=f"fal http {exc.status}: {str(exc.detail)[:200]}") from exc
         except httpx.HTTPError as exc:
             raise VideoProviderError("Could not reach the video service.", retry=True) from exc
         url = (out.get("video") or {}).get("url")
@@ -292,7 +294,8 @@ class FalDepthVideo(FalVideo):
         try:
             sub = self.submit(DEPTH_VIDEO_MODEL, body)
         except _Failed as exc:
-            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429) from exc
+            raise VideoProviderError(_neutral(exc.status, "video"), code=exc.status, retry=exc.status >= 500 or exc.status == 429,
+                                     owner_detail=f"fal http {exc.status}: {str(exc.detail)[:200]}") from exc
         except httpx.HTTPError as exc:
             raise VideoProviderError("Could not reach the video service. Try again in a moment.", retry=True) from exc
         return f"{sub['request_id']}|{sub['status_url']}|{sub['response_url']}"

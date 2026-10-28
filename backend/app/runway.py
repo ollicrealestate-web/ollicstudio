@@ -59,7 +59,8 @@ class RunwayVideo:
         detail = str(body.get("error") or body.get("message") or res.text)[:300]
         log.warning("OWNER: Runway error %s: %s", res.status_code, detail)
         if res.status_code in (401, 403):
-            raise VideoProviderError("The video service is not set up correctly. The owner has been told.", code=res.status_code)
+            raise VideoProviderError("The video service is not set up correctly. The owner has been told.", code=res.status_code,
+                                     owner_detail=f"Runway http {res.status_code}: {detail[:200]}")
         if res.status_code == 429:
             raise VideoProviderError("The video service is busy. Try again in a few minutes.", code=429, retry=True)
         if res.status_code >= 500:
