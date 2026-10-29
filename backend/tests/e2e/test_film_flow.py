@@ -246,13 +246,19 @@ def test_cinematic_two_gold_lines_then_the_building(stack, tmp_path):
         # what the image animation's "Cinematic" button leaves for the walkthrough (as if chosen there, then reloaded)
         page.evaluate("""pid => sessionStorage.setItem('ollic-cine', JSON.stringify({ opt: 2, hero: null, heroName: 'front.jpg', project: pid, format: '16:9', title: 'Cine villa', look: 'white render' }))""", pid)
         page.reload(); page.wait_for_selector("#svcStart:not([hidden])")
+        assert "Cinematic: Lite construction" in page.inner_text("#svcTitle")
         page.set_input_files("#fileInput", str(ifc))
         page.wait_for_selector("#cinePanel:not([hidden])", timeout=60000)
         page.wait_for_function("!document.querySelector('#cineGo').disabled", timeout=60000)
-        assert "Lite construction" in page.inner_text("#cineTitle")
+        assert "Lite construction" in page.inner_text("#cineTitle") and page.inner_text("#filmTitle") == "Lite construction"
+        # only the cinematic on the page: the walkthrough's planning, shots and film button step aside
+        assert not page.is_visible("#planFullBtn") and not page.is_visible("#filmGo") and not page.is_visible("#addShot") and not page.is_visible("#filmEngine")
+        assert page.is_visible("#rScene") and page.is_visible("#filmDesc")
         calls_before = len(stack["depth"].calls)
         page.click("#cineGo")
         page.wait_for_function("document.querySelector('#filmProgText')?.textContent.includes('All 3 parts sent')", timeout=600000)
+        page.wait_for_function("document.querySelector('#filmTitle').textContent === 'Film your model'")   # sent: back to the walkthrough
+        assert page.is_visible("#planFullBtn")
         assert errors == [], errors
         browser.close()
     repo = stack["repo"]

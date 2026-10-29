@@ -183,28 +183,28 @@
     </section>
     <section class="film" id="filmSection" aria-labelledby="filmTitle">
       <div class="studio-head">
-        <div><span class="eyebrow">AI walkthrough</span><h2 id="filmTitle" class="studio-title">Film your model</h2>
-          <p class="muted">Let Claude plan the shots, or frame them yourself in the model. Ollic records each camera move exactly from your model, the AI films it photoreal, and every shot is checked against the model.</p></div>
+        <div><span class="eyebrow" id="filmEyebrow">AI walkthrough</span><h2 id="filmTitle" class="studio-title">Film your model</h2>
+          <p class="muted" id="filmLead">Let Claude plan the shots, or frame them yourself in the model. Ollic records each camera move exactly from your model, the AI films it photoreal, and every shot is checked against the model.</p></div>
       </div>
       <div class="card film-card">
-        <div class="cine-panel" id="cinePanel" hidden>
-          <div class="rbox-head"><b id="cineTitle">Cinematic video</b> <span class="hint" id="cineLook"></span></div>
-          <p class="hint" id="cineSteps"></p>
-          <div class="render-go"><button type="button" class="btn primary big" id="cineGo">Make the cinematic video</button><button type="button" class="btn" id="cineDrop">Cancel</button>
-            <span class="hint" id="cineEst"></span></div>
-        </div>
         <div class="tier-slot" id="tierSlotFilm"></div>
         <div class="film-grid">
-          <label class="field">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
+          <label class="field walk-only">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
           <label class="field">Format <select id="filmFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
         </div>
         <div class="scene-slot" id="sceneSlotFilm"></div>
         <label class="field">Describe the look <span class="hint">Materials, light, time of day, setting. Claude uses it for every shot.</span>
           <textarea id="filmDesc" rows="3" maxlength="1500" placeholder="e.g. White render and bronze glass, warm evening light, palm trees, interlocking paving"></textarea></label>
         <div class="rwrite"><button type="button" class="btn" id="filmLookBtn">Read the model and write the look</button><span class="hint" id="filmLookNote">Claude studies the view on screen, your scene and your notes.</span></div>
-        <label class="check"><input type="checkbox" id="filmLife"> Add life: people walking and cars passing</label>
-        <div class="rwrite"><button type="button" class="btn primary" id="planFullBtn">Plan the full property film</button><button type="button" class="btn" id="planBtn">Plan a short film</button><span class="hint" id="planNoteFilm">Claude plans the whole film from your model: the site from above, around the building, the street with cars, through the front door and the rooms. Or add shots yourself.</span></div>
-        <div class="shot-add">
+        <div class="cine-panel" id="cinePanel" hidden>
+          <div class="rbox-head"><b id="cineTitle">Cinematic video</b> <span class="hint" id="cineLook"></span></div>
+          <p class="hint" id="cineSteps"></p>
+          <div class="render-go"><button type="button" class="btn primary big" id="cineGo">Make the cinematic video</button><button type="button" class="btn" id="cineDrop">Cancel</button>
+            <span class="hint" id="cineEst"></span></div>
+        </div>
+        <label class="check walk-only"><input type="checkbox" id="filmLife"> Add life: people walking and cars passing</label>
+        <div class="rwrite walk-only"><button type="button" class="btn primary" id="planFullBtn">Plan the full property film</button><button type="button" class="btn" id="planBtn">Plan a short film</button><span class="hint" id="planNoteFilm">Claude plans the whole film from your model: the site from above, around the building, the street with cars, through the front door and the rooms. Or add shots yourself.</span></div>
+        <div class="shot-add walk-only">
           <label class="storey-pick"><span>Add</span><select id="shotKind" aria-label="Camera move">
             <option value="approach">Approach from the street</option><option value="orbit">Orbit around the building</option><option value="aerial">Aerial over the site</option>
             <option value="rise">Rise up the facade</option><option value="sidepass">Low drone pass along the front</option><option value="topdown">Straight down from above</option>
@@ -213,8 +213,8 @@
           <label class="storey-pick"><span>Length</span><select id="shotSecs" aria-label="Shot length"><option value="5">5 s</option><option value="8" selected>8 s</option><option value="10">10 s</option></select></label>
           <button type="button" class="btn" id="addShot">Add shot</button>
         </div>
-        <ol class="film-shots" id="filmShots"></ol>
-        <div class="render-go">
+        <ol class="film-shots walk-only" id="filmShots"></ol>
+        <div class="render-go walk-only">
           <button type="button" class="btn primary big" id="filmGo" disabled>Film the shots</button>
           <span class="hint" id="filmEst">Add a shot first.</span>
         </div>
@@ -223,7 +223,7 @@
         </div>
         <div id="filmMsg" class="notice" role="status" hidden></div>
         <div class="jobs" id="filmJobs" aria-live="polite"></div>
-        <div class="join-box" id="joinBox" hidden>
+        <div class="join-box walk-only" id="joinBox" hidden>
           <div class="rbox-head"><b>One finished film</b> <span class="hint">Tick the shots in the order you want; Ollic joins them with soft fades, your title at the start and the end. No extra AI cost.</span></div>
           <ol class="join-list" id="joinList"></ol>
           <div class="video-fields">

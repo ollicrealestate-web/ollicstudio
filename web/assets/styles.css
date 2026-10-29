@@ -638,3 +638,6 @@ tr:last-child td { border-bottom: 0; }
 .cine-opt small { color: var(--muted); }
 .cine-opt:has(input:checked) { border-color: var(--red); }
 .cine-opt.off { opacity: .5; }
+
+/* a cinematic chosen in the image animation: the walkthrough's own controls step aside */
+#filmSection.cine-mode .walk-only, #projectView.cine-mode #addShotView { display: none !important; }

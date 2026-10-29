@@ -281,6 +281,7 @@ function drawStart() {
   const svc = SERVICES[service];
   if (!svc || !svc.accept) return;
   $("#svcTitle").textContent = svc.name; $("#svcLead").textContent = svc.lead;
+  if (service === "film") drawCine();
   $("#svcEyebrow").textContent = "Step 1 of 2 · Your file";
   const input = $("#fileInput");
   input.accept = svc.accept.map(t => EXT[t]).join(","); input.multiple = svc.multi > 1;
@@ -891,7 +892,8 @@ $("#filmGo").onclick = async () => {
         meta.clay_file_id = (await up(rec.first.clay, `Guide - ${s.name} ${stamp} - clay.jpg`, "image/jpeg")).id;
         meta.lines_file_id = (await up(rec.first.lines, `Guide - ${s.name} ${stamp} - lines.png`, "image/png")).id;
       }
-      await sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `Shot ${i + 1} of ${shots.length}: sending… ${Math.round(f * 100)}%`));
+      await whenFree(() => sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `Shot ${i + 1} of ${shots.length}: sending… ${Math.round(f * 100)}%`)),
+        text => say(at + part * 0.7, `Shot ${i + 1} of ${shots.length}: ${text}`), ctl.signal);
       sent++;
     }
     say(1, `${sent} shot${sent > 1 ? "s" : ""} sent. Each is rendered, filmed and checked against your model; they appear below in a few minutes.`);
@@ -1455,9 +1457,22 @@ $("#cineNext").onclick = e => {
   toast(ifc ? "Choose your model: the cinematic is made from it." : "Upload your IFC or Revit model: the cinematic is made from it.");
   goTo("film", "start");
 };
+var FILM_HEAD = { eyebrow: "AI walkthrough", title: "Film your model", lead: "" };   // var: drawCine can run before this line
 function drawCine() {
-  const on = !!(cine && current && cine.project === current.id && service === "film" && step === "work");
+  const pending = !!(cine && current && cine.project === current.id && service === "film");
+  const on = pending && step === "work";
   $("#cinePanel").hidden = !on;
+  // the whole page is about the cinematic while one is chosen
+  $("#filmSection").classList.toggle("cine-mode", on); $("#projectView").classList.toggle("cine-mode", pending);
+  if (!FILM_HEAD) return;
+  if (!FILM_HEAD.lead) FILM_HEAD.lead = $("#filmLead").textContent;
+  $("#filmEyebrow").textContent = on ? "Cinematic video" : FILM_HEAD.eyebrow;
+  $("#filmTitle").textContent = on ? CINE[cine.opt].name.replace(/^Cinematic \d · /, "") : FILM_HEAD.title;
+  $("#filmLead").textContent = on ? `${CINE[cine.opt].steps} Made from your model so the building stays exact, in the look of your render, and checked by Claude.` : FILM_HEAD.lead;
+  if (pending && step === "start") {
+    $("#svcTitle").textContent = `${CINE[cine.opt].name.replace(/^Cinematic \d · /, "Cinematic: ")}`;
+    $("#svcLead").textContent = "Choose your model (IFC or Revit). The cinematic is made from it, so the building stays exact.";
+  }
   if (!on) return;
   const c = CINE[cine.opt];
   $("#cineTitle").textContent = c.name;
@@ -1467,6 +1482,17 @@ function drawCine() {
   $("#cineGo").disabled = !viewerModelId || !!modelLoading || !!filming;
 }
 $("#cineDrop").onclick = () => { cine = null; saveCine(); drawCine(); };
+/** Sends one part, waiting for a free place when the project already has as many jobs running as it may. */
+async function whenFree(send, say, signal) {
+  for (;;) {
+    try { return await send(); }
+    catch (err) {
+      if (err.status !== 429 || err.code !== "too_many_active") throw err;
+      say("Waiting for the earlier parts to get going (a project films a few at a time)…");
+      for (let i = 0; i < 20; i++) { if (signal?.aborted) throw new DOMException("Cancelled", "AbortError"); await new Promise(r => setTimeout(r, 1500)); }
+    }
+  }
+}
 function cinePlan(opt) {
   const look = cine.look ? `${cine.look}. ` : "";
   const arc = (from, to, extra = {}) => viewer.shotPath("arc", { from, to, ...extra });
@@ -1492,7 +1518,7 @@ $("#cineGo").onclick = async () => {
   if (!filmEngines.exact?.available) { message($("#filmMsg"), "Ollic Path Exact is not connected yet."); return; }
   message($("#filmMsg"), "");
   if (viewer.mode === "walk" || viewer.mode === "interior") setViewMode("exterior");
-  const plan = cinePlan(cine.opt), fmt = cine.format || "16:9", seqId = "cine-" + newKey().replace(/[^A-Za-z0-9]/g, "").slice(0, 24);
+  const plan = cinePlan(cine.opt), fmt = $("#filmFormat").value || cine.format || "16:9", seqId = "cine-" + newKey().replace(/[^A-Za-z0-9]/g, "").slice(0, 24);
   const ctl = new AbortController(); filming = ctl; drawFilmEstimate(); drawCine();
   const say = (f, text) => { $("#filmProgress").hidden = false; $("#filmBar").style.width = `${Math.round(f * 100)}%`; $("#filmProgText").textContent = text; };
   const desc = [$("#filmDesc").value.trim(), cine.look].filter(Boolean).join(". ");
@@ -1519,7 +1545,8 @@ $("#cineGo").onclick = async () => {
         meta[`${end}_view_id`] = (await up(st.view, `Guide - ${s.name} ${stamp} ${end} - view.jpg`, "image/jpeg")).id;
         for (const k of ["lines", "depth", "materials"]) meta[`${end}_${k}_id`] = (await up(st[k], `Guide - ${s.name} ${stamp} ${end} - ${k}.png`, "image/png")).id;
       }
-      await sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `${label}: sending… ${Math.round(f * 100)}%`));
+      await whenFree(() => sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `${label}: sending… ${Math.round(f * 100)}%`)),
+        text => say(at + part * 0.7, `${label}: ${text}`), ctl.signal);
       sent++;
     }
     say(1, `All ${sent} parts sent. Each is rendered, filmed and checked against your model, then Ollic joins them into one film. It appears below when ready.`);
