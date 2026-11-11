@@ -85,6 +85,9 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
         fal["exact"].guide, fal["exact"].strength = settings.exact_guide, settings.exact_strength
     # Ollic Path Exact: walkthrough shots filmed on the model's depth (fal); tests pass fal={"film_exact": ...}
     app.state.film_exact = fal.get("film_exact", FalDepthVideo(settings.fal_key) if settings.fal_key else None)
+    # Ollic Cinema: the camera move from the model as Seedance 2.5's reference video (BytePlus, direct); tests pass fal={"film_seedance": ...}
+    from .byteplus import SeedanceVideo
+    app.state.film_seedance = fal.get("film_seedance", SeedanceVideo(settings.byteplus_api_key, settings.seedance_model) if settings.byteplus_api_key else None)
     # video options by id; an option with no client is listed as not connected
     app.state.video_clients = {"motion": kling, "vs": fal.get("video")}
 

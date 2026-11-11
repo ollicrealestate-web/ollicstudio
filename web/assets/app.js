@@ -750,7 +750,7 @@ function guideFor(fileId, kind = "lines") {
 /* ---------- AI walkthrough: Claude plans the shots, the model gives the exact camera moves ---------- */
 const SHOT_NAME = { approach: "Approach from the street", orbit: "Orbit around the building", aerial: "Aerial over the site", rise: "Rise up the facade", push: "Slow move in",
   sidepass: "Low drone pass along the front", topdown: "Straight down from above", entry: "Through the front door", interior: "Through a room", custom: "Your move" };
-const FILM_PRICE = { exact: 0.10, path: 0.28, path_plus: 0.17 };
+const FILM_PRICE = { exact: 0.10, seedance: 0.30, path: 0.28, path_plus: 0.17 };
 let shots = [], filmEngines = {}, filming = null;
 function newShot(kind, seconds, extra = {}) {
   if (!viewer) { toast("Open your model first."); return null; }
@@ -780,7 +780,7 @@ function drawShots() {
 function drawFilmEstimate() {
   const secs = shots.reduce((a, s) => a + s.seconds, 0), eng = $("#filmEngine").value, p = FILM_PRICE[eng] || 0.28;
   $("#filmGo").disabled = !shots.length || !!filming;
-  $("#filmEst").textContent = shots.length ? `${shots.length} shot${shots.length > 1 ? "s" : ""}, ${secs} s of film. About $${(secs * p).toFixed(2)} for the video plus ${eng === "exact" ? "two renders" : "one render"} per shot; ready in about ${Math.max(3, Math.round(2 + secs / 4))}–${Math.round(6 + secs / 3)} minutes.` : "Add a shot first.";
+  $("#filmEst").textContent = shots.length ? `${shots.length} shot${shots.length > 1 ? "s" : ""}, ${secs} s of film. About $${(secs * p).toFixed(2)} for the video plus ${eng === "exact" || eng === "seedance" ? "two renders" : "one render"} per shot; ready in about ${Math.max(3, Math.round(2 + secs / 4))}–${Math.round(6 + secs / 3)} minutes.` : "Add a shot first.";
 }
 async function previewShot(s) {
   if (!viewer) return;
@@ -815,7 +815,8 @@ async function loadFilmEngines() {
   delete filmEngines._pictures;
   const keep = $("#filmEngine").value;
   $("#filmEngine").replaceChildren(...Object.entries(filmEngines).map(([k, e]) => el("option", { value: k, ...(e.available ? {} : { disabled: "" }) }, `${e.name}${e.available ? "" : " (not connected yet)"}`)));
-  $("#filmEngine").value = filmEngines[keep]?.available ? keep : (Object.keys(filmEngines).find(k => filmEngines[k].available) || "path");
+  const best = ["seedance", "path", "path_plus", "exact"].find(k => filmEngines[k]?.available);
+  $("#filmEngine").value = filmEngines[keep]?.available ? keep : (best || "path");
   $("#filmEngine").dispatchEvent(new Event("change"));
 }
 async function planFilm(full) {
@@ -875,9 +876,9 @@ $("#filmGo").onclick = async () => {
     for (const [i, s] of shots.entries()) {
       const part = 1 / shots.length, at = i * part;
       say(at, `Shot ${i + 1} of ${shots.length}: recording the exact camera move from your model…`);
-      const exact = engine === "exact";
+      const exact = engine === "exact" || engine === "seedance";      // renders at both ends of the move
       const secs = exact ? Math.max(4, s.seconds) : s.seconds;
-      const rec = await recordShot(viewer, s.poses, secs, fmt, { signal: ctl.signal, kind: exact ? "depth" : "clay", stills: exact ? ["view", "lines", "depth", "materials"] : ["clay", "lines"],
+      const rec = await recordShot(viewer, s.poses, secs, fmt, { signal: ctl.signal, kind: engine === "exact" ? "depth" : "clay", stills: exact ? ["view", "lines", "depth", "materials"] : ["clay", "lines"],
         onProgress: f => say(at + part * 0.6 * f, `Shot ${i + 1} of ${shots.length}: recording the camera move… ${Math.round(f * 100)}%`) });
       const stamp = stampNow(), up = async (url, name, type) => uploadFile(current.id, new File([await dataBlob(url)], name, { type }), () => {});
       const meta = { name: s.name, kind: s.kind, engine, tier: chosenTier(), format: fmt, description: desc, frame_prompt: s.frame_prompt, motion_prompt: s.motion_prompt,
@@ -1433,6 +1434,7 @@ const CINE = {
 // var, not let: applyView reads these and can run before this line
 var cine = (() => { try { return JSON.parse(sessionStorage.getItem("ollic-cine") || "null"); } catch { return null; } })();
 var cineFor = null;
+setTimeout(() => drawCine(), 0);     // the page may have been drawn before the chosen cinematic was read back
 function saveCine() { try { cine ? sessionStorage.setItem("ollic-cine", JSON.stringify(cine)) : sessionStorage.removeItem("ollic-cine"); } catch { /* private mode */ } }
 function openCine(f, r, asIs, ln) {
   cineFor = { f, r, asIs, ln };
@@ -1478,10 +1480,13 @@ function drawCine() {
   $("#cineTitle").textContent = c.name;
   $("#cineLook").textContent = cine.hero ? `in the look of your render of ${cine.heroName}` : "in your project's look and scene";
   $("#cineSteps").textContent = c.steps;
-  $("#cineEst").textContent = viewerModelId && !modelLoading ? `About $${c.est.toFixed(2)} in all (video and renders); ready in about 10–25 minutes. You can leave the page.` : "Waiting for your model to open…";
-  $("#cineGo").disabled = !viewerModelId || !!modelLoading || !!filming;
+  const eng = $("#filmEngine").value, secs = { 1: 24, 2: 12, 3: 32 }[cine.opt], renders = { 1: 8, 2: 4, 3: 8 }[cine.opt];
+  const est = secs * (FILM_PRICE[eng] ?? 0.10) + renders * ((eng === "exact" || eng === "seedance") ? 0.15 : 0.08);
+  $("#cineEst").textContent = viewerModelId && !modelLoading ? `${filmEngines[eng]?.name || "Video"}: about $${est.toFixed(2)} in all (video and renders); ready in about 10–25 minutes. You can leave the page.` : "Waiting for your model to open…";
+  $("#cineGo").disabled = !viewerModelId || !!modelLoading || !!filming || !filmEngines[$("#filmEngine").value]?.available;
 }
 $("#cineDrop").onclick = () => { cine = null; saveCine(); drawCine(); };
+$("#filmEngine").addEventListener("change", () => drawCine());
 /** Sends one part, waiting for a free place when the project already has as many jobs running as it may. */
 async function whenFree(send, say, signal) {
   for (;;) {
@@ -1515,7 +1520,9 @@ $("#cineGo").onclick = async () => {
   if (!cine || !viewer || !viewerModelId || filming) return;
   const { canRecord, recordShot } = await import("./guidevideo.js");
   if (!canRecord()) { message($("#filmMsg"), "This browser cannot record from the model. Use Chrome or Edge on a computer, or Safari 17 or newer."); return; }
-  if (!filmEngines.exact?.available) { message($("#filmMsg"), "Ollic Path Exact is not connected yet."); return; }
+  const engine = $("#filmEngine").value;
+  if (!filmEngines[engine]?.available) { message($("#filmMsg"), `${filmEngines[engine]?.name || "That video option"} is not connected yet. Choose another video option.`); return; }
+  const both = engine === "exact" || engine === "seedance";
   message($("#filmMsg"), "");
   if (viewer.mode === "walk" || viewer.mode === "interior") setViewMode("exterior");
   const plan = cinePlan(cine.opt), fmt = $("#filmFormat").value || cine.format || "16:9", seqId = "cine-" + newKey().replace(/[^A-Za-z0-9]/g, "").slice(0, 24);
@@ -1535,15 +1542,23 @@ $("#cineGo").onclick = async () => {
         sent++; continue;
       }
       say(at, `${label}: recording the exact camera move from your model…`);
-      const rec = await recordShot(viewer, s.poses, s.seconds, fmt, { signal: ctl.signal, kind: "depth", stills: ["view", "lines", "depth", "materials"],
+      const rec = await recordShot(viewer, s.poses, s.seconds, fmt, { signal: ctl.signal, kind: engine === "exact" ? "depth" : "clay",
+        stills: both ? ["view", "lines", "depth", "materials"] : ["clay", "lines"],
         onProgress: f => say(at + part * 0.6 * f, `${label}: recording… ${Math.round(f * 100)}%`) });
       const stamp = stampNow(), up = async (url, name, type) => uploadFile(current.id, new File([await dataBlob(url)], name, { type }), () => {});
-      const meta = { name: s.name, kind: s.kind, engine: "exact", tier: chosenTier(), format: fmt, description: desc, life: !!s.life, stage: s.stage || "",
-        hero_at: cine.hero ? (s.hero_at || "") : "", ...(cine.hero ? { hero_render_id: cine.hero } : {}), model_id: viewerModelId, ...seq };
+      // Ollic Path and Path Plus render only the first frame, so the look render applies to it when the shot uses it at all
+      const heroAt = cine.hero ? (both ? (s.hero_at || "") : (s.hero_at ? "start" : "")) : "";
+      const meta = { name: s.name, kind: s.kind, engine, tier: chosenTier(), format: fmt, description: desc, life: !!s.life, stage: s.stage || "",
+        hero_at: heroAt, ...(cine.hero ? { hero_render_id: cine.hero } : {}), model_id: viewerModelId, ...seq };
       say(at + part * 0.62, `${label}: saving the views of your model…`);
-      for (const [end, st] of [["start", rec.first], ["end", rec.last]]) {
-        meta[`${end}_view_id`] = (await up(st.view, `Guide - ${s.name} ${stamp} ${end} - view.jpg`, "image/jpeg")).id;
-        for (const k of ["lines", "depth", "materials"]) meta[`${end}_${k}_id`] = (await up(st[k], `Guide - ${s.name} ${stamp} ${end} - ${k}.png`, "image/png")).id;
+      if (both) {
+        for (const [end, st] of [["start", rec.first], ["end", rec.last]]) {
+          meta[`${end}_view_id`] = (await up(st.view, `Guide - ${s.name} ${stamp} ${end} - view.jpg`, "image/jpeg")).id;
+          for (const k of ["lines", "depth", "materials"]) meta[`${end}_${k}_id`] = (await up(st[k], `Guide - ${s.name} ${stamp} ${end} - ${k}.png`, "image/png")).id;
+        }
+      } else {
+        meta.clay_file_id = (await up(rec.first.clay, `Guide - ${s.name} ${stamp} - clay.jpg`, "image/jpeg")).id;
+        meta.lines_file_id = (await up(rec.first.lines, `Guide - ${s.name} ${stamp} - lines.png`, "image/png")).id;
       }
       await whenFree(() => sendShot(current.id, rec.blob, meta, f => say(at + part * (0.7 + 0.3 * f), `${label}: sending… ${Math.round(f * 100)}%`)),
         text => say(at + part * 0.7, `${label}: ${text}`), ctl.signal);

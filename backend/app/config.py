@@ -57,6 +57,8 @@ class Settings:
     # Google Gemini API (direct): Nano Banana images, used for animation line drawings
     gemini_api_key: str | None = field(default=None, repr=False)
     fal_key: str | None = field(default=None, repr=False)          # Ollic VS (fal.ai): images and video
+    byteplus_api_key: str | None = field(default=None, repr=False)  # Ollic Cinema (BytePlus ModelArk, Seedance 2.5)
+    seedance_model: str = "dreamina-seedance-2-5-260628"
     runway_api_key: str | None = field(default=None, repr=False)   # Ollic Path (Runway): AI walkthroughs from the model
     gemini_image_model: str = "gemini-nano-banana-2.1"
 
@@ -136,6 +138,8 @@ class Settings:
             aps_client_secret=os.environ.get("APS_CLIENT_SECRET", "").strip(),
             gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip() or None,
             fal_key=os.environ.get("FAL_KEY", "").strip() or None,
+            byteplus_api_key=(os.environ.get("BYTEPLUS_API_KEY", "") or os.environ.get("ARK_API_KEY", "")).strip() or None,
+            seedance_model=os.environ.get("SEEDANCE_MODEL", "").strip() or "dreamina-seedance-2-5-260628",
             runway_api_key=os.environ.get("RUNWAY_API_KEY", "").strip() or None,
             gemini_image_model=os.environ.get("GEMINI_IMAGE_MODEL", "").strip() or "gemini-nano-banana-2.1",
         )

@@ -3,6 +3,7 @@ official SDK types), the geometry check, Claude's shot plan, and the shot job en
 
 from __future__ import annotations
 
+from decimal import Decimal
 import base64
 import json
 import shutil
@@ -123,10 +124,10 @@ class FakeRunway:
 
 @pytest.fixture
 def film_app(render_settings, repo, storage):
-    def make(runway="fake", writer=None, exact=None):
+    def make(runway="fake", writer=None, exact=None, cinema=None):
         app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=FakeImages(), runner=InlineRunner(),
                          runway=FakeRunway() if runway == "fake" else runway, prompt_writer=writer, kling=None, gemini=None,
-                         fal={"film_exact": exact} if exact else {})
+                         fal={**({"film_exact": exact} if exact else {}), **({"film_seedance": cinema} if cinema else {})})
         app.state.clip_poll_seconds = 0
         return TestClient(app), app
     return make
@@ -448,3 +449,59 @@ def test_a_construction_stage_is_described_to_every_prompt(film_app, alice, repo
     assert repo.jobs[r.json()["id"]]["status"] == "succeeded", repo.jobs[r.json()["id"]]["error"]
     (call,) = video.calls
     assert "excavation and foundations" in call["prompt"]
+
+
+
+class FakeSeedance(FakeRunway):
+    provider = "byteplus"
+    model = "dreamina-seedance-2-5-260628"
+    last_usage = {"total_tokens": 300000}
+
+    def film(self, **kw):
+        self.calls.append(kw)
+        return "cgt-123"
+
+
+@needs_ffmpeg
+def test_ollic_cinema_films_with_the_model_move_as_reference_and_the_renders_as_the_look(film_app, alice, repo, storage):
+    cinema, checker = FakeSeedance(), FilmChecker()
+    c, app = film_app(runway=None, writer=checker, cinema=cinema)
+    repo.roles[alice["id"]] = "admin"
+    assert c.get("/api/film/engines").json()["seedance"] == {"name": "Ollic Cinema", "blurb": c.get("/api/film/engines").json()["seedance"]["blurb"],
+                                                             "price": "about $0.30 a second, plus two renders", "available": True}
+    assert c.get("/api/film/engines").json()["exact"]["available"] is False
+    pid = new_project(c, alice)
+    meta = {"name": "Around", "kind": "arc", "engine": "seedance", "format": "16:9", "frame_prompt": "photoreal villa", "stage": "the frame rising"} | exact_views(c, alice, pid)
+    r = c.post(f"/api/projects/{pid}/films", files={"file": ("guide.mp4", mp4(6, "1280x720"), "video/mp4")}, data={"meta": json.dumps(meta)}, headers=alice["headers"])
+    assert r.status_code == 202, r.text
+    job = repo.jobs[r.json()["id"]]
+    assert job["status"] == "succeeded", job["error"]
+    (call,) = cinema.calls
+    assert call["guide_url"].startswith("http") and len(call["references"]) == 2 and all(x[:2] == b"\xff\xd8" for x in call["references"])
+    assert "@Video1" in call["prompt"] and "the frame rising" in call["prompt"] and call["seconds"] == 6
+    v = repo.videos[job["result"]["video_id"]]
+    assert v["script"]["engine"] == "seedance"
+    (use,) = [u for u in repo.usage if u.get("provider") == "byteplus"]
+    assert use["cost_usd"] == "2.10" and use["operation"] == "video_to_video"      # 300,000 tokens at $7 a million
+
+
+def test_the_byteplus_client_sends_the_reference_video_and_images():
+    import httpx
+    from app.byteplus import SeedanceVideo, estimate_cost
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        if req.method == "POST":
+            return httpx.Response(200, json={"id": "cgt-9"})
+        return httpx.Response(200, json={"id": "cgt-9", "status": "succeeded", "content": {"video_url": "https://x/v.mp4"}, "usage": {"total_tokens": 1000}})
+    v = SeedanceVideo("key", transport=httpx.MockTransport(handler))
+    assert v.film(guide_url="https://s/guide.mp4", references=[b"\xff\xd8a", b"\xff\xd8b"], prompt="go", aspect="9:16", seconds=6.4) == "cgt-9"
+    body = json.loads(seen[0].content)
+    assert seen[0].headers["authorization"] == "Bearer key" and seen[0].url.path.endswith("/contents/generations/tasks")
+    assert body["model"] == "dreamina-seedance-2-5-260628" and body["ratio"] == "9:16" and body["duration"] == 6 and body["generate_audio"] is False
+    roles = [x.get("role") for x in body["content"]]
+    assert roles == [None, "reference_video", "reference_image", "reference_image"]
+    st = v.status("cgt-9")
+    assert st.status == "succeeded" and st.video_url == "https://x/v.mp4" and v.last_usage["total_tokens"] == 1000
+    assert estimate_cost(5) == Decimal("1.51")      # 1280x720x24/1024 tokens a second, out and in, $7 a million

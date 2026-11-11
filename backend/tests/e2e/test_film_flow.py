@@ -84,7 +84,10 @@ def test_a_walkthrough_shot_is_planned_recorded_and_filmed(stack, tmp_path):
         page.wait_for_selector("#viewerWrap:not([hidden]) canvas", timeout=60000)
         page.wait_for_selector("#filmSection:not([hidden])")
         assert page.is_visible("#addShotView") and not page.is_visible("#useView")
-        assert page.input_value("#filmEngine") == "exact" and "Ollic Path Exact" in page.inner_text("#filmEngine") and "Runway" not in page.content()
+        # the best connected option comes first (Cinema, then Path, Path Plus, Exact); provider names never show
+        assert page.input_value("#filmEngine") == "path" and "Ollic Cinema (not connected yet)" in page.inner_text("#filmEngine")
+        assert "Runway" not in page.content() and "BytePlus" not in page.content() and "Seedance" not in page.content()
+        page.select_option("#filmEngine", "exact")
 
         # 1. the plan (no Claude key here, so the ready-made three shots), then keep one short shot
         page.fill("#filmDesc", "white render, bronze glazing, palm trees")
@@ -252,8 +255,10 @@ def test_cinematic_two_gold_lines_then_the_building(stack, tmp_path):
         page.wait_for_function("!document.querySelector('#cineGo').disabled", timeout=60000)
         assert "Lite construction" in page.inner_text("#cineTitle") and page.inner_text("#filmTitle") == "Lite construction"
         # only the cinematic on the page: the walkthrough's planning, shots and film button step aside
-        assert not page.is_visible("#planFullBtn") and not page.is_visible("#filmGo") and not page.is_visible("#addShot") and not page.is_visible("#filmEngine")
+        assert not page.is_visible("#planFullBtn") and not page.is_visible("#filmGo") and not page.is_visible("#addShot")
         assert page.is_visible("#rScene") and page.is_visible("#filmDesc")
+        assert page.is_visible("#filmEngine")          # the video option stays: Ollic Path Exact, Cinema, Path or Path Plus
+        page.select_option("#filmEngine", "exact")
         calls_before = len(stack["depth"].calls)
         page.click("#cineGo")
         page.wait_for_function("document.querySelector('#filmProgText')?.textContent.includes('All 3 parts sent')", timeout=600000)
@@ -277,3 +282,37 @@ def test_cinematic_two_gold_lines_then_the_building(stack, tmp_path):
     if _os.environ.get("OLLIC_DUMP"):
         for v in parts[:1] + [film]:
             open(f"{_os.environ['OLLIC_DUMP']}/{'gold' if v is parts[0] else 'film'}.mp4", "wb").write(stack["storage"].buckets["videos"][v["storage_path"]][0])
+
+
+def test_cinematic_one_on_ollic_path(stack, tmp_path):
+    """The fly-around can be filmed on another video option: each part sends the model's clay move and first frame."""
+    ifc = tmp_path / "villa1.ifc"; ifc.write_bytes(build_ifc(sample_house(), seed="cine1"))
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(args=GL_ARGS)
+        page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+        page.route("**/fonts.googleapis.com/**", lambda r: r.abort()); page.route("**/fonts.gstatic.com/**", lambda r: r.abort())
+        errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(stack["url"] + "/app.html#sign-up")
+        page.fill("#upName", "Ada"); page.fill("#upEmail", "ada@cine1.test"); page.fill("#upPassword", "correct-horse-1")
+        page.click("#signUpForm button[type=submit]"); page.wait_for_selector("#projectsView:not([hidden])")
+        page.fill("#newProjectName", "Cine 1"); page.click("#newProjectForm button[type=submit]")
+        page.click(".svc-card:has-text('AI walkthrough')"); page.wait_for_selector("#svcStart:not([hidden])")
+        pid = page.evaluate("new URLSearchParams(location.search).get('project')")
+        page.evaluate("""pid => sessionStorage.setItem('ollic-cine', JSON.stringify({ opt: 1, hero: null, heroName: 'x', project: pid, format: '16:9', title: 'Cine 1', look: '' }))""", pid)
+        page.reload(); page.wait_for_selector("#svcStart:not([hidden])")
+        page.set_input_files("#fileInput", str(ifc))
+        page.wait_for_function("!document.querySelector('#cineGo').disabled", timeout=60000)
+        assert page.input_value("#filmEngine") == "path" and "Ollic Path: about $" in page.inner_text("#cineEst")
+        runway_before = len(stack["runway"].calls)
+        page.click("#cineGo")
+        page.wait_for_function("document.querySelector('#filmProgText')?.textContent.includes('All 4 parts sent')", timeout=900000)
+        assert errors == [], errors
+        browser.close()
+    assert len(stack["runway"].calls) - runway_before == 4
+    repo = stack["repo"]
+    for _ in range(300):      # the four shots finish in the background; on a busy machine this takes a while
+        joins = [j for j in repo.jobs.values() if j["type"] == "video_export" and j["input"].get("title") == "Cine 1"]
+        if joins and joins[0]["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(1)
+    assert joins and joins[0]["status"] == "succeeded", [(j["type"], j["status"], j.get("error")) for j in repo.jobs.values()][-6:]

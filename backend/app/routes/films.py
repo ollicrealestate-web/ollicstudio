@@ -47,10 +47,13 @@ def _to_h264(src) -> bytes:
         return out.read_bytes()
 
 
+ENGINE_STATE = {"exact": "film_exact", "seedance": "film_seedance", "path": "runway", "path_plus": "runway"}
+
+
 class ShotMeta(BaseModel):
     name: str = Field(default="Shot", max_length=80)
     kind: Literal["push", "orbit", "approach", "aerial", "rise", "sidepass", "topdown", "entry", "interior", "arc", "construct", "custom"] = "custom"
-    engine: Literal["exact", "path", "path_plus"] = "exact"
+    engine: Literal["exact", "seedance", "path", "path_plus"] = "exact"
     tier: Literal["standard", "premium", "swift", "ultra", "vs"] = "standard"   # the picture option for the first (and last) frame
     format: Literal["16:9", "9:16", "1:1"] = "16:9"
     description: str = Field(default="", max_length=1500)
@@ -99,8 +102,8 @@ async def make_shot(project_id: uuid.UUID, request: Request, response: Response,
         m = ShotMeta.model_validate(json.loads(meta))
     except (ValueError, ValidationError) as exc:
         raise HTTPException(422, {"code": "bad_settings", "reason": "The shot settings were not valid. Reload the page and try again."}) from exc
-    exact = m.engine == "exact"
-    if getattr(request.app.state, "film_exact" if exact else "runway", None) is None:
+    exact = m.engine in ("exact", "seedance")     # both: renders at both ends of the move, from the model's views
+    if getattr(request.app.state, ENGINE_STATE[m.engine], None) is None:
         raise HTTPException(503, {"code": "not_configured", "reason": f"{FILM_ENGINES[m.engine]['name']} is not connected yet."})
     needed = ([m.start_view_id, m.start_lines_id, m.start_depth_id, m.end_view_id, m.end_lines_id, m.end_depth_id] if exact
               else [m.clay_file_id, m.lines_file_id])
@@ -161,12 +164,17 @@ async def make_shot(project_id: uuid.UUID, request: Request, response: Response,
     finally:
         tmp.unlink(missing_ok=True)
     seconds = round(info.duration_s, 2)
-    if exact:
+    if m.engine == "seedance":
+        from ..byteplus import estimate_cost as seedance_cost
+        est = seedance_cost(seconds, w, h)
+    elif exact:
         from ..fal import depth_video_cost
         est = depth_video_cost(seconds)
     else:
         est = runway_cost(ENGINE_MODEL[m.engine], seconds)
     # "tier" counts the job among the day's videos; the first frame uses the picture option "frame_tier"
+    if m.stage:      # a construction shot: what is being built, in every prompt of the shot
+        m.description = (m.description + "\nCONSTRUCTION STAGE (show it as a real building site at this stage): " + m.stage).strip()
     job_input = m.model_dump(mode="json", exclude={"tier"}) | {"guide_path": guide_path, "seconds": seconds, "width": w, "height": h, "aspect": ASPECT[m.format],
                                                                "tier": "film", "frame_tier": m.tier, "estimate_usd": str(est)}
     try:
@@ -281,7 +289,7 @@ def plan_film(project_id: uuid.UUID, body: PlanIn, request: Request, user: Curre
 @router.get("/film/engines")
 def film_engines(request: Request):
     st = request.app.state
-    on = lambda k: getattr(st, "film_exact" if k == "exact" else "runway", None) is not None  # noqa: E731
+    on = lambda k: getattr(st, ENGINE_STATE[k], None) is not None  # noqa: E731
     return {k: {**{x: v[x] for x in ("name", "blurb", "price")}, "available": on(k)} for k, v in FILM_ENGINES.items()} | {
         "_pictures": {k: v["name"] for k, v in IMAGE_ENGINES.items()}}
 

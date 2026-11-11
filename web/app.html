@@ -189,7 +189,7 @@
       <div class="card film-card">
         <div class="tier-slot" id="tierSlotFilm"></div>
         <div class="film-grid">
-          <label class="field walk-only">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
+          <label class="field">Video option <select id="filmEngine" class="clip-engine"></select><span class="hint" id="filmEngineNote"></span></label>
           <label class="field">Format <select id="filmFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
         </div>
         <div class="scene-slot" id="sceneSlotFilm"></div>
@@ -199,7 +199,7 @@
         <div class="cine-panel" id="cinePanel" hidden>
           <div class="rbox-head"><b id="cineTitle">Cinematic video</b> <span class="hint" id="cineLook"></span></div>
           <p class="hint" id="cineSteps"></p>
-          <div class="render-go"><button type="button" class="btn primary big" id="cineGo">Make the cinematic video</button><button type="button" class="btn" id="cineDrop">Cancel</button>
+          <div class="render-go"><button type="button" class="btn primary big" id="cineGo" disabled>Make the cinematic video</button><button type="button" class="btn" id="cineDrop">Cancel</button>
             <span class="hint" id="cineEst"></span></div>
         </div>
         <label class="check walk-only"><input type="checkbox" id="filmLife"> Add life: people walking and cars passing</label>

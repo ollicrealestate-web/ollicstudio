@@ -142,7 +142,9 @@ def run_film_job(state, user: CurrentUser, job_id: str) -> None:
         rjob = repo.create_job(user, {"project_id": pid, "type": "concept_render", "status": "queued", "stage": "Waiting to start", "idempotency_key": None,
                                       "input": {"prompt": fprompt[:6000], "prompt_ready": True, "references": [{"file_id": inp["clay_file_id"], "role": "model"}],
                                                 "guide_file_id": inp.get("lines_file_id"), "tier": inp.get("frame_tier") or "standard", "aspect": inp["aspect"],
-                                                "quality": "high", "view": "exterior", "time_of_day": "midday", "film_shot": inp.get("name") or "Shot"}})
+                                                "quality": "high", "view": "interior" if inp.get("kind") == "interior" else "exterior", "time_of_day": "midday",
+                                                "film_shot": inp.get("name") or "Shot",
+                                                **({"hero_render_id": inp["hero_render_id"]} if inp.get("hero_render_id") and inp.get("hero_at") else {})}})
         run_render_job(state, user, rjob["id"])
         r = repo.get_job(user, rjob["id"]) or {}
         if r.get("status") != "succeeded":
@@ -280,6 +282,23 @@ def film_check(writer, start_view: bytes, end_view: bytes, frames: list[Image.Im
     return {"ok": bool(a.get("ok")), "issues": [str(x)[:200] for x in (a.get("issues") or [])][:8], "cost_usd": out.get("cost_usd"), "usage": out.get("usage")}
 
 
+CINEMA_RULES = ("Use @Video1 as the authority for all camera movement, framing, timing and the building's exact shape, floors, openings and layout; "
+                "do not add, remove or move any part of the building. Make it a photoreal architectural film in the look of @Image1 (the first frame) "
+                "and @Image2 (the last frame): same materials, colours, light, sky and setting from start to end, no cuts, no new objects on the building. ")
+
+
+def cinema_prompt(motion: str) -> str:
+    return CINEMA_RULES + motion
+
+
+def _owner_text(repo, user, detail: str) -> str:
+    from .renders import _owner_note
+
+    class _E:
+        owner_detail = detail
+    return _owner_note(repo, user, _E())
+
+
 def _seq(inp: dict) -> dict:
     return {"id": inp["seq_id"], "index": int(inp.get("seq_index") or 0), "count": int(inp.get("seq_count") or 0), "title": inp.get("seq_title") or ""}
 
@@ -324,9 +343,10 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
             return
         inp, pid = job["input"], job["project_id"]
         guide_path = inp["guide_path"]
-        video = getattr(state, "film_exact", None)
+        cinema = inp.get("engine") == "seedance"
+        video = getattr(state, "film_seedance" if cinema else "film_exact", None)
         if video is None:
-            return fail("Ollic Path Exact is not connected yet.")
+            return fail(("Ollic Cinema" if cinema else "Ollic Path Exact") + " is not connected yet.")
         repo.update_job(user, job_id, {"status": "running", "stage": "Rendering the first frame from your model", "started_at": now_iso(),
                                        "attempts": int(job.get("attempts") or 0) + 1, "worker": WORKER_NAME})
         writer = getattr(state, "prompt_writer", None)
@@ -335,8 +355,6 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
             inp = {**inp, "description": with_scene(inp.get("description") or "", repo.get_project(user, pid))}   # the project's scene, in every prompt
         except BackendUnavailable:
             pass
-        if inp.get("stage"):    # a construction shot: what is being built
-            inp = {**inp, "description": (inp.get("description") or "") + "\nCONSTRUCTION STAGE (show it as a real building site at this stage): " + inp["stage"]}
         views = {}
         for end in ("start", "end"):
             f = repo.get_source_file(user, inp[f"{end}_view_id"])
@@ -388,8 +406,12 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
             return fail("The guide video could not be read. Record the shot again.")
         mprompt = (inp.get("motion_prompt") or motion_prompt(inp.get("description") or "", bool(inp.get("life")))) + " " + SAME_SCENE
         repo.update_job(user, job_id, {"stage": "Filming the shot on your model", "result": {"first_frame": start["id"], "last_frame": last["id"]}})
-        task = video.film(depth_video_url=url, first_frame=jpeg(cover(first_img, inp["width"], inp["height"])),
-                          last_frame=jpeg(cover(last_img, inp["width"], inp["height"])), prompt=mprompt, aspect=inp["format"])
+        if cinema:
+            refs = [jpeg(cover(first_img, inp["width"], inp["height"])), jpeg(cover(last_img, inp["width"], inp["height"]))]
+            task = video.film(guide_url=url, references=refs, prompt=cinema_prompt(mprompt), aspect=inp["format"], seconds=inp["seconds"])
+        else:
+            task = video.film(depth_video_url=url, first_frame=jpeg(cover(first_img, inp["width"], inp["height"])),
+                              last_frame=jpeg(cover(last_img, inp["width"], inp["height"])), prompt=mprompt, aspect=inp["format"])
         started, st, misses = time.monotonic(), None, 0
         while True:
             if repo.get_job(user, job_id).get("status") == "cancelled":
@@ -408,14 +430,22 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
             repo.update_job(user, job_id, {"stage": f"Filming the shot on your model ({waited // 60} min {waited % 60:02d} s so far)"})
             time.sleep(poll)
         if st.status == "failed":
-            log.warning("OWNER: depth video %s failed: %s", task, st.message)
-            return fail("The video service could not film this camera move. Try a shorter or slower move.")
+            log.warning("OWNER: %s video %s failed: %s", inp.get("engine"), task, st.message)
+            return fail("The video service could not film this camera move. Try a shorter or slower move."
+                        + _owner_text(repo, user, f"{'BytePlus' if cinema else 'fal'} task {task}: {st.message}"))
         repo.update_job(user, job_id, {"stage": "Checking the shot against your model"})
         data = video.download(st.video_url)
-        cost = depth_video_cost(inp["seconds"])
+        if cinema:
+            from .byteplus import PRICE_SOURCE as SEED_SOURCE, estimate_cost as seed_estimate, token_cost
+            tokens = int((getattr(video, "last_usage", None) or {}).get("total_tokens") or 0)
+            cost = token_cost(tokens) if tokens else seed_estimate(inp["seconds"], inp["width"], inp["height"])
+            usage = {"provider": "byteplus", "model": getattr(video, "model", "seedance"), "price_source": SEED_SOURCE + ("" if tokens else "; estimated from the length"),
+                     "raw_usage": {"seconds": inp["seconds"], "tokens": tokens, "task": task}}
+        else:
+            cost = depth_video_cost(inp["seconds"])
+            usage = {"provider": "fal", "model": DEPTH_VIDEO_MODEL, "price_source": DEPTH_VIDEO_SOURCE, "raw_usage": {"seconds": inp["seconds"]}}
         try:
-            repo.create_usage_event(user, {"project_id": pid, "job_id": job_id, "provider": "fal", "model": DEPTH_VIDEO_MODEL, "operation": "video_to_video",
-                                           "cost_usd": str(cost), "price_source": DEPTH_VIDEO_SOURCE, "raw_usage": {"seconds": inp["seconds"]}})
+            repo.create_usage_event(user, {"project_id": pid, "job_id": job_id, "operation": "video_to_video", "cost_usd": str(cost), **usage})
         except BackendUnavailable:
             log.exception("could not record film cost for job %s", job_id)
 
@@ -451,7 +481,7 @@ def run_exact_film_job(state, user: CurrentUser, job_id: str) -> None:
                                      "format": inp["format"], "width": info.width, "height": info.height, "fps": round(info.fps) or 24,
                                      "duration_s": round(info.duration_s, 2), "kind": "film",
                                      "items": [{"render_id": start["id"], "caption": "first frame"}, {"render_id": last["id"], "caption": "last frame"}],
-                                     "script": {"engine": "exact", "shot": inp.get("kind"), "seconds": inp["seconds"], "check": check, "life": bool(inp.get("life")),
+                                     "script": {"engine": inp.get("engine") or "exact", "shot": inp.get("kind"), "seconds": inp["seconds"], "check": check, "life": bool(inp.get("life")),
                                                 **({"seq": _seq(inp)} if inp.get("seq_id") else {})},
                                      "label": "AI video — not to scale"})
         except BackendUnavailable:
