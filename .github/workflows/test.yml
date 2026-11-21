@@ -1,0 +1,94 @@
+name: Ollic Sketch tests
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  revit-helper:
+    name: Compile Revit helper (Revit ${{ matrix.revit }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        revit: [2024, 2025, 2026, 2027]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build exactly as setup.ps1 does
+        shell: pwsh
+        run: |
+          $src = "$env:RUNNER_TEMP\src-${{ matrix.revit }}"
+          Copy-Item revit-helper $src -Recurse
+          dotnet build "$src\OllicSketch.Revit.csproj" -c Release "-p:RevitVersion=${{ matrix.revit }}" -o "$env:RUNNER_TEMP\out" 2>&1 | Tee-Object build.log
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem "$env:RUNNER_TEMP\out" | Format-Table Name, Length
+          if (-not (Test-Path "$env:RUNNER_TEMP\out\OllicSketch.Revit.dll")) { throw "dll missing" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: revit-${{ matrix.revit }}-build-log
+          path: build.log
+
+  setup-script:
+    name: Installer scripts parse on Windows PowerShell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse with Windows PowerShell 5.1 (what users run)
+        shell: powershell
+        run: |
+          foreach ($f in 'setup.ps1','uninstall.ps1') {
+            $t=$null;$e=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$e) | Out-Null
+            if ($e.Count) { $e | ForEach-Object { Write-Host "$f line $($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
+            Write-Host "$f parses"
+          }
+
+  hub:
+    name: Claude extension (hub) talks to Revit and Blender
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node tests/hub_test.mjs
+
+  blender:
+    name: Blender ${{ matrix.blender }} connector, renders and buyer tour
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        blender: ["4.2", "4.5", "5.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender and a software OpenGL driver
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libgl1-mesa-dri libegl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 > /dev/null
+          MAJ=${{ matrix.blender }}
+          F=$(curl -fsSL "https://download.blender.org/release/Blender$MAJ/" | grep -oE "blender-$MAJ\.[0-9]+-linux-x64\.tar\.xz" | sort -V | tail -1)
+          echo "Using $F"
+          curl -fsSL "https://download.blender.org/release/Blender$MAJ/$F" -o b.tar.xz
+          mkdir blender && tar xf b.tar.xz -C blender --strip-components=1
+      - name: Run the connector end to end (build, light, camera path, videos, still, tour)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a -s "-screen 0 1280x720x24" ./blender/blender -b --factory-startup --python tests/blender_ci.py -- out
+      - name: Open the buyer tour in a real browser
+        if: always()
+        run: |
+          npm i -s playwright@1.48.2 && npx playwright install --with-deps chromium > /dev/null
+          node tests/tour_check.mjs out/tour.html out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blender-${{ matrix.blender }}-outputs
+          path: |
+            out/*.png
+            out/*.html
+            out/*.json
+            out/walkthrough/*.mp4
+            out/construction/*.mp4

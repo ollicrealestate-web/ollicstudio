@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<title>__OLLIC_TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&display=swap">
+<style>
+/* One deliberate look: a dark glass control layer over the 3D home. */
+:root{--ink:#f4f2ee;--muted:#b9b4ab;--glass:rgba(18,20,22,.62);--line:rgba(255,255,255,.14);--accent:#e3b26a;--font:"Archivo","Helvetica Neue",Arial,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0e1012;color:var(--ink);font-family:var(--font);overflow:hidden;-webkit-user-select:none;user-select:none}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.bar{position:fixed;left:0;right:0;display:flex;gap:10px;align-items:center;padding:12px max(14px,env(safe-area-inset-left)) 12px max(14px,env(safe-area-inset-right));pointer-events:none}
+.top{top:env(safe-area-inset-top,0)}
+.bottom{bottom:env(safe-area-inset-bottom,0);flex-wrap:wrap;justify-content:center}
+.bar>*{pointer-events:auto}
+.title{background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:12px;padding:9px 14px;max-width:min(560px,70vw)}
+.title b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.brand{margin-left:auto;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);background:var(--glass);border:1px solid var(--line);border-radius:999px;padding:6px 10px}
+button{font:inherit;font-size:14px;color:var(--ink);background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:999px;padding:10px 16px;cursor:pointer}
+button.on{background:var(--accent);border-color:var(--accent);color:#1b1408;font-weight:600}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.time{display:flex;align-items:center;gap:10px;background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:999px;padding:8px 14px}
+.time label{font-size:13px;color:var(--muted)}
+.time output{font-variant-numeric:tabular-nums;font-size:13px;min-width:62px}
+input[type=range]{accent-color:var(--accent);width:min(220px,38vw)}
+#card{position:fixed;left:50%;top:18%;transform:translate(-50%,8px);opacity:0;transition:opacity .5s,transform .5s;background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:16px;padding:16px 20px;min-width:240px;max-width:min(420px,88vw);text-align:center;pointer-events:none}
+#card.show{opacity:1;transform:translate(-50%,0)}
+#card .n{font-size:22px;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+#card .a{font-size:13px;color:var(--accent);margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+#card .s{font-size:14px;color:var(--ink);margin-top:8px;line-height:1.45}
+#hint{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);font-size:12px;color:var(--muted);background:var(--glass);border:1px solid var(--line);border-radius:999px;padding:6px 12px;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis;transition:opacity .4s}
+#joy{position:fixed;left:calc(18px + env(safe-area-inset-left,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px));width:110px;height:110px;border-radius:50%;border:1px solid var(--line);background:rgba(18,20,22,.35);display:none;touch-action:none}
+#joy i{position:absolute;left:35px;top:35px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.35)}
+#load{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:#0e1012;z-index:5;text-align:center;padding:24px}
+#load b{font-size:20px}
+#load span{color:var(--muted);font-size:13px}
+@media (max-width:640px){.brand{display:none}button{padding:9px 13px;font-size:13px}#card .n{font-size:19px}}
+@media (prefers-reduced-motion:reduce){#card,#hint{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="3D model of the home"></canvas>
+<div class="bar top">
+  <div class="title"><b id="ttl">__OLLIC_TITLE__</b><span id="sub"></span></div>
+  <div class="brand">Ollic Sketch</div>
+</div>
+<div id="card" role="status" aria-live="polite"><div class="n"></div><div class="a"></div><div class="s"></div></div>
+<div id="hint"></div>
+<div id="joy" aria-hidden="true"><i></i></div>
+<div class="bar bottom">
+  <button id="tourBtn" class="on">Start tour</button>
+  <button id="walkBtn">Walk</button>
+  <button id="dollBtn">Dollhouse</button>
+  <div class="time"><label for="hour">Light</label><input id="hour" type="range" min="6" max="22" step="0.25" value="15"><output id="hourOut">3:00 pm</output></div>
+  <button id="muteBtn" aria-pressed="false">Music on</button>
+</div>
+<div id="load"><b>Loading the home…</b><span id="loadMsg">Preparing the 3D model</span></div>
+
+<script type="application/octet-stream" id="glb">__OLLIC_GLB__</script>
+<script>window.OLLIC = /*__OLLIC_DATA__*/null;</script>
+<script>
+// Loads Three.js from cdnjs, falling back to jsDelivr or unpkg if one is unreachable.
+function loadScript(urls){return new Promise((res,rej)=>{const tryAt=i=>{if(i>=urls.length)return rej(new Error('load'));const s=document.createElement('script');s.src=urls[i];s.onload=res;s.onerror=()=>{s.remove();tryAt(i+1)};document.head.appendChild(s)};tryAt(0)})}
+(async()=>{
+  try{
+    await loadScript(['https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js','https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js']);
+    await loadScript(['https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js','https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js']);
+  }catch(e){document.getElementById('loadMsg').textContent='The 3D engine could not load. Check the internet connection and reopen this page.';return}
+  start();
+})();
+
+function start(){
+const D=window.OLLIC||{rooms:[],path:null,bounds:null,hide_in_dollhouse:[],hour:15,title:'3D home tour'};
+const $=id=>document.getElementById(id);
+$('sub').textContent=D.subtitle||(D.rooms.length?`${D.rooms.length} rooms · tap Start tour`:'');
+const canvas=$('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+renderer.outputEncoding=THREE.sRGBEncoding;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.0;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(70,1,0.05,800);
+scene.add(camera);
+// Plan metres (x east, y north, z up) to Three.js (x, y up, z south): (x, z, -y)
+const W=(x,y,z)=>new THREE.Vector3(x,z,-y);
+const B=D.bounds||{x0:-5,y0:-5,z0:0,x1:5,y1:5,z1:4};
+const C=W((B.x0+B.x1)/2,(B.y0+B.y1)/2,(B.z0+B.z1)/2);
+const span=Math.max(B.x1-B.x0,B.y1-B.y0,6);
+
+// ---------- lights
+const hemi=new THREE.HemisphereLight(0xdfe9ff,0x5b5246,0.6);scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xffffff,2.2);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);const sc=sun.shadow.camera;sc.left=-span;sc.right=span;sc.top=span;sc.bottom=-span;sc.near=1;sc.far=span*6;sun.shadow.bias=-0.0004;sun.shadow.normalBias=0.03;
+scene.add(sun);scene.add(sun.target);sun.target.position.copy(C);
+const roomLights=D.rooms.slice(0,10).map(r=>{const l=new THREE.PointLight(0xffd3a0,0,Math.max(6,Math.sqrt(r.area_m2||12)*2.5),2);l.position.copy(W(r.x,r.y,(r.z||0)+2.55));scene.add(l);return l});
+
+// ---------- model
+const hideNames=(D.hide_in_dollhouse||[]).map(s=>s.toLowerCase());
+const hideable=[],solids=[];
+function b64ToBuf(b){const s=atob(b.trim());const u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u.buffer}
+new THREE.GLTFLoader().parse(b64ToBuf($('glb').textContent),'',g=>{
+  g.scene.traverse(o=>{if(!o.isMesh)return;o.castShadow=true;o.receiveShadow=true;
+    const n=((o.name||'')+' '+((o.parent&&o.parent.name)||'')).toLowerCase();
+    if(hideNames.some(h=>n.includes(h)))hideable.push(o);
+    const isFloorish=/floor finish|rug|site|slab|ground/.test(n);
+    if(!isFloorish)solids.push(o);
+    const m=o.material;if(m&&m.transparent){m.depthWrite=false}});
+  scene.add(g.scene);$('load').remove();setHour(D.hour||15);setMode('doll');
+  hint(D.path?'Tap Start tour, or Walk to explore yourself.':'Drag to look around. Use Walk to move inside.');
+},err=>{$('loadMsg').textContent='This tour file is damaged. Ask for a new copy.'});
+
+// ---------- time of day
+const night=new THREE.Color(0x0b1022),day=new THREE.Color(0x9fc3e6),dusk=new THREE.Color(0xe6a26a);
+function setHour(h){
+  h=+h;$('hour').value=h;
+  const hr=Math.floor(h),mi=Math.round((h-hr)*60),ap=hr>=12?'pm':'am';$('hourOut').textContent=`${((hr+11)%12)+1}:${String(mi).padStart(2,'0')} ${ap}`;
+  const t=(h-6)/12.8,isDay=h>=6&&h<=18.8,el=isDay?Math.max(0,Math.sin(Math.PI*t))*Math.PI/2*0.93:-0.1,az=Math.PI*(0.5+t);
+  const low=isDay?Math.max(0,1-el/(25*Math.PI/180)):1;
+  const dir=new THREE.Vector3(Math.sin(az)*Math.cos(el),Math.sin(Math.max(el,0.02)),-Math.cos(az)*Math.cos(el));
+  sun.position.copy(C).addScaledVector(dir,span*3);
+  sun.intensity=isDay?(0.6+2.2*(1-low)):0;
+  sun.color.setRGB(1,1-0.35*low,1-0.65*low);
+  const sky=isDay?day.clone().lerp(dusk,low*0.85):night.clone();
+  scene.background=sky;scene.fog=new THREE.Fog(sky,span*4,span*14);
+  hemi.intensity=isDay?0.25+0.45*(1-low):0.08;
+  const lamps=h>=17.5||h<6.5?Math.min(1,(h-17.5)/1.5+0.4):0;
+  roomLights.forEach(l=>l.intensity=Math.max(0,lamps)*1.6);
+  renderer.toneMappingExposure=isDay?1.0:1.25;
+}
+$('hour').addEventListener('input',e=>setHour(e.target.value));
+
+// ---------- modes
+let mode='doll',yaw=0,pitch=0;const eye=(D.path&&D.path.eye)||1.5,floorZ=(D.path&&D.path.z0)||0;
+const pos=new THREE.Vector3();
+const orbit={theta:-0.9,phi:0.9,r:span*1.5};
+function setMode(m){mode=m;
+  ['tourBtn','walkBtn','dollBtn'].forEach(id=>$(id).classList.toggle('on',(id==='tourBtn'&&m==='tour')||(id==='walkBtn'&&m==='walk')||(id==='dollBtn'&&m==='doll')));
+  hideable.forEach(o=>o.visible=m!=='doll');
+  $('joy').style.display=m==='walk'&&matchMedia('(pointer:coarse)').matches?'block':'none';
+  if(m==='walk'){if(!pos.lengthSq()){const s=D.path&&D.path.stops&&D.path.stops[0];if(s){pos.copy(W(s.x,s.y,floorZ+eye));const q=D.path.stops[1];if(q)yaw=Math.atan2(q.y-s.y,q.x-s.x)}else pos.copy(W((B.x0+B.x1)/2,(B.y0+B.y1)/2,floorZ+eye))}
+    hint(matchMedia('(pointer:coarse)').matches?'Use the circle to walk, drag to look around.':'W A S D or arrow keys to walk, drag to look around.')}
+  if(m==='doll')hint('Drag to turn the home, pinch or scroll to zoom.');
+}
+$('walkBtn').onclick=()=>{stopTour();setMode('walk')};
+$('dollBtn').onclick=()=>{stopTour();setMode('doll')};
+$('tourBtn').onclick=()=>{if(tour.active){stopTour();setMode('doll')}else startTour()};
+
+// ---------- guided tour
+const tour={active:false,i:0,d:0,hold:0,shown:-1,rising:0};
+const segs=[];let total=0;
+if(D.path&&D.path.stops&&D.path.stops.length>1){const st=D.path.stops;for(let i=0;i<st.length-1;i++){const L=Math.hypot(st[i+1].x-st[i].x,st[i+1].y-st[i].y);segs.push(L);total+=L}}
+function pathAt(d){const st=D.path.stops;let acc=0;for(let i=0;i<segs.length;i++){if(acc+segs[i]>=d||i===segs.length-1){const t=segs[i]?(d-acc)/segs[i]:0;return{x:st[i].x+(st[i+1].x-st[i].x)*t,y:st[i].y+(st[i+1].y-st[i].y)*t}}acc+=segs[i]}return{x:st[0].x,y:st[0].y}}
+function stopDist(k){let a=0;for(let i=0;i<k;i++)a+=segs[i];return a}
+function startTour(){if(!total){hint('This tour has no walking route yet.');return}
+  music.start();Object.assign(tour,{active:true,i:0,d:0,hold:0,shown:-1,rising:0});setMode('tour');
+  const p0=pathAt(0),p1=pathAt(1.2);yaw=Math.atan2(p1.y-p0.y,p1.x-p0.x);pitch=0;pos.copy(W(p0.x,p0.y,floorZ+eye));$('tourBtn').textContent='Stop tour';hint('Sit back. The tour walks you through every room.')}
+function stopTour(){tour.active=false;$('tourBtn').textContent='Start tour';showCard(null)}
+function roomFor(label){return D.rooms.find(r=>(r.name||'').toLowerCase()===(label||'').toLowerCase())}
+function showCard(stop){const c=$('card');if(!stop){c.classList.remove('show');return}
+  const r=roomFor(stop.label);c.querySelector('.n').textContent=stop.label;
+  c.querySelector('.a').textContent=r&&r.area_m2?(D.units==='ft2'?`${Math.round(r.area_m2*10.764)} sq ft`:`${r.area_m2} m²`):'';
+  c.querySelector('.s').textContent=(r&&r.selling_point)||'';c.classList.add('show')}
+const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+function dollPos(){return new THREE.Vector3(C.x+orbit.r*Math.sin(orbit.phi)*Math.cos(orbit.theta),C.y+orbit.r*Math.cos(orbit.phi),C.z+orbit.r*Math.sin(orbit.phi)*Math.sin(orbit.theta))}
+// Returns true while the camera is rising to the dollhouse at the end (it then places the camera itself).
+function stepTour(dt){
+  const st=D.path.stops;
+  if(tour.rising>0){tour.rising+=dt;const k=Math.min(1,tour.rising/3.5);
+    camera.position.lerpVectors(tour.from,dollPos(),ease(k));camera.lookAt(C);
+    if(k>=1){stopTour();setMode('doll')}return true}
+  if(tour.hold>0){tour.hold-=dt;yaw=tour.base+0.5*Math.sin((tour.holdT-tour.hold)/tour.holdT*Math.PI*2);if(tour.hold<=0)showCard(null);return false}
+  while(tour.i<st.length&&stopDist(tour.i)<=tour.d+1e-6){const s=st[tour.i];
+    if((s.hold||0)>0&&tour.shown!==tour.i){tour.shown=tour.i;tour.hold=s.hold;tour.holdT=s.hold;tour.base=yaw;if(s.label)showCard(s);tour.i++;return false}tour.i++}
+  if(tour.d>=total){tour.rising=0.0001;tour.from=camera.position.clone();showCard(null);return true}
+  let nextHold=-1;for(let k=tour.i;k<st.length;k++)if((st[k].hold||0)>0){nextHold=k;break}
+  const toHold=nextHold<0?99:stopDist(nextHold)-tour.d;
+  tour.d=Math.min(total,tour.d+dt*0.95*Math.max(0.35,Math.min(1,toHold/1.0)));
+  const p=pathAt(tour.d),q=pathAt(Math.min(total,tour.d+1.2));const target=Math.atan2(q.y-p.y,q.x-p.x);
+  const dy=((target-yaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;yaw+=dy*Math.min(1,dt*3);
+  pos.copy(W(p.x,p.y,floorZ+eye));return false}
+
+// ---------- input
+const keys={};addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true});addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+let drag=null,pinch=null;const joy={x:0,y:0,id:null};
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,id:e.pointerId};music.start()});
+canvas.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;
+  if(mode==='doll'){orbit.theta+=dx*0.006;orbit.phi=Math.max(0.15,Math.min(1.45,orbit.phi-dy*0.005))}
+  else{if(tour.active)return;yaw-=dx*0.004;pitch=Math.max(-1.2,Math.min(1.2,pitch-dy*0.004))}});
+canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('pointercancel',()=>drag=null);
+canvas.addEventListener('wheel',e=>{e.preventDefault();if(mode==='doll')orbit.r=Math.max(span*0.5,Math.min(span*4,orbit.r*(e.deltaY>0?1.1:0.9)))},{passive:false});
+canvas.addEventListener('touchmove',e=>{if(e.touches.length===2&&mode==='doll'){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);if(pinch)orbit.r=Math.max(span*0.5,Math.min(span*4,orbit.r*pinch/d));pinch=d;drag=null}},{passive:true});
+canvas.addEventListener('touchend',()=>pinch=null);
+const jb=$('joy'),jk=jb.querySelector('i');
+jb.addEventListener('pointerdown',e=>{joy.id=e.pointerId;jb.setPointerCapture(e.pointerId);moveJoy(e)});
+jb.addEventListener('pointermove',e=>{if(joy.id===e.pointerId)moveJoy(e)});
+jb.addEventListener('pointerup',()=>{joy.id=null;joy.x=joy.y=0;jk.style.left='35px';jk.style.top='35px'});
+function moveJoy(e){const r=jb.getBoundingClientRect();let x=(e.clientX-r.left-55)/45,y=(e.clientY-r.top-55)/45;const l=Math.hypot(x,y);if(l>1){x/=l;y/=l}joy.x=x;joy.y=y;jk.style.left=35+x*35+'px';jk.style.top=35+y*35+'px'}
+const ray=new THREE.Raycaster();
+function blocked(from,dir){ray.set(new THREE.Vector3(from.x,from.y-0.7,from.z),dir);ray.far=0.35;return ray.intersectObjects(solids,false).some(h=>h.object.visible)}
+function walk(dt){let f=0,s=0;if(keys.w||keys.arrowup)f+=1;if(keys.s||keys.arrowdown)f-=1;if(keys.a||keys.arrowleft)s-=1;if(keys.d||keys.arrowright)s+=1;f-=joy.y;s+=joy.x;
+  if(!f&&!s)return;const sp=1.6*dt,fx=Math.cos(yaw),fy=Math.sin(yaw);const mx=(fx*f+fy*s)*sp,my=(fy*f-fx*s)*sp;
+  if(mx&&!blocked(pos,new THREE.Vector3(Math.sign(mx),0,0)))pos.x+=mx;
+  if(my&&!blocked(pos,new THREE.Vector3(0,0,-Math.sign(my))))pos.z-=my}
+
+// ---------- music: a soft pad made in code, no sound files
+const music={ctx:null,gain:null,on:true,started:false,
+  start(){if(this.started||!this.on)return;try{const A=window.AudioContext||window.webkitAudioContext;this.ctx=new A()}catch(e){return}this.started=true;const c=this.ctx;
+    this.gain=c.createGain();this.gain.gain.value=0;const lp=c.createBiquadFilter();lp.type='lowpass';lp.frequency.value=900;this.gain.connect(lp);lp.connect(c.destination);
+    this.gain.gain.linearRampToValueAtTime(0.06,c.currentTime+3);
+    const chords=[[261.6,329.6,392,493.9],[220,261.6,329.6,392],[174.6,220,261.6,329.6],[196,246.9,293.7,392]];let k=0;
+    const play=()=>{const t=c.currentTime;chords[k%4].forEach((f,i)=>{const o=c.createOscillator(),g=c.createGain();o.type=i%2?'sine':'triangle';o.frequency.value=f/(i===0?2:1);
+      g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(0.25,t+1.5);g.gain.linearRampToValueAtTime(0,t+6.2);o.connect(g);g.connect(this.gain);o.start(t);o.stop(t+6.3)});k++};
+    play();this.timer=setInterval(play,5000)},
+  toggle(){this.on=!this.on;$('muteBtn').textContent=this.on?'Music on':'Music off';$('muteBtn').setAttribute('aria-pressed',String(!this.on));
+    if(this.gain)this.gain.gain.linearRampToValueAtTime(this.on?0.06:0,this.ctx.currentTime+0.4);else if(this.on)this.start()}};
+$('muteBtn').onclick=()=>music.toggle();
+
+let hintT;function hint(t){const h=$('hint');h.textContent=t;h.style.opacity=1;clearTimeout(hintT);hintT=setTimeout(()=>h.style.opacity=0,6000)}
+
+// ---------- loop
+function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.fov=w<h?80:70;camera.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+camera.rotation.order='YXZ';
+let last=performance.now();
+renderer.setAnimationLoop(now=>{const dt=Math.min(0.05,(now-last)/1000);last=now;
+  if(mode==='tour'&&tour.active){if(!stepTour(dt)){camera.position.copy(pos);camera.rotation.set(pitch,yaw-Math.PI/2,0,'YXZ')}}
+  else if(mode==='walk'){walk(dt);camera.position.copy(pos);camera.rotation.set(pitch,yaw-Math.PI/2,0,'YXZ')}
+  else if(mode==='doll'){camera.position.lerp(dollPos(),0.12);camera.lookAt(C)}
+  renderer.render(scene,camera)});
+window.__ollicTour={setHour,setMode,startTour,state:()=>({mode,tour:{active:tour.active,i:tour.i,d:tour.d},pos:pos.toArray(),meshes:solids.length,hideable:hideable.length})};
+}
+</script>
+</body>
+</html>

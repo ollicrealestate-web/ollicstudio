@@ -1,0 +1,22 @@
+{
+  "currency": "NGN",
+  "note": "Sample rates. Edit the copy in %LOCALAPPDATA%\\OllicSketch\\rates.json, or ask Claude to update a rate, to match current market prices.",
+  "rates": {
+    "foundation_concrete": { "label": "Foundation concrete (strip and pad footings)", "unit": "m³", "rate": 145000 },
+    "rc_frame": { "label": "Reinforced concrete columns and beams, incl. formwork and rebar", "unit": "m³", "rate": 210000 },
+    "floor_concrete": { "label": "Floor slabs (ground and suspended)", "unit": "m³", "rate": 185000 },
+    "block_225": { "label": "225 mm sandcrete blocks", "unit": "nr", "rate": 850 },
+    "block_150": { "label": "150 mm sandcrete blocks", "unit": "nr", "rate": 700 },
+    "cement_mortar": { "label": "Cement for block mortar", "unit": "bags", "rate": 9500 },
+    "roof_carcass": { "label": "Roof carcass: trusses and purlins", "unit": "m²", "rate": 9000 },
+    "roof_covering": { "label": "Long-span aluminium roofing sheets", "unit": "m²", "rate": 8500 },
+    "door": { "label": "Doors, complete", "unit": "nr", "rate": 180000 },
+    "window": { "label": "Windows, complete", "unit": "nr", "rate": 150000 },
+    "plumbing_fixture": { "label": "Sanitary fittings", "unit": "nr", "rate": 120000 },
+    "pipework": { "label": "Pipework", "unit": "m", "rate": 4500 },
+    "ductwork": { "label": "Ductwork", "unit": "m", "rate": 25000 },
+    "plaster": { "label": "Wall plaster", "unit": "m²", "rate": 4500 },
+    "paint": { "label": "Emulsion paint", "unit": "m²", "rate": 3000 },
+    "floor_tiles": { "label": "Floor tiles", "unit": "m²", "rate": 12000 }
+  }
+}

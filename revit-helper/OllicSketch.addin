@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Ollic Sketch</Name>
+    <Assembly>OllicSketch\OllicSketch.Revit.dll</Assembly>
+    <AddInId>6b1f6c2e-8d4a-4f7e-9c3b-0a11c5e7d201</AddInId>
+    <FullClassName>OllicSketch.Revit.App</FullClassName>
+    <VendorId>OLLIC</VendorId>
+    <VendorDescription>Ollic Sketch: plain-language design with Claude</VendorDescription>
+  </AddIn>
+</RevitAddIns>

@@ -1,0 +1,210 @@
+{
+  "manifest_version": "0.2",
+  "name": "ollic-sketch",
+  "display_name": "Ollic Sketch",
+  "version": "0.2.0",
+  "description": "Design and edit buildings in your own Revit and Blender by talking to Claude: architecture, structure, MEP, drawings, renders, walkthrough and construction videos, 3D buyer tours, and a Naira bill of quantities.",
+  "long_description": "Ollic Sketch connects Claude to the Revit on your computer. Describe what you want in plain language and Claude builds it in your real model: levels, walls, floors, roofs, doors and windows, rooms, columns, beams, foundations, pipes and ducts, clash checks, views, sheets, PDF and image exports, and a priced bill of quantities in Naira. Every change is one undo step in Revit. Requires Revit 2024 or later with the Ollic Sketch helper installed by setup.",
+  "author": {
+    "name": "OLLIC Real Estate Development Limited"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "src/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/src/index.js"
+      ],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "connection_status",
+      "description": "Shows which design tools are connected to Ollic Sketch right now (the Revit versions open on this computer)."
+    },
+    {
+      "name": "revit_get_project_info",
+      "description": "Project name, levels with elevations, element counts, active view and selection count."
+    },
+    {
+      "name": "revit_get_selection",
+      "description": "Details of the elements the architect has selected in Revit (walls with start/end/thickness, doors, rooms and so on)."
+    },
+    {
+      "name": "revit_list_elements",
+      "description": "Lists elements of one category with geometry (walls: start, end, thickness, height; rooms: name, area; doors/windows: host wall, sill)."
+    },
+    {
+      "name": "revit_list_types",
+      "description": "Lists the types loaded in the project for one kind of element, for example the wall types and their thicknesses, or the door families."
+    },
+    {
+      "name": "revit_create_levels",
+      "description": "Creates levels (storeys) and a floor plan view for each."
+    },
+    {
+      "name": "revit_create_grids",
+      "description": "Creates structural grid lines."
+    },
+    {
+      "name": "revit_create_walls",
+      "description": "Creates walls along centre-lines."
+    },
+    {
+      "name": "revit_create_floors",
+      "description": "Creates floor slabs from boundary points, or from the outline of the walls on a level when no boundary is given."
+    },
+    {
+      "name": "revit_create_roof",
+      "description": "Creates a roof on a level (usually a 'Roof' level at the top of the walls)."
+    },
+    {
+      "name": "revit_place_openings",
+      "description": "Places doors and windows in walls."
+    },
+    {
+      "name": "revit_create_rooms",
+      "description": "Places named rooms at points inside enclosed walls, or set auto_level to fill every enclosed space on a level."
+    },
+    {
+      "name": "revit_place_components",
+      "description": "Places loaded families such as WCs, basins, showers, lights, sockets, distribution boards, AC units and furniture at points."
+    },
+    {
+      "name": "revit_modify_elements",
+      "description": "Moves, rotates, changes type or thickness, or sets parameters of elements."
+    },
+    {
+      "name": "revit_delete_elements",
+      "description": "Deletes elements by id."
+    },
+    {
+      "name": "revit_create_columns",
+      "description": "Places structural columns at points or at every grid intersection, from base_level to top_level (default: the level above)."
+    },
+    {
+      "name": "revit_create_beams",
+      "description": "Places beams between points, or along every wall of a level (ring beams / lintel bands), at a level plus offset."
+    },
+    {
+      "name": "revit_create_foundations",
+      "description": "Creates strip footings under all walls of a level and/or pad footings at points or under every column."
+    },
+    {
+      "name": "revit_create_pipes",
+      "description": "Draws pipe runs through points (z = height above the level, mm)."
+    },
+    {
+      "name": "revit_create_ducts",
+      "description": "Draws duct runs through points (z = height above the level, mm), rectangular (width/height) or round (diameter)."
+    },
+    {
+      "name": "revit_find_clashes",
+      "description": "Finds hard clashes, by default pipes and ducts against beams, columns, walls, floors and foundations."
+    },
+    {
+      "name": "revit_create_views",
+      "description": "Creates floor, ceiling or structural plans, a section between two points, all four elevations, or a 3D view."
+    },
+    {
+      "name": "revit_create_sheets",
+      "description": "Creates drawing sheets with the project's title block and places the given views on them."
+    },
+    {
+      "name": "revit_open_view",
+      "description": "Opens a view in Revit so the architect can see the result."
+    },
+    {
+      "name": "revit_export_pdf",
+      "description": "Exports sheets (default: all sheets) or views to one PDF in Documents\\Ollic Sketch\\Exports."
+    },
+    {
+      "name": "revit_export_image",
+      "description": "Exports a realistic, shaded or hidden-line image of a 3D view (creates one if no view_id is given)."
+    },
+    {
+      "name": "revit_export_fbx",
+      "description": "Exports the 3D model to an FBX file for Blender (renders, walkthroughs, construction films, buyer tours)."
+    },
+    {
+      "name": "blender_get_scene_info",
+      "description": "What is in Blender now: size, rooms, objects per construction stage, cameras, time of day and render jobs."
+    },
+    {
+      "name": "blender_build_from_plan",
+      "description": "Builds a full 3D model in Blender from a dimensioned plan: walls with doors and windows cut in, slabs, floor finishes, ceilings, stairs, roof with gable walls, foundations, site and simple furniture per room."
+    },
+    {
+      "name": "blender_import_model",
+      "description": "Imports a model file (FBX from revit_export_fbx, or glTF/OBJ)."
+    },
+    {
+      "name": "blender_apply_style",
+      "description": "Sets the look: clay (plain grey, the guide for AI video) or realistic materials."
+    },
+    {
+      "name": "blender_set_time_of_day",
+      "description": "Moves the sun for the hour (6 morning to 22 night); evening and night switch on room lights."
+    },
+    {
+      "name": "blender_set_camera_path",
+      "description": "Sets the walkthrough route at eye height."
+    },
+    {
+      "name": "blender_render_video",
+      "description": "Starts rendering a video in the background: kind walkthrough (along the camera path) or construction (foundation to furnished, orbiting camera)."
+    },
+    {
+      "name": "blender_render_status",
+      "description": "Progress of render jobs: frames done, minutes left, and the video file when finished."
+    },
+    {
+      "name": "blender_cancel_render",
+      "description": "Stops a render job."
+    },
+    {
+      "name": "blender_render_still",
+      "description": "Renders one image: exterior (three-quarter view), aerial, or walk (a frame of the walkthrough)."
+    },
+    {
+      "name": "blender_export_tour",
+      "description": "Exports a 3D buyer tour: one HTML file that opens on any phone or computer, with a guided tour (room name, size, selling point), free walking, dollhouse view with the roof off, time-of-day slider and soft music."
+    },
+    {
+      "name": "blender_save",
+      "description": "Saves the Blender file."
+    },
+    {
+      "name": "revit_get_quantities",
+      "description": "Measured quantities from the model: wall areas by thickness, slab, roof, column, beam and footing volumes, door and window counts, pipe and duct lengths, room areas."
+    },
+    {
+      "name": "ollic_bill_of_quantities",
+      "description": "Builds a priced bill of quantities in Naira from the Revit model, using the architect's saved rates."
+    },
+    {
+      "name": "ollic_rates",
+      "description": "Shows the Naira rates used for the bill of quantities, or updates some of them (give rate keys and new values)."
+    }
+  ],
+  "keywords": [
+    "revit",
+    "architecture",
+    "bim",
+    "structure",
+    "mep",
+    "boq",
+    "nigeria"
+  ],
+  "license": "UNLICENSED",
+  "compatibility": {
+    "platforms": [
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

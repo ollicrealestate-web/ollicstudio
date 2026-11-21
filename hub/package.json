@@ -1,0 +1,19 @@
+{
+  "name": "ollic-sketch-hub",
+  "version": "0.1.0",
+  "description": "Ollic Sketch hub: connects Claude to Revit (architecture, structure, MEP) and, next, AutoCAD, Civil 3D and Blender.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "ollic-sketch": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "status": "node src/status.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
