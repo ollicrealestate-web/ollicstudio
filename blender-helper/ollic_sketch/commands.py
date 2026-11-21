@@ -190,6 +190,16 @@ def _clear_ollic():
             bpy.data.objects.remove(o, do_unlink=True)
 
 
+def _remove_starter_cube():
+    """Blender's new-file cube would sit inside the house; remove it only if it is untouched."""
+    o = bpy.data.objects.get("Cube")
+    if (o and o.type == "MESH" and len(o.data.vertices) == 8 and not o.modifiers
+            and tuple(round(v, 4) for v in o.location) == (0, 0, 0)
+            and tuple(round(v, 4) for v in o.scale) == (1, 1, 1)
+            and tuple(round(v, 4) for v in o.rotation_euler) == (0, 0, 0)):
+        bpy.data.objects.remove(o, do_unlink=True)
+
+
 def build_from_plan(a):
     """Builds walls, openings, floors, ceilings, stairs, roof, foundations, site and furniture from a dimensioned plan."""
     levels = a.get("levels") or []
@@ -197,6 +207,7 @@ def build_from_plan(a):
         raise ValueError("levels is required: [{name, elevation_mm, height_mm, walls, openings, rooms, stairs}]")
     if a.get("clear", True):
         _clear_ollic()
+    _remove_starter_cube()
     C = {k: _coll(k) for k in ("Foundation", "Slab", "Walls", "Openings", "Floors", "Stairs", "Roof", "Finishes", "Furniture", "Site")}
     counts = dict(walls=0, openings=0, rooms=0, furniture=0, stairs=0)
     top = None

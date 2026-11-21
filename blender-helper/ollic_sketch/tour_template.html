@@ -226,12 +226,14 @@ function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);c
 addEventListener('resize',resize);resize();
 camera.rotation.order='YXZ';
 let last=performance.now();
-renderer.setAnimationLoop(now=>{const dt=Math.min(0.05,(now-last)/1000);last=now;
+let fps=0;renderer.setAnimationLoop(now=>{const raw=(now-last)/1000;last=now;fps=fps*0.9+(raw>0?1/raw:0)*0.1;
+  // real time, so slow phones keep the tour's pace; capped so a paused tab does not jump
+  const dt=Math.min(0.25,raw);
   if(mode==='tour'&&tour.active){if(!stepTour(dt)){camera.position.copy(pos);camera.rotation.set(pitch,yaw-Math.PI/2,0,'YXZ')}}
   else if(mode==='walk'){walk(dt);camera.position.copy(pos);camera.rotation.set(pitch,yaw-Math.PI/2,0,'YXZ')}
   else if(mode==='doll'){camera.position.lerp(dollPos(),0.12);camera.lookAt(C)}
   renderer.render(scene,camera)});
-window.__ollicTour={setHour,setMode,startTour,state:()=>({mode,tour:{active:tour.active,i:tour.i,d:tour.d},pos:pos.toArray(),meshes:solids.length,hideable:hideable.length})};
+window.__ollicTour={setHour,setMode,startTour,state:()=>({mode,tour:{active:tour.active,i:tour.i,d:tour.d},pos:pos.toArray(),meshes:solids.length,hideable:hideable.length,fps:Math.round(fps)})};
 }
 </script>
 </body>

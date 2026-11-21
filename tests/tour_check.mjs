@@ -17,7 +17,8 @@ for (const [name, vp] of [["desktop", { width: 1280, height: 720 }], ["phone", {
   if (!st0 || st0.meshes < 10) fails.push(name + ": too few meshes " + JSON.stringify(st0));
   if (!st0 || st0.hideable < 1) fails.push(name + ": roof/ceilings not found for dollhouse");
   await page.click("#tourBtn");
-  await page.waitForTimeout(7000);
+  // wait (up to 45 s) for the tour to leave the Entrance pause and walk on
+  await page.waitForFunction(() => window.__ollicTour.state().tour.d > 0.5, null, { timeout: 45000, polling: 500 }).catch(() => {});
   await page.screenshot({ path: `${outDir}/tour-${name}-guided.png` });
   const card = await page.textContent("#card .n");
   const st1 = await page.evaluate(() => window.__ollicTour.state());
