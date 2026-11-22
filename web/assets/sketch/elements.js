@@ -107,6 +107,7 @@ export function moveGrip(el, key, p) {
 export function translate(el, d) {
   if (el.shape === "line") { el.a = G.add(el.a, d); el.b = G.add(el.b, d); }
   else if (el.shape === "arc") el.c = G.add(el.c, d);
+  else if (el.plane?.o) el.plane.o = G.add(el.plane.o, d);                         // drawn in an elevation: its plane moves
   else if (Array.isArray(el.boundary)) { el.boundary.forEach(c => translate(c, d)); (el.slopeArrows || []).forEach(a => { a.tail = G.add(a.tail, d); a.head = G.add(a.head, d); }); } // floors, extrusions, roofs
   else if (Array.isArray(el.path)) el.path.forEach(c => translate(c, d));          // sweeps
   else if (el.a && el.b) { el.a = G.add(el.a, d); el.b = G.add(el.b, d); }         // reference planes, dimensions, extrusion roofs

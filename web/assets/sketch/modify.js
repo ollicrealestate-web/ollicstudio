@@ -62,15 +62,14 @@ export function transformAny(doc, el, coll, Mx) {
       else { each(el.boundary, c => transform(c, Mx)); each(el.slopeArrows, a => { a.tail = apply(Mx, a.tail); a.head = apply(Mx, a.head); }); }
       break;
     case "components":
-      if (el.kind === "extrusion") each(el.boundary, c => transform(c, Mx));
-      else if (el.kind === "sweep") {
-        if (el.plane) { // drawn in an elevation: the path stays on its vertical plane; the plane moves
-          el.plane.o = apply(Mx, el.plane.o);
-          const k = Math.sqrt(Math.abs(det(Mx))) || 1;
-          el.plane.u = G.mul(lin(Mx, el.plane.u), 1 / k); el.plane.n = G.mul(lin(Mx, el.plane.n), 1 / k);
-          if (Math.abs(k - 1) > 1e-9) each(el.path, c => { if (c.shape === "line") { c.a = G.mul(c.a, k); c.b = G.mul(c.b, k); } else { c.c = G.mul(c.c, k); c.r *= k; } });
-        } else { each(el.path, c => transform(c, Mx)); if (mir) el.flip = !el.flip; }
-      }
+      if (el.plane) { // drawn in an elevation: the sketch stays on its vertical plane; the plane moves
+        el.plane.o = apply(Mx, el.plane.o);
+        const k = Math.sqrt(Math.abs(det(Mx))) || 1;
+        el.plane.u = G.mul(lin(Mx, el.plane.u), 1 / k); el.plane.n = G.mul(lin(Mx, el.plane.n), 1 / k);
+        if (Math.abs(k - 1) > 1e-9) each(el.kind === "sweep" ? el.path : el.boundary, c => { if (c.shape === "line") { c.a = G.mul(c.a, k); c.b = G.mul(c.b, k); } else { c.c = G.mul(c.c, k); c.r *= k; } });
+        if (Math.abs(k - 1) > 1e-9 && el.kind === "extrusion") { el.start *= k; el.end *= k; }
+      } else if (el.kind === "extrusion") each(el.boundary, c => transform(c, Mx));
+      else if (el.kind === "sweep") { each(el.path, c => transform(c, Mx)); if (mir) el.flip = !el.flip; }
       break;
     case "dimensions": el.a = apply(Mx, el.a); el.b = apply(Mx, el.b); if (mir) el.offset = -el.offset; break;
     case "texts": el.p = apply(Mx, el.p); break;

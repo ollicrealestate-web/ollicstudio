@@ -39,10 +39,16 @@ export class View3D {
     this.renderer.domElement.addEventListener("pointerdown", e => { downAt = { x: e.clientX, y: e.clientY, b: e.button }; });
     this.renderer.domElement.addEventListener("pointerup", e => {
       if (!downAt || downAt.b !== 0 || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
+      // while sketching with Pick Lines, a click picks a model edge instead of selecting
+      if (this.app.pickEdge3D?.active()) { const ed = this.edgeAt(e); if (ed) this.app.pickEdge3D.add(ed.a, ed.b); else this.app.toast("Click on an edge (a line of the model)."); this.setEdgeHi(null); return; }
       const r = this.renderer.domElement.getBoundingClientRect();
       ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
       const hit = ray.intersectObjects(this.root.children, true).find(h => h.object.isMesh && h.object.userData.id);
       this.app.pick3D?.(hit ? hit.object.userData.id : null);
+    });
+    this.renderer.domElement.addEventListener("pointermove", e => {
+      if (e.buttons || !this.app.pickEdge3D?.active()) { if (this.edgeHi) this.setEdgeHi(null); return; }
+      this.setEdgeHi(this.edgeAt(e));
     });
     this.grid = new THREE.GridHelper(60, 60, 0x2e2e36, 0x1b1b20);
     this.grid.position.set(5, 0, -5);
@@ -115,6 +121,32 @@ export class View3D {
     this.app.build3D?.(this, THREE);
     // frame the model the first time there is something to see
     if (!this.fitted && this.root.children.length) { this.fitted = true; this.fit(); }
+  }
+
+  /** The model edge (from the 3D outlines) under the mouse: { a, b } in model mm (x east, y north, z up), or null. */
+  edgeAt(e) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+    // a pick distance of about 6 pixels at the target's distance
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    ray.params.Line = { threshold: (dist * Math.tan((this.camera.fov * Math.PI) / 360) * 2 * 6) / Math.max(1, r.height) };
+    const lines = []; this.root.traverse(o => { if (o.isLineSegments && o.visible) lines.push(o); });
+    const hit = ray.intersectObjects(lines, false)[0];
+    if (!hit || hit.index == null) return null;
+    const pos = hit.object.geometry.attributes.position, i = hit.index - (hit.index % 2);
+    const P = k => new THREE.Vector3().fromBufferAttribute(pos, k).applyMatrix4(hit.object.matrixWorld);
+    const A = P(i), B = P(i + 1);
+    const M = v => ({ x: Math.round(v.x * 10000) / 10, y: Math.round(-v.z * 10000) / 10, z: Math.round(v.y * 10000) / 10 });
+    return { a: M(A), b: M(B), three: [A, B] };
+  }
+  setEdgeHi(ed) {
+    if (this.edgeHi) { this.scene.remove(this.edgeHi); this.edgeHi.geometry.dispose(); this.edgeHi = null; }
+    if (ed) {
+      this.edgeHi = new THREE.Line(new THREE.BufferGeometry().setFromPoints(ed.three), new THREE.LineBasicMaterial({ color: 0x3b82f6, depthTest: false }));
+      this.edgeHi.renderOrder = 10; this.scene.add(this.edgeHi);
+    }
+    this.needsRender = true;
   }
 
   /** Frames everything in view. */
