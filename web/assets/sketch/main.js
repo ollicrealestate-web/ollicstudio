@@ -11,14 +11,14 @@ import { WallTool, drawWalls, drawUnderlay, drawWallDims, buildWalls3D, wallProp
 import { wallFootprints, outlineEdges, locationPolyline, checkWall } from "./walls.js";
 import * as LV from "./levels.js";
 import { MoveTool, RotateTool, MirrorTool, ScaleTool, ArrayTool, OffsetTool, TrimTool, SplitTool, AlignTool, CornerTool } from "./modifytools.js";
-import { enforceLocks } from "./modify.js";
+import { enforceLocks, moveOpening, translation, canTransform } from "./modify.js";
 import { OpeningTool, drawOpenings, drawOpeningDims, openingsAt, buildOpenings3D, openingProps, wireOpeningProps, scheduleDialog, tagOpenings } from "./openingsui.js";
 import * as OP from "./openings.js";
 import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
-import { floorLoops, floorParts } from "./floors.js";
+import { floorLoops, floorParts, curvePoints as curvePts } from "./floors.js";
 import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSketchProps, wireComponentSketchProps, drawComponents, drawRefPlanes, componentsAt, cutWallSolids, cutWallPlan, floorVoidHoles, buildComponents3D, RefPlaneTool, modelInPlaceDialog, wallSweepDialog, parapetDialog, componentProps, wireComponentProps, workPlaneDialog } from "./componentsui.js";
 import { checkSketch } from "./floors.js";
-import { chainPath as sweepChain } from "./components.js";
+import { chainPath as sweepChain, sweepPlanStrip } from "./components.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { startRoofSketch, finishRoofSketch, RoofBoundaryTool, SlopeArrowTool, RoofExtrusionTool, drawRoofs, roofsAt, buildRoofs3D, cutWallsByRoof, slopedPrismGeometry, roofSketchProps, wireRoofSketchProps, roofLineProps, wireRoofLineProps, roofProps, wireRoofProps, editRoof, roofOnPlan, drawRoofSketchMarks } from "./roofsui.js";
 import { roofGeometry } from "./roofs.js";
@@ -26,6 +26,7 @@ import { DimensionTool, TextTool, drawAnnotations, annotationsAt, annotationBox,
 import { ElevationView, ELEVATIONS, modelBoxMm, applySectionBox } from "./views.js";
 import { planSheet, pdfFromCanvas, planDxf, modelGlb, download, safeName, choosePaper, planBox } from "./exports.js";
 import * as THREE from "three";
+import { ElevSketchTool, drawElevSketch } from "./elevsketch.js";
 import { icon } from "./icons.js";
 
 const $ = s => document.querySelector(s);
@@ -50,7 +51,8 @@ app.savePrefs = () => writePrefs(app.prefs);
 app.lookup = id => findById(app.doc, id)?.el || null;
 app.levelName = () => app.doc.levels.find(l => l.id === app.levelId)?.name || "Level";
 app.geomVer = 0;
-app.redraw = (with3d = false) => { if (with3d) app.geomVer++; app.plan.invalidate(); if (with3d) { app.view3d.invalidate(); app.elev?.invalidate(); } };
+app.redraw = (with3d = false) => { if (with3d) app.geomVer++; app.plan.invalidate(); app.elev?.invalidateOverlay(); if (with3d) { app.view3d.invalidate(); app.elev?.invalidate(); } };
+app.drawElevSketch = (ctx, ev) => drawElevSketch(ctx, ev, app);
 const fpCache = new Map();
 /** Wall footprints of a level, recomputed only when the model changed. */
 app.footprints = levelId => {
@@ -78,6 +80,24 @@ app.snapCurves = () => {
 };
 const JOIN = 2;
 /** Moves elements; walls joined to moved walls stretch so the joins hold (as in Revit). */
+/** Plan outline(s) of any element, for previews while moving, rotating or mirroring: [{ pts, closed }]. */
+app.outlineOf = id => {
+  const doc = app.doc, el = app.lookup(id); if (!el) return [];
+  const curvesPts = list => (list || []).map(c => ({ pts: curvePts(c) }));
+  if (doc.walls.includes(el) || doc.lines.includes(el)) return [{ pts: locationPolyline(el) }];
+  if (doc.openings.includes(el)) { const f = OP.openingFrame(doc, el); return f ? [{ pts: f.corners, closed: true }] : []; }
+  if (doc.floors.includes(el)) return curvesPts(el.boundary);
+  if (doc.roofs.includes(el)) { try { return [{ pts: roofGeometry(doc, el).outline, closed: true }]; } catch { return []; } }
+  if (doc.components.includes(el)) {
+    if (el.kind === "extrusion") return curvesPts(el.boundary);
+    if (el.kind === "sweep") return el.plane ? [{ pts: sweepPlanStrip(doc, el), closed: true }] : curvesPts(el.path);
+    return [];
+  }
+  if (doc.dimensions.includes(el)) return [{ pts: [el.a, el.b] }];
+  if (doc.texts.includes(el)) { const r = 300; return [{ pts: [G.add(el.p, { x: -r, y: -r }), G.add(el.p, { x: r, y: -r }), G.add(el.p, { x: r, y: r }), G.add(el.p, { x: -r, y: r })], closed: true }]; }
+  if (doc.referencePlanes.includes(el)) return [{ pts: [el.a, el.b] }];
+  return [];
+};
 app.translateWithJoins = (doc, ids, delta) => {
   const set = new Set(ids);
   const moved = doc.walls.filter(w => set.has(w.id) && w.shape === "line");
@@ -85,7 +105,10 @@ app.translateWithJoins = (doc, ids, delta) => {
   for (const id of ids) {
     const el = findById(doc, id)?.el; if (!el) continue;
     const o = doc.openings.find(x => x.id === id);
-    if (o) { const w = doc.walls.find(x => x.id === o.hostWallId); if (w && !set.has(w.id)) o.positionAlongWall += G.dot(delta, G.norm(G.sub(w.b, w.a))); continue; }
+    if (o) { if (!set.has(o.hostWallId)) moveOpening(doc, o, translation(delta), { wallAxis: OP.wallAxis }); continue; }
+    const comp = doc.components.find(x => x.id === id);
+    if (comp?.kind === "wallSweep") continue; // goes with its walls
+    if (comp?.kind === "sweep" && comp.plane) { comp.plane.o = G.add(comp.plane.o, delta); continue; }
     translateEl(el, delta);
   }
   for (const w of doc.walls) {
@@ -337,7 +360,8 @@ const TOOLS = {
   text: () => new TextTool(app),
   wall: () => new WallTool(app),
   door: () => new OpeningTool(app, "door"),
-  boundary: () => (app.sketch?.kind === "roof" ? new RoofBoundaryTool(app) : new BoundaryTool(app)),
+  boundary: () => (app.sketch?.elev ? new ElevSketchTool(app) : app.sketch?.kind === "roof" ? new RoofBoundaryTool(app) : new BoundaryTool(app)),
+  elevSketch: () => new ElevSketchTool(app),
   slopeArrow: () => new SlopeArrowTool(app),
   roofExtrusion: () => new RoofExtrusionTool(app),
   refPlane: () => new RefPlaneTool(app),
@@ -359,8 +383,8 @@ const TOOLS = {
 app.setTool = name => {
   if (!TOOLS[name]) return;
   const SELECT_FIRST = ["move", "copy", "rotate", "mirrorPick", "mirrorDraw", "scale", "array"];
-  if (SELECT_FIRST.includes(name) && ![...app.selection].some(id => app.lookup(id)?.shape)) {
-    app.toast("Select the walls or lines first, then choose the tool again.");
+  if (SELECT_FIRST.includes(name) && ![...app.selection].some(id => canTransform(app.doc, id))) {
+    app.toast("Select what to change first (walls, doors, windows, floors, roofs, components, text...), then choose the tool again.");
     if (app.tool?.name !== "select") { app.tool = TOOLS.select(); renderRibbon(); app.toolChanged(); }
     return;
   }
@@ -481,7 +505,7 @@ function runItem(it) {
   if (it.roofOnly && app.sketch?.kind !== "roof") { app.toast("A slope arrow is for roof footprints."); return; }
   if (it.soon) { app.toast(`${it.label}: ${it.soon.toLowerCase()}.`); return; }
   // drawing tools work on a plan: leave the elevation first
-  if (app.elevSide && !/^(elev-|sectionBox|tile|planOnly|threeOnly|view3d|schedule|levels|units|snapsDlg|shortcuts|undo|redo|wallTypes|zoomFit)/.test(it.id)) closeElevation();
+  if (app.elevSide && !app.sketch?.elev && !/^(elev-|sectionBox|tile|planOnly|threeOnly|view3d|schedule|levels|units|snapsDlg|shortcuts|undo|redo|wallTypes|zoomFit|component|live3d|fullScreen)/.test(it.id)) closeElevation();
   if (it.tool) app.setTool(it.tool);
   else it.run?.();
 }

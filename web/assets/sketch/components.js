@@ -88,8 +88,23 @@ export function chainPath(curves) {
   return { pts, closed };
 }
 
-/** Rings of a sweep (for 3D) and its centred profile. */
+/** A point of a vertical work plane: s along the plane (mm), z height (mm). */
+export const planePoint = (pl, s, z) => ({ x: pl.o.x + pl.u.x * s, y: pl.o.y + pl.u.y * s, z });
+
+/** Rings of a sweep (for 3D) and its centred profile. A sweep drawn in an elevation has a vertical `plane`
+ *  { o, u, n, side }: its path is in (s along u, z) and the profile stands out from the plane along n. */
 export function sweepGeometry(doc, c) {
+  if (c.plane) {
+    const { pts, closed } = chainPath(c.path); // (x = s, y = z)
+    let prof = profilePts(doc, c);
+    // profile x = out from the face, y = across the path (to the left of travel: up for a path drawn left to right)
+    let p2 = prof.map(q => ({ x: (c.flip ? -1 : 1) * q.y, y: q.x }));
+    if (!c.flip) p2 = p2.reverse();
+    const flat = S.sweepRings(pts, 0, p2, closed); // x = s', y = z', z = out
+    const pl = c.plane;
+    const rings = flat.map(r => r.map(q => ({ x: pl.o.x + pl.u.x * q.x + pl.n.x * q.z, y: pl.o.y + pl.u.y * q.x + pl.n.y * q.z, z: q.y })));
+    return { rings, closed, prof: p2, pts: null, plane: true };
+  }
   const { pts, closed } = chainPath(c.path);
   let prof = profilePts(doc, c);
   if (c.flip) prof = prof.map(p => ({ x: -p.x, y: p.y })).reverse();
@@ -169,3 +184,14 @@ export function revealsFor(doc, w) {
 }
 
 export function makeRefPlane(a, b, name) { return { id: newId("rp"), a: { ...a }, b: { ...b }, name: name || "" }; }
+
+/** Plan footprint of a sweep drawn in an elevation: the strip it covers on its face. */
+export function sweepPlanStrip(doc, c) {
+  const g = sweepGeometry(doc, c), pl = c.plane, pts = g.rings.flat();
+  const ss = pts.map(q => G.dot(G.sub(q, pl.o), pl.u)), ns = pts.map(q => G.dot(G.sub(q, pl.o), pl.n));
+  const s0 = Math.min(...ss), s1 = Math.max(...ss), n0 = Math.min(...ns), n1 = Math.max(...ns);
+  const P = (s, n) => G.add(G.add(pl.o, G.mul(pl.u, s)), G.mul(pl.n, n));
+  return [P(s0, n0), P(s1, n0), P(s1, n1), P(s0, n1)];
+}
+/** Height range of a sweep drawn in an elevation. */
+export function sweepZRange(doc, c) { const zs = sweepGeometry(doc, c).rings.flat().map(q => q.z); return { z0: Math.min(...zs), z1: Math.max(...zs) }; }
