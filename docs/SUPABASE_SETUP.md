@@ -59,3 +59,10 @@ Run `supabase/migrations/20261023000010_testers.sql`. A tester (`profiles.role =
 free features without daily limits, plus the one-time paid allowance in `profiles.allowances`,
 e.g. `{"vs_image": 2, "vs_video": 1}` (Ollic VS pictures and clips). Failed or cancelled attempts
 are not counted. Customers cannot change their own role or allowances.
+
+## Sketch (migration 13)
+
+Run `supabase/migrations/20261122000013_sketch_projects.sql` once, after migration 12. It creates the
+`sketch_projects` table: one row per sketch (name and the whole drawing as JSON), readable and changeable
+only by the account that made it (row-level security), and an owner that can never change.
+

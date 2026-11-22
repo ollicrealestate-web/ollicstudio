@@ -23,7 +23,7 @@ from .aps import AutodeskModels
 from .runway import RunwayVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import animation, cinematic, films, look, models, projects, renders, videos
+from .routes import animation, cinematic, films, look, models, projects, renders, sketches, videos
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
@@ -116,6 +116,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.include_router(videos.router, prefix="/api")
     app.include_router(animation.router, prefix="/api")
     app.include_router(cinematic.router, prefix="/api")
+    app.include_router(sketches.router, prefix="/api")
 
     # The website's public settings come from the server's environment, so keys are
     # entered once (e.g. in Railway's variables). Only public values are sent: the

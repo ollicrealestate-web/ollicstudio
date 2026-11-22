@@ -28,6 +28,12 @@ async function request(method, path, body, retry = true, extra = {}) {
 }
 
 export const api = {
+  // Sketch (the plan and 3D modeller): one JSON document per sketch, owned by the user
+  listSketches: () => request("GET", "/sketches"),
+  createSketch: body => request("POST", "/sketches", body),
+  getSketch: id => request("GET", `/sketches/${id}`),
+  updateSketch: (id, body) => request("PUT", `/sketches/${id}`, body),
+  deleteSketch: id => request("DELETE", `/sketches/${id}`),
   listProjects: () => request("GET", "/projects"),
   createProject: name => request("POST", "/projects", { name }),
   getProject: id => request("GET", `/projects/${id}`),

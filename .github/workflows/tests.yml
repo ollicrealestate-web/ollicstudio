@@ -1,0 +1,60 @@
+name: Tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sketch:
+    name: Sketch (geometry and browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Geometry and model unit tests
+        run: node --test tests/sketch/*.test.mjs
+      - name: Browser tests (real Chromium)
+        run: |
+          npm i --no-save --no-package-lock playwright@1.48.2
+          npx playwright install --with-deps chromium > /dev/null
+          for f in tests/sketch/e2e_*.mjs; do node "$f" out/sketch || exit 1; done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Exported files open in independent readers (ezdxf, Khronos glTF validator)
+        run: |
+          pip install -q ezdxf
+          python tests/sketch/check_exports.py out/sketch
+          npm i --no-save --no-package-lock gltf-validator@2.0.0-dev.3.10
+          node tests/sketch/check_glb.mjs out/sketch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sketch-screenshots
+          path: |
+            out/sketch/*.png
+            out/sketch/*.pdf
+            out/sketch/*.dxf
+            out/sketch/*.glb
+
+  backend:
+    name: API and studio browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install
+        working-directory: backend
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          pip install -q -r requirements-dev.txt
+          python -m playwright install --with-deps chromium > /dev/null
+      - name: Run
+        working-directory: backend
+        run: python -m pytest

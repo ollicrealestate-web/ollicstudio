@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sketch · Ollic Design Studio</title>
+<link rel="preload" href="vendor/archivo/archivo-var.woff" as="font" type="font/woff" crossorigin>
+<meta name="theme-color" content="#070707">
+<link rel="stylesheet" href="assets/sketch/sketch.css">
+<script src="assets/config.js"></script>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/"}}</script>
+</head>
+<body class="sk">
+<header class="sk-top">
+  <a class="sk-brand" href="app.html" title="Back to the studio"><span class="sk-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20H3z"/><path d="M9.5 20v-5.5h5V20"/></svg></span>Ollic <b>Sketch</b></a>
+  <label class="sk-name"><span class="sr">Project name</span><input id="projName" type="text" maxlength="120" spellcheck="false" value="Untitled sketch"></label>
+  <span class="sk-save" id="saveState" role="status" aria-live="polite"></span>
+  <nav class="sk-file" aria-label="File">
+    <button type="button" id="fileNew">New</button>
+    <button type="button" id="fileOpen">Open</button>
+    <button type="button" id="fileSave" class="primary">Save</button>
+    <button type="button" id="fileCopy">Save as copy</button>
+    <button type="button" id="fileExport">Export</button>
+    <button type="button" id="fileImport">Import</button>
+    <input type="file" id="importInput" accept=".json,application/json" hidden>
+  </nav>
+</header>
+
+<div class="sk-ribbon">
+  <div class="sk-rtabs" role="tablist" id="ribbonTabs"></div>
+  <div class="sk-rpanel" id="ribbonPanel" role="toolbar" aria-label="Tools"></div>
+</div>
+<div class="sk-options" id="optionsBar" aria-label="Options Bar"></div>
+
+<div class="sk-body">
+  <aside class="sk-left">
+    <section class="sk-props" aria-labelledby="propsTitle">
+      <h2 id="propsTitle">Properties</h2>
+      <div id="props"></div>
+    </section>
+    <section class="sk-browser" aria-labelledby="browserTitle">
+      <h2 id="browserTitle">Project Browser</h2>
+      <div id="browser" role="tree"></div>
+    </section>
+  </aside>
+  <main class="sk-views tile" id="views">
+    <section class="sk-view" id="planView" aria-label="Floor plan">
+      <div class="sk-vtitle"><span id="planTitle">Floor Plan: Level 1</span></div>
+      <div class="sk-canvas"><canvas id="planCanvas" tabindex="0" aria-label="Floor plan drawing area"></canvas><div class="sk-elev" id="elevView" hidden></div></div>
+      <div class="sk-vbar" id="planBar"></div>
+    </section>
+    <section class="sk-view" id="view3dWrap" aria-label="3D view">
+      <div class="sk-vtitle"><span>3D View: {3D}</span></div>
+      <div id="view3d" class="sk-3d"></div>
+      <div class="sk-vbar" id="bar3d"></div>
+    </section>
+  </main>
+</div>
+
+<footer class="sk-status">
+  <span id="statusPrompt">Ready</span>
+  <span id="statusTyped" class="typed" hidden></span>
+  <span class="grow"></span>
+  <span id="statusSnap"></span>
+  <span id="statusXY" class="xy"></span>
+</footer>
+
+<div class="sk-menu" id="ctxMenu" role="menu" hidden></div>
+<div class="sk-dialog-wrap" id="dialogWrap" hidden><div class="sk-dialog" role="dialog" aria-modal="true" id="dialog"></div></div>
+<div class="sk-dialog-wrap ask" id="askWrap" hidden><div class="sk-dialog" role="alertdialog" aria-modal="true" id="ask"></div></div>
+<div class="sk-toast" id="toast" role="status" aria-live="polite"></div>
+<input class="sk-inline" id="inlineInput" type="text" inputmode="decimal" hidden aria-label="Value">
+
+<script type="module" src="assets/sketch/main.js"></script>
+</body>
+</html>
