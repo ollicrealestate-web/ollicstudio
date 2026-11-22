@@ -10,6 +10,8 @@ import { SelectTool, LineTool } from "./tools.js";
 import { WallTool, drawWalls, drawUnderlay, drawWallDims, buildWalls3D, wallProps, wireWallProps, wallTypeDialog, levelsDialog, copyToLevelsDialog } from "./wallsui.js";
 import { wallFootprints, outlineEdges, locationPolyline, checkWall } from "./walls.js";
 import * as LV from "./levels.js";
+import { MoveTool, RotateTool, MirrorTool, ScaleTool, ArrayTool, OffsetTool, TrimTool, SplitTool, AlignTool, CornerTool } from "./modifytools.js";
+import { enforceLocks } from "./modify.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { icon } from "./icons.js";
 
@@ -80,9 +82,12 @@ app.stretchWallEnd = (doc, id, key, p) => {
 };
 /** Walls connected end to end with this one (the chain Tab selects). */
 app.chainOf = id => {
-  const start = app.doc.walls.find(w => w.id === id);
+  const wall = app.doc.walls.find(w => w.id === id);
+  const line = !wall && app.doc.lines.find(l => l.id === id);
+  const start = wall || line;
   if (!start) return [];
-  const same = app.doc.walls.filter(w => w.baseLevelId === start.baseLevelId);
+  const same = wall ? app.doc.walls.filter(w => w.baseLevelId === start.baseLevelId)
+    : linesInPlan(app.doc, app.levelId).filter(l => l.kind === line.kind);
   const endsOf = w => { const p = locationPolyline(w); return [p[0], p.at(-1)]; };
   const seen = new Set([id]), queue = [start];
   while (queue.length) {
@@ -104,7 +109,15 @@ app.toast = (msg, bad = false) => {
   clearTimeout(app._toastT); app._toastT = setTimeout(() => t.classList.remove("show"), bad ? 4200 : 2600);
 };
 app.commit = (label, fn) => {
-  try { return app.history.transact(label, fn); }
+  try {
+    return app.history.transact(label, doc => {
+      const r = fn(doc);
+      // locked alignments hold whatever moved; then every wall must still be valid
+      if (doc.constraints?.length) enforceLocks(doc, w => wallFootprints(doc, w.baseLevelId).get(w.id), (dd, id, d) => app.translateWithJoins(dd, [id], d));
+      for (const w of doc.walls) checkWall(doc, w);
+      return r;
+    });
+  }
   catch (err) { app.toast(err.message || "That change could not be made.", true); return undefined; }
 };
 app.hoverCandidate = () => app.hoverId;
@@ -145,8 +158,8 @@ app.updateHover = c => {
   }
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
-  const firstWall = list.find(id => app.isWall(id));
-  if (firstWall && app.chainOf(firstWall).length > 1) list.push(`chain:${firstWall}`);
+  const first = list[0];
+  if (first && app.chainOf(first).length > 1) list.push(`chain:${first}`);
   const same = list.length === app.hoverList.length && list.every((id, i) => id === app.hoverList[i]);
   // a Tab choice holds while the pointer stays still; moving it starts again from the nearest element
   const movedAway = app.tabAt && Math.hypot(c.sx - app.tabAt.x, c.sy - app.tabAt.y) > 4;
@@ -207,9 +220,28 @@ const TOOLS = {
   modelLine: () => new LineTool(app, "model"),
   detailLine: () => new LineTool(app, "detail"),
   wall: () => new WallTool(app),
+  move: () => new MoveTool(app, false),
+  copy: () => new MoveTool(app, true),
+  rotate: () => new RotateTool(app),
+  mirrorPick: () => new MirrorTool(app, false),
+  mirrorDraw: () => new MirrorTool(app, true),
+  scale: () => new ScaleTool(app),
+  array: () => new ArrayTool(app),
+  offset: () => new OffsetTool(app),
+  trim: () => new TrimTool(app),
+  split: () => new SplitTool(app),
+  align: () => new AlignTool(app),
+  chamfer: () => new CornerTool(app, "chamfer"),
+  fillet: () => new CornerTool(app, "fillet"),
 };
 app.setTool = name => {
   if (!TOOLS[name]) return;
+  const SELECT_FIRST = ["move", "copy", "rotate", "mirrorPick", "mirrorDraw", "scale", "array"];
+  if (SELECT_FIRST.includes(name) && ![...app.selection].some(id => app.lookup(id)?.shape)) {
+    app.toast("Select the walls or lines first, then choose the tool again.");
+    if (app.tool?.name !== "select") { app.tool = TOOLS.select(); renderRibbon(); app.toolChanged(); }
+    return;
+  }
   app.tool?.cancelDrag?.();
   if (name !== "select") app.lastTool = name;
   app.tool = TOOLS[name]();
@@ -237,20 +269,21 @@ const RIBBON = [
   { tab: "Modify", groups: [
     { label: "Select", items: [{ id: "select", label: "Modify", icon: "modify", key: "MD", tool: "select" }] },
     { label: "Modify", items: [
-      { id: "align", label: "Align", icon: "align", key: "AL", ...SOON(3) },
-      { id: "offset", label: "Offset", icon: "offset", key: "OF", ...SOON(3) },
-      { id: "mirrorPick", label: "Mirror - Pick Axis", icon: "mirror", key: "MM", ...SOON(3) },
-      { id: "mirrorDraw", label: "Mirror - Draw Axis", icon: "mirror", key: "DM", ...SOON(3) },
-      { id: "move", label: "Move", icon: "move", key: "MV", ...SOON(3) },
-      { id: "copy", label: "Copy", icon: "copy", key: "CO", ...SOON(3) },
-      { id: "rotate", label: "Rotate", icon: "rotate", key: "RO", ...SOON(3) },
-      { id: "trim", label: "Trim/Extend", icon: "trim", key: "TR", ...SOON(3) },
-      { id: "split", label: "Split", icon: "split", key: "SL", ...SOON(3) },
-      { id: "array", label: "Array", icon: "array", key: "AR", ...SOON(3) },
-      { id: "scale", label: "Scale", icon: "scale", key: "RE", ...SOON(3) },
-      { id: "chamfer", label: "Chamfer", icon: "chamfer", key: "CH", ...SOON(3) },
-      { id: "fillet", label: "Fillet", icon: "fillet", key: "FL", ...SOON(3) },
-      { id: "pin", label: "Pin", icon: "pin", key: "PN", ...SOON(3) },
+      { id: "align", label: "Align", icon: "align", key: "AL", tool: "align" },
+      { id: "offset", label: "Offset", icon: "offset", key: "OF", tool: "offset" },
+      { id: "mirrorPick", label: "Mirror - Pick Axis", icon: "mirror", key: "MM", tool: "mirrorPick" },
+      { id: "mirrorDraw", label: "Mirror - Draw Axis", icon: "mirror", key: "DM", tool: "mirrorDraw" },
+      { id: "move", label: "Move", icon: "move", key: "MV", tool: "move" },
+      { id: "copy", label: "Copy", icon: "copy", key: "CO", tool: "copy" },
+      { id: "rotate", label: "Rotate", icon: "rotate", key: "RO", tool: "rotate" },
+      { id: "trim", label: "Trim/Extend", icon: "trim", key: "TR", tool: "trim" },
+      { id: "split", label: "Split", icon: "split", key: "SL", tool: "split" },
+      { id: "array", label: "Array", icon: "array", key: "AR", tool: "array" },
+      { id: "scale", label: "Scale", icon: "scale", key: "RE", tool: "scale" },
+      { id: "chamfer", label: "Chamfer", icon: "chamfer", key: "CH", tool: "chamfer" },
+      { id: "fillet", label: "Fillet", icon: "fillet", key: "FL", tool: "fillet" },
+      { id: "pin", label: "Pin", icon: "pin", key: "PN", run: () => setPinned(true) },
+      { id: "unpin", label: "Unpin", icon: "pin", key: "UP", run: () => setPinned(false) },
       { id: "delete", label: "Delete", icon: "del", key: "DE", run: () => deleteSelection() },
     ] },
     { label: "Levels", items: [{ id: "copyLevels", label: "Copy to Levels", icon: "levels", run: () => copyToLevelsDialog(app, ui) }] },
@@ -330,8 +363,10 @@ function renderOptions() {
       s.innerHTML = o.items.map(it => `<option value="${esc(it.value)}"${it.value === o.value ? " selected" : ""}>${esc(it.label)}</option>`).join("");
       s.onchange = () => o.onChange(s.value); lab.append(s);
     } else if (o.type === "number") {
-      const n = document.createElement("input"); n.type = "number"; n.value = o.value; if (o.min != null) n.min = o.min; if (o.max != null) n.max = o.max; n.step = o.step || 1;
+      const n = document.createElement("input"); n.type = "number"; n.value = o.value; if (o.placeholder) n.placeholder = o.placeholder; if (o.min != null) n.min = o.min; if (o.max != null) n.max = o.max; n.step = o.step || 1;
       n.onchange = () => o.onChange(parseFloat(n.value)); lab.append(n);
+    } else if (o.type === "button") {
+      const b = document.createElement("button"); b.type = "button"; b.className = "btn"; b.textContent = o.label; b.onclick = o.onClick; bar.append(b); continue;
     } else if (o.type === "check") {
       const c = document.createElement("input"); c.type = "checkbox"; c.checked = !!o.value; c.onchange = () => o.onChange(c.checked); lab.prepend(c);
     }
@@ -468,8 +503,15 @@ function deleteSelection() {
     doc.lines = doc.lines.filter(l => !ids.includes(l.id));
     doc.walls = doc.walls.filter(w => !ids.includes(w.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
+    doc.constraints = (doc.constraints || []).filter(k => !ids.includes(k.ref) && !ids.includes(k.el));
   });
   app.selection.clear(); app.selectionChanged();
+}
+function setPinned(on) {
+  const ids = [...app.selection].filter(id => app.lookup(id)?.shape);
+  if (!ids.length) { app.toast("Select walls or lines first."); return; }
+  app.commit(on ? "Pin" : "Unpin", doc => { for (const id of ids) { const el = findById(doc, id).el; if (on) el.pinned = true; else delete el.pinned; } });
+  app.toast(on ? `Pinned ${ids.length}: they cannot be moved or deleted until unpinned (UP).` : `Unpinned ${ids.length}.`);
 }
 function undo() { const l = app.history.undo(); if (l) app.toast(`Undone: ${l}`); else app.toast("Nothing to undo."); }
 function redo() { const l = app.history.redo(); if (l) app.toast(`Redone: ${l}`); else app.toast("Nothing to redo."); }
@@ -537,7 +579,7 @@ canvas.addEventListener("pointerdown", ev => {
   const r = canvas.getBoundingClientRect();
   const hit = app.plan.hitLabel(ev.clientX - r.left, ev.clientY - r.top);
   // open the box after the browser has finished moving focus for this click
-  if (hit && app.tool.name === "select") { ev.preventDefault(); setTimeout(() => hit.onClick(hit), 0); return; }
+  if (hit) { ev.preventDefault(); setTimeout(() => hit.onClick(hit), 0); return; }
   const c = pickContext(ev);
   app.tool.down(c);
   if (app.snapOverride && app.tool.name !== "select") { app.snapOverride = null; }

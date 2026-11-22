@@ -308,6 +308,12 @@ def test_cinematic_one_on_ollic_path(stack, tmp_path):
         page.wait_for_function("document.querySelector('#filmProgText')?.textContent.includes('All 4 parts sent')", timeout=900000)
         assert errors == [], errors
         browser.close()
+    # the page reports a part as sent when the server accepts it; the server then calls the video
+    # service in the background, so give the last call a moment to land before counting
+    for _ in range(300):
+        if len(stack["runway"].calls) - runway_before >= 4:
+            break
+        time.sleep(0.1)
     assert len(stack["runway"].calls) - runway_before == 4
     repo = stack["repo"]
     for _ in range(300):      # the four shots finish in the background; on a busy machine this takes a while
