@@ -10,6 +10,15 @@ Last updated: 24 October 2026 (models back; AI walkthroughs; Revit).
 
 - **Live** at https://ollicstudio.onrender.com (Render, Frankfurt; Supabase project zusfpymdqfmwgfaejaer).
 
+## Sketch (plan and 3D modeller), from 22 Nov 2026
+
+Branch `sketch`. Page `web/sketch.html`, code `web/assets/sketch/*.js`, saving `backend/app/routes/sketches.py` and migration 13. Built in eight phases; each phase is tested before the next.
+
+| Phase | What works | Evidence |
+| --- | --- | --- |
+| 1. Workspace | Ribbon (Architecture, Modify, Annotate, View, Manage; tools of later phases shown greyed with their phase), Options Bar, Properties, Project Browser, status prompts. Plan on a canvas in mm with grid, wheel zoom, middle-drag / Space+drag pan, double-click wheel or ZF to fit, tablet pinch and one-finger pan, long-press menu. Model Line (LI) and Detail Line (DL): Line, Rectangle, Polygon (inscribed/circumscribed), Circle, Start-End-Radius Arc, Centre-Ends Arc, Pick Lines; Chain, Offset, line styles. Snaps: endpoint, midpoint, intersection, centre, perpendicular, tangent, nearest, grid; SE/SM/SI/SC/SP/ST/SN/SO one-pick overrides. Shift holds 0/90°, 15° steps otherwise. Typed lengths and radii. Selection by click, window, crossing, Tab cycling, Ctrl add, Shift remove; grips; drag to move; Delete; blue temporary length dimension you can click and type into. Unlimited undo/redo (each action one step). Right-click: Cancel, Repeat, Zoom to Fit. 3D view beside the plan (model lines). Saving: every change kept in this browser at once (restored after a crash or reload); signed-in users save to their account (`sketch_projects`), autosave every 30 s, Save as copy, Export/Import JSON, warning before leaving with unsaved changes | `tests/sketch/phase1.test.mjs` (11), `tests/sketch/e2e_phase1.mjs` (29 checks in Chromium), `backend/tests/test_sketches.py` |
+| 2. Levels and walls | Next | |
+
 ## Services
 
 | Service | Status | Evidence |

@@ -40,9 +40,38 @@ class FakeRepo:
         self.components: list[dict] = []
         self.shots: dict[str, dict] = {}
         self.videos: dict[str, dict] = {}
+        self.sketches: dict[str, dict] = {}
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
+
+    # Sketch (plan and 3D modeller)
+    def create_sketch(self, user, record):
+        row = {"id": str(uuid.uuid4()), "owner_id": user.id, **copy.deepcopy(record), "created_at": self._now(), "updated_at": self._now()}
+        self.sketches[row["id"]] = row
+        return copy.deepcopy(row)
+
+    def list_sketches(self, user):
+        rows = sorted((r for r in self.sketches.values() if r["owner_id"] == user.id), key=lambda r: r["updated_at"], reverse=True)
+        return [{k: v for k, v in r.items() if k != "doc"} for r in rows]
+
+    def get_sketch(self, user, sketch_id):
+        r = self.sketches.get(sketch_id)
+        return copy.deepcopy(r) if r and r["owner_id"] == user.id else None
+
+    def update_sketch(self, user, sketch_id, fields):
+        r = self.sketches.get(sketch_id)
+        if not r or r["owner_id"] != user.id:
+            return None
+        r.update(copy.deepcopy(fields)); r["updated_at"] = self._now()
+        return copy.deepcopy(r)
+
+    def delete_sketch(self, user, sketch_id):
+        r = self.sketches.get(sketch_id)
+        if not r or r["owner_id"] != user.id:
+            return False
+        del self.sketches[sketch_id]
+        return True
 
     def create_project(self, user, name):
         row = {"id": str(uuid.uuid4()), "owner_id": user.id, "name": name, "status": "draft", "input_type": "unknown", "created_at": self._now(), "updated_at": self._now()}

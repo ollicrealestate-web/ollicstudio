@@ -244,7 +244,9 @@ function applyView() {
   const svc = SERVICES[service];
   const pv = $("#projectView"); pv.dataset.service = service || ""; pv.dataset.step = step || "";
   $("#svcTabs").replaceChildren(...[...SVC_ORDER, "library"].map(k => el("button", { type: "button", class: `svc-tab${k === service ? " on" : ""}${k === "library" ? " lib" : ""}`,
-    "aria-pressed": String(k === service), onclick: () => chooseService(k) }, svcIcon(SERVICES[k].icon), SERVICES[k].short)));
+    "aria-pressed": String(k === service), onclick: () => chooseService(k) }, svcIcon(SERVICES[k].icon), SERVICES[k].short)),
+    // Sketch is its own workspace (plans and 3D modelling), opened from the same bar
+    el("a", { class: "svc-tab", href: "sketch.html" }, "Sketch"));
   $("#svcGrid").replaceChildren(...SVC_ORDER.map(k => el("button", { type: "button", class: "svc-card", onclick: () => chooseService(k) },
     svcIcon(SERVICES[k].icon), el("b", {}, SERVICES[k].name), el("span", {}, SERVICES[k].lead), el("small", {}, `You upload: ${SERVICES[k].needs}`))));
   $("#svcPick").hidden = !!service;

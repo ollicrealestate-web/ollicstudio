@@ -61,6 +61,12 @@ class Repository(Protocol):
     def get_rendered_image(self, user: CurrentUser, image_id: str) -> dict | None: ...
     def list_rendered_images(self, user: CurrentUser, project_id: str) -> list[dict]: ...
     def create_usage_event(self, user: CurrentUser, record: dict) -> dict: ...
+    # Sketch (plan and 3D modeller)
+    def create_sketch(self, user: CurrentUser, record: dict) -> dict: ...
+    def list_sketches(self, user: CurrentUser) -> list[dict]: ...
+    def get_sketch(self, user: CurrentUser, sketch_id: str) -> dict | None: ...
+    def update_sketch(self, user: CurrentUser, sketch_id: str, fields: dict) -> dict | None: ...
+    def delete_sketch(self, user: CurrentUser, sketch_id: str) -> bool: ...
     def list_usage_events(self, user: CurrentUser, limit: int = 100) -> list[dict]: ...
 
 
@@ -126,6 +132,25 @@ class SupabaseRepository:
     def get_source_file(self, user, file_id):
         rows = self._call("GET", "/source_files", user, params={"select": "*", "id": _eq(file_id), "owner_id": _eq(user.id)})
         return rows[0] if rows else None
+
+    # ------------------------------------------------------------ Sketch (plan and 3D modeller)
+    def create_sketch(self, user, record):
+        return self._call("POST", "/sketch_projects", user, json={**record, "owner_id": user.id}, prefer="return=representation")[0]
+
+    def list_sketches(self, user):
+        return self._call("GET", "/sketch_projects", user, params={"select": "id,owner_id,name,schema_version,created_at,updated_at", "owner_id": _eq(user.id), "order": "updated_at.desc"})
+
+    def get_sketch(self, user, sketch_id):
+        rows = self._call("GET", "/sketch_projects", user, params={"select": "*", "id": _eq(sketch_id), "owner_id": _eq(user.id)})
+        return rows[0] if rows else None
+
+    def update_sketch(self, user, sketch_id, fields):
+        rows = self._call("PATCH", "/sketch_projects", user, params={"id": _eq(sketch_id), "owner_id": _eq(user.id)}, json=fields, prefer="return=representation")
+        return rows[0] if rows else None
+
+    def delete_sketch(self, user, sketch_id):
+        rows = self._call("DELETE", "/sketch_projects", user, params={"id": _eq(sketch_id), "owner_id": _eq(user.id)}, prefer="return=representation")
+        return bool(rows)
 
     # ------------------------------------------------------------ Phase 2: jobs, renders, usage
     def _insert(self, table, user, record):
