@@ -138,3 +138,52 @@ test("flat roof with a fall from a slope arrow: 100 mm over 10 m", () => {
   const flat = R.makeRoof(doc, { baseLevelId: "lv-1", baseOffset: 3000, boundary: lines(fp).map(e => ({ ...e, definesSlope: false })) });
   near(R.roofGeometry(doc, flat).top, 3200, 1e-9);
 });
+
+// ---- many building outlines: square-cornered plans with wings and small jogs, all slopes 30°
+// (a T-shaped plan once left a gap along a valley; the roof faces must cover the plan exactly)
+test("hip roofs on 500 square-cornered plans cover the plan exactly, every face at 30°", () => {
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  // orthogonal polygons: union of a few rectangles traced as an outline via grid rasterisation
+  function ortho() {
+    const W = 30, cell = () => Math.round(rnd() * 3 + 1) * 1000;
+    const xs = [0]; for (let i = 0; i < 6; i++) xs.push(xs.at(-1) + (rnd() < 0.25 ? 50 + Math.round(rnd() * 300) : cell()));
+    const ys = [0]; for (let i = 0; i < 6; i++) ys.push(ys.at(-1) + (rnd() < 0.25 ? 50 + Math.round(rnd() * 300) : cell()));
+    const on = Array.from({ length: 6 }, () => Array(6).fill(false));
+    const n = 2 + Math.floor(rnd() * 3);
+    for (let k = 0; k < n; k++) { const i0 = Math.floor(rnd() * 5), j0 = Math.floor(rnd() * 5), i1 = i0 + 1 + Math.floor(rnd() * (6 - i0 - 1)), j1 = j0 + 1 + Math.floor(rnd() * (6 - j0 - 1)); for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) on[i][j] = true; }
+    // keep the largest 4-connected piece
+    const seen = new Set(); let best = [];
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) if (on[i][j] && !seen.has(i * 6 + j)) { const st = [[i, j]], comp = []; seen.add(i * 6 + j); while (st.length) { const [a, b] = st.pop(); comp.push([a, b]); for (const [da, db] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a2 = a + da, b2 = b + db; if (a2 >= 0 && a2 < 6 && b2 >= 0 && b2 < 6 && on[a2][b2] && !seen.has(a2 * 6 + b2)) { seen.add(a2 * 6 + b2); st.push([a2, b2]); } } } if (comp.length > best.length) best = comp; }
+    const set = new Set(best.map(([a, b]) => a * 6 + b)), has = (a, b) => a >= 0 && a < 6 && b >= 0 && b < 6 && set.has(a * 6 + b);
+    // boundary edges, then chain
+    const edges = new Map();
+    for (const [a, b] of best) {
+      if (!has(a, b - 1)) edges.set(`${a},${b}`, [a + 1, b]);       // bottom: (a,b)->(a+1,b)
+      if (!has(a + 1, b)) edges.set(`${a + 1},${b}`, [a + 1, b + 1]); // right
+      if (!has(a, b + 1)) edges.set(`${a + 1},${b + 1}`, [a, b + 1]); // top
+      if (!has(a - 1, b)) edges.set(`${a},${b + 1}`, [a, b]);       // left
+    }
+    const start = edges.keys().next().value; let cur = start, pts = [];
+    for (let g = 0; g < 200; g++) { const [a, b] = cur.split(",").map(Number); pts.push(G.P(xs[a], ys[b])); const nx = edges.get(cur); if (!nx) return null; cur = `${nx[0]},${nx[1]}`; if (cur === start) break; }
+    // drop collinear points
+    pts = pts.filter((p, i) => Math.abs(G.cross(G.sub(p, pts[(i - 1 + pts.length) % pts.length]), G.sub(pts[(i + 1) % pts.length], p))) > 1e-6);
+    return pts.length >= 4 && set.size === best.length ? pts : null;
+  }
+  
+  let n = 0;
+  for (let k = 0; k < 2000 && n < 500; k++) {
+    const poly = ortho(); if (!poly) continue; n++;
+    const sk = R.skeleton(poly, poly.map(() => deg(30)));
+    const A = Math.abs(G.polygonArea(poly)), F = sk.faces.reduce((s, f) => s + area(f), 0);
+    near(F, A, 1e-3 * A, `plan ${JSON.stringify(poly.map(p => [p.x, p.y]))}`);
+    for (const f of sk.faces) { const pl = R.planeOf(f.pts); near(Math.hypot(pl.a, pl.b), Math.tan(deg(30)), 1e-6, "face slope"); }
+  }
+  assert.ok(n >= 500);
+});
+
+test("the T-shaped plan that left a gap: one roof, no hole", () => {
+  const T = [[0, 8144], [8171, 8144], [8171, 4144], [10171, 4144], [10171, 10144], [8171, 10144], [8171, 11144], [0, 11144]].map(([x, y]) => G.P(x, y));
+  const sk = R.skeleton(T, T.map(() => deg(30)));
+  near(sk.faces.reduce((s, f) => s + area(f), 0), Math.abs(G.polygonArea(T)), 1e-3);
+  assert.equal(sk.arcs.filter(a => a.from === "valley").length, 2);
+});
