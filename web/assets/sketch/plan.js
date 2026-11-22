@@ -78,6 +78,7 @@ export class PlanView {
     for (const l of lines) if (l.kind !== "sketch") this.drawLine(l, this.colorFor(l.id, l.kind === "detail" ? COLORS.detail : COLORS.line));
     this.ctx.globalAlpha = 1;
     for (const l of lines) if (l.kind === "sketch") this.drawLine(l, app.sketch?.bad?.has(l.id) ? "#ff3b3b" : this.colorFor(l.id, COLORS.sketch));
+    app.drawSketchMarks?.(this);
     // selection grips
     for (const id of app.selection) {
       const el = app.lookup(id);

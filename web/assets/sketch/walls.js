@@ -70,9 +70,12 @@ export function centrePolyline(w, type) {
 
 export function levelElevation(doc, id) { return doc.levels.find(l => l.id === id)?.elevation ?? 0; }
 
+/** Set by roofs.js: how high a wall attached to a roof must rise (its highest point under the roof). */
+export const roofHooks = { maxUnderside: null };
+
 export function wallHeights(doc, w) {
   const z0 = levelElevation(doc, w.baseLevelId) + (w.baseOffset || 0);
-  // Attach Top: the wall stops at the underside of a floor (or later a roof)
+  // Attach Top: the wall stops at the underside of a floor, or follows the underside of a roof
   const fl = w.attachTopTo && (doc.floors || []).find(f => f.id === w.attachTopTo);
   if (fl) {
     const t = doc.floorTypes.find(x => x.id === fl.typeId) || doc.floorTypes[0];
@@ -82,6 +85,10 @@ export function wallHeights(doc, w) {
   const z1 = w.topLevelId && doc.levels.some(l => l.id === w.topLevelId)
     ? levelElevation(doc, w.topLevelId) + (w.topOffset || 0)
     : z0 + (w.unconnectedHeight || 3000);
+  if (w.attachTopTo && roofHooks.maxUnderside) {
+    const zr = roofHooks.maxUnderside(doc, w, z1);
+    if (zr != null) return { z0, z1: zr, ownTop: z1, roofId: w.attachTopTo };
+  }
   return { z0, z1 };
 }
 

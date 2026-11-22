@@ -289,7 +289,7 @@ export function buildWalls3D(v3, THREE, app) {
     // faces: the wall cut round its doors and windows
     const solids = app.cutWallSolids ? app.cutWallSolids(w, wallSolids(doc, w, f)) : wallSolids(doc, w, f);
     if (style !== "wire") for (const solid of solids) {
-      const geo = extrude(solid.poly, solid.z0, solid.z1);
+      const geo = solid.top && app.slopedPrism ? app.slopedPrism(THREE, solid) : extrude(solid.poly, solid.z0, solid.z1);
       const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: sel ? 0x9cc0ff : 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
         : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
         : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
@@ -299,7 +299,14 @@ export function buildWalls3D(v3, THREE, app) {
       group.add(mesh);
     }
     // lines: the outline of the whole wall (no seams where it was cut); openings add their own outlines
-    for (const piece of f.pieces) {
+    // a wall attached to a roof: its outline follows the roof
+    const outl = w.attachTopTo && app.cutWallByRoof ? app.cutWallByRoof(w, f.pieces.map(poly => ({ poly, z0: f.z0, z1: f.z1 }))) : null;
+    if (outl) for (const solid of outl) {
+      const geo = solid.top ? app.slopedPrism(THREE, solid) : extrude(solid.poly, solid.z0, solid.z1);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: edgeColor }));
+      edges.userData.id = w.id; group.add(edges); geo.dispose();
+    }
+    if (!outl) for (const piece of f.pieces) {
       const geo = extrude(piece, f.z0, f.z1);
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: edgeColor }));
       edges.userData.id = w.id;
@@ -310,6 +317,7 @@ export function buildWalls3D(v3, THREE, app) {
   app.buildOpenings3D?.(group, THREE, visible);
   app.buildFloors3D?.(group, THREE, visible);
   app.buildComponents3D?.(group, THREE, visible);
+  app.buildRoofs3D?.(group, THREE, visible);
   v3.root.add(group);
   v3.setShadows?.(style === "realistic");
 }

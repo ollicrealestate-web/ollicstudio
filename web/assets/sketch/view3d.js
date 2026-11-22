@@ -122,7 +122,8 @@ export class View3D {
     if (box.isEmpty()) { box.min.set(-1, 0, -9); box.max.set(11, 3, 1); }
     const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
     const r = Math.max(4, size.length() / 2);
-    const dist = r / Math.sin((this.camera.fov * Math.PI) / 360) * 0.9;
+    const v = (this.camera.fov * Math.PI) / 360, h = Math.atan(Math.tan(v) * (this.camera.aspect || 1)); // half angles; narrow views fit the width
+    const dist = r / Math.sin(Math.min(v, h)) * 0.95;
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
     this.controls.target.copy(centre);
     this.camera.position.copy(centre.clone().add(dir.multiplyScalar(dist)));

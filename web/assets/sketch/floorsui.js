@@ -268,11 +268,11 @@ export function attachTopDialog(app, ui) {
   if (!ids.length) { app.toast("Select walls first."); return; }
   const minBase = Math.min(...ids.map(id => wallHeights(doc, doc.walls.find(w => w.id === id)).z0));
   const above = doc.floors.filter(f => F.floorLevels(doc, f).bottom > minBase + 100);
-  ui.openDialog(`<h3>Attach Top/Base</h3><p>Attach the top of the ${ids.length} selected wall${ids.length > 1 ? "s" : ""} to the underside of a floor, or detach them.</p>
-    <div class="list">${above.map(f => `<button type="button" data-f="${f.id}"><span>${ui.esc(F.floorType(doc, f).name)} on ${ui.esc(doc.levels.find(l => l.id === f.levelId)?.name || "")}</span><small>underside ${levelLabel(F.floorLevels(doc, f).bottom)}</small></button>`).join("") || "<p>No floor above these walls yet.</p>"}</div>
+  ui.openDialog(`<h3>Attach Top/Base</h3><p>Attach the top of the ${ids.length} selected wall${ids.length > 1 ? "s" : ""} to the underside of a floor or roof, or detach them.</p>
+    <div class="list">${above.map(f => `<button type="button" data-f="${f.id}"><span>${ui.esc(F.floorType(doc, f).name)} on ${ui.esc(doc.levels.find(l => l.id === f.levelId)?.name || "")}</span><small>underside ${levelLabel(F.floorLevels(doc, f).bottom)}</small></button>`).join("")}${(doc.roofs || []).map(r => `<button type="button" data-f="${r.id}"><span>Roof on ${ui.esc(doc.levels.find(l => l.id === r.baseLevelId)?.name || "")}</span><small>the walls follow its underside</small></button>`).join("") || (above.length ? "" : "<p>No floor or roof above these walls yet.</p>")}</div>
     <div class="actions"><button class="btn" type="button" id="aDetach">Detach Top</button><button class="btn" type="button" id="aCancel">Cancel</button></div>`, d => {
     d.querySelector("#aCancel").onclick = ui.closeDialog;
-    d.querySelector("#aDetach").onclick = () => { app.commit("Detach top", dd => ids.forEach(id => { const w = dd.walls.find(x => x.id === id); const { z0, z1 } = wallHeights(dd, w); if (w.attachTopTo) { delete w.attachTopTo; if (!w.topLevelId) w.unconnectedHeight = z1 - z0; } })); ui.closeDialog(); };
+    d.querySelector("#aDetach").onclick = () => { app.commit("Detach top", dd => ids.forEach(id => { const w = dd.walls.find(x => x.id === id); const h = wallHeights(dd, w); if (w.attachTopTo) { delete w.attachTopTo; if (!w.topLevelId) w.unconnectedHeight = (h.ownTop ?? h.z1) - h.z0; } })); ui.closeDialog(); };
     d.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { app.commit("Attach top", dd => ids.forEach(id => { dd.walls.find(x => x.id === id).attachTopTo = b.dataset.f; })); ui.closeDialog(); });
   });
 }

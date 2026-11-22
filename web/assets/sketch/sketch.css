@@ -11,7 +11,8 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body.sk { background: var(--bg); color: var(--ink); font: 14px/1.4 var(--f); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; overflow: hidden; }
+body.sk { background: var(--bg); color: var(--ink); font: 14px/1.4 var(--f); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+body.sk > * { min-width: 0; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }

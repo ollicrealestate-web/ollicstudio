@@ -9,9 +9,10 @@ import { COLORS } from "./plan.js";
 import { newId, levelLabel } from "./model.js";
 import { makeWall, wallHeights, checkWall, wallType } from "./walls.js";
 import * as LV from "./levels.js";
+import { addRoofParapet } from "./roofsui.js";
 
 const REF_COLOR = "#4ade80";
-export const SKETCH_TITLES = { floor: "Modify | Create Floor Boundary", extrusion: "Modify | Create Extrusion", sweep: "Modify | Sweep > Path" };
+export const SKETCH_TITLES = { floor: "Modify | Create Floor Boundary", extrusion: "Modify | Create Extrusion", sweep: "Modify | Sweep > Path", roof: "Modify | Create Roof Footprint" };
 
 // --------------------------------------------------------------------------- sketch mode for components
 export function startComponentSketch(app, kind, opts = {}) {
@@ -321,9 +322,10 @@ export function wallSweepDialog(app, ui, reveal) {
 /** Parapet on the selected walls: walls on top, flush with their outer faces, with a coping sweep. */
 export function parapetDialog(app, ui) {
   const ids = [...app.selection].filter(id => app.isWall(id));
-  if (!ids.length) { app.toast("Select the outer walls the parapet stands on, then choose Parapet."); return; }
+  const roofId = !ids.length && [...app.selection].find(id => app.doc.roofs.some(r => r.id === id));
+  if (!ids.length && !roofId) { app.toast("Select the outer walls (or the flat roof) the parapet stands on, then choose Parapet."); return; }
   const p = app.prefs.parapet || {};
-  ui.openDialog(`<h3>Parapet</h3><p>Adds a parapet on top of the ${ids.length} selected wall${ids.length > 1 ? "s" : ""}, flush with their outside faces, with a coping on top.</p>
+  ui.openDialog(`<h3>Parapet</h3><p>${roofId ? "Adds a parapet round the edge of the selected roof, standing on its top, flush with its edge" : `Adds a parapet on top of the ${ids.length} selected wall${ids.length > 1 ? "s" : ""}, flush with their outside faces`}, with a coping on top.</p>
     <table><tr><td>Height (mm)</td><td><input id="pH" type="number" min="100" step="50" value="${p.height ?? 900}"></td></tr>
     <tr><td>Thickness (mm)</td><td><input id="pT" type="number" min="100" step="5" value="${p.thickness ?? 225}"></td></tr>
     <tr><td>Coping 300 x 75 with drip</td><td><input id="pC" type="checkbox"${p.coping === false ? "" : " checked"}></td></tr></table>
@@ -333,7 +335,7 @@ export function parapetDialog(app, ui) {
       const H = parseFloat(d.querySelector("#pH").value), T = parseFloat(d.querySelector("#pT").value), coping = d.querySelector("#pC").checked;
       if (!(H >= 100) || !(T >= 100)) { d.querySelector("#pErr").innerHTML = `<div class="err">Height and thickness must be at least 100 mm.</div>`; return; }
       app.prefs.parapet = { height: H, thickness: T, coping }; app.savePrefs();
-      try { app.history.transact("Parapet", doc => addParapet(doc, ids, H, T, coping)); ui.closeDialog(); app.toast("Parapet added."); }
+      try { app.history.transact("Parapet", doc => (roofId ? addRoofParapet(doc, roofId, H, T, coping) : addParapet(doc, ids, H, T, coping))); ui.closeDialog(); app.toast("Parapet added."); }
       catch (e) { d.querySelector("#pErr").innerHTML = `<div class="err">${ui.esc(e.message)}</div>`; }
     };
   });

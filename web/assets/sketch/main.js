@@ -20,6 +20,8 @@ import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSk
 import { checkSketch } from "./floors.js";
 import { chainPath as sweepChain } from "./components.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
+import { startRoofSketch, finishRoofSketch, RoofBoundaryTool, SlopeArrowTool, RoofExtrusionTool, drawRoofs, roofsAt, buildRoofs3D, cutWallsByRoof, slopedPrismGeometry, roofSketchProps, wireRoofSketchProps, roofLineProps, wireRoofLineProps, roofProps, wireRoofProps, editRoof, roofOnPlan, drawRoofSketchMarks } from "./roofsui.js";
+import { roofGeometry } from "./roofs.js";
 import { icon } from "./icons.js";
 
 const $ = s => document.querySelector(s);
@@ -112,8 +114,12 @@ app.chainOf = id => {
 };
 app.setLevel = id => setLevel(id);
 app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
-app.drawModel = view => { drawFloors(view, app); drawWalls(view, app); drawOpenings(view, app); drawComponents(view, app); drawRefPlanes(view, app); };
-app.cutWallSolids = (w, solids) => cutWallSolids(app.doc, w, solids);
+app.drawModel = view => { drawFloors(view, app); drawRoofs(view, app); drawWalls(view, app); drawOpenings(view, app); drawComponents(view, app); drawRefPlanes(view, app); };
+app.cutWallSolids = (w, solids) => cutWallsByRoof(app.doc, w, cutWallSolids(app.doc, w, solids));
+app.drawSketchMarks = view => drawRoofSketchMarks(view, app);
+app.cutWallByRoof = (w, solids) => cutWallsByRoof(app.doc, w, solids);
+app.slopedPrism = (THREE, s) => slopedPrismGeometry(THREE, s);
+app.buildRoofs3D = (group, THREE, visible) => buildRoofs3D(group, THREE, app, visible);
 app.cutWallPlan = (w, pieces, cutZ) => cutWallPlan(app.doc, w, pieces, cutZ);
 app.floorVoidHoles = (part, top, bottom) => floorVoidHoles(app.doc, part, top, bottom);
 app.buildComponents3D = (group, THREE, visible) => buildComponents3D(group, THREE, app, visible);
@@ -126,6 +132,7 @@ app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
 app.extraBoxes = () => [...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) }));
 app.pick3D = id => { app.selection.clear(); if (id) app.selection.add(id); app.selectionChanged(); };
 const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc, ask: (m, ok) => app.ask(m, ok), askText: (l, v) => app.askText(l, v) };
+app.ui = ui;
 app.toast = (msg, bad = false) => {
   const t = $("#toast"); t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("show");
   clearTimeout(app._toastT); app._toastT = setTimeout(() => t.classList.remove("show"), bad ? 4200 : 2600);
@@ -139,7 +146,13 @@ app.commit = (label, fn) => {
       OP.keepOpeningsInPlace(doc, ends);
       doc.openings = doc.openings.filter(o => doc.walls.some(w => w.id === o.hostWallId));
       doc.tags = doc.tags.filter(t => doc.openings.some(o => o.id === t.hostId));
-      for (const w of doc.walls) if (w.attachTopTo && !doc.floors.some(f => f.id === w.attachTopTo)) delete w.attachTopTo;
+      for (const w of doc.walls) if (w.attachTopTo && !doc.floors.some(f => f.id === w.attachTopTo) && !doc.roofs.some(r => r.id === w.attachTopTo)) delete w.attachTopTo;
+      // roofs: must be buildable, and under the 40 m limit
+      for (const r of doc.roofs) {
+        const g = roofGeometry(doc, r);
+        if (g.top > 40000) throw new Error(`That roof would reach ${(g.top / 1000).toFixed(3)} m. The building height limit is 40 m.`);
+        if (r.topZ == null || Math.abs(r.topZ - g.top) > 0.01) r.topZ = Math.round(g.top * 100) / 100;
+      }
       // wall sweeps and reveals lose deleted walls, and go when none are left
       const wallIds = new Set(doc.walls.map(w => w.id));
       for (const c of doc.components) if (c.kind === "wallSweep") c.wallIds = c.wallIds.filter(id => wallIds.has(id));
@@ -183,6 +196,11 @@ app.elementsInRect = (r, crossing) => {
     if (pts.length && (crossing ? pts.some(inside) : pts.every(inside))) ids.push(c.id);
   }
   for (const rp of app.doc.referencePlanes) if (crossing ? [rp.a, rp.b].some(inside) : [rp.a, rp.b].every(inside)) ids.push(rp.id);
+  for (const r of app.doc.roofs) {
+    if (!roofOnPlan(app.doc, r, app.levelId) || app.sketch) continue;
+    let pts = []; try { pts = roofGeometry(app.doc, r).outline; } catch { pts = []; }
+    if (pts.length && (crossing ? pts.some(inside) : pts.every(inside))) ids.push(r.id);
+  }
   for (const fl of app.doc.floors) {
     if (fl.levelId !== app.levelId || app.sketch) continue;
     const pts = floorLoops(fl).flat();
@@ -210,7 +228,7 @@ app.updateHover = c => {
     cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
   }
   cands.push(...openingsAt(app, c.raw));
-  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol));
+  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...roofsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol));
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
   const first = list[0];
@@ -277,7 +295,9 @@ const TOOLS = {
   detailLine: () => new LineTool(app, "detail"),
   wall: () => new WallTool(app),
   door: () => new OpeningTool(app, "door"),
-  boundary: () => new BoundaryTool(app),
+  boundary: () => (app.sketch?.kind === "roof" ? new RoofBoundaryTool(app) : new BoundaryTool(app)),
+  slopeArrow: () => new SlopeArrowTool(app),
+  roofExtrusion: () => new RoofExtrusionTool(app),
   refPlane: () => new RefPlaneTool(app),
   window: () => new OpeningTool(app, "window"),
   move: () => new MoveTool(app, false),
@@ -321,7 +341,8 @@ const RIBBON = [
       { id: "window", label: "Window", icon: "window", key: "WN", tool: "window" },
       { id: "component", label: "Component", icon: "component", run: () => modelInPlaceDialog(app, ui) },
       { id: "floor", label: "Floor", icon: "floor", key: "SB", run: () => startFloorSketch(app) },
-      { id: "roof", label: "Roof", icon: "roof", ...SOON(7) },
+      { id: "roof", label: "Roof by Footprint", icon: "roof", key: "RF", run: () => startRoofSketch(app) },
+      { id: "roofExtrusion", label: "Roof by Extrusion", icon: "roof", tool: "roofExtrusion" },
     ] },
     { label: "Wall details", items: [
       { id: "wallSweep", label: "Wall Sweep", icon: "sweep", run: () => wallSweepDialog(app, ui, false) },
@@ -388,10 +409,10 @@ const RIBBON = [
 ];
 const SKETCH_TAB = { tab: "Modify | Create Floor Boundary", groups: [
   { label: "Mode", items: [
-    { id: "finishSketch", label: "Finish Edit Mode", icon: "fit", run: () => (app.sketch?.kind === "floor" ? finishSketch(app, ui) : finishComponentSketch(app, ui)) },
+    { id: "finishSketch", label: "Finish Edit Mode", icon: "fit", run: () => (app.sketch?.kind === "floor" ? finishSketch(app, ui) : app.sketch?.kind === "roof" ? finishRoofSketch(app, ui) : finishComponentSketch(app, ui)) },
     { id: "cancelSketch", label: "Cancel Edit Mode", icon: "del", run: () => cancelSketch(app) },
   ] },
-  { label: "Draw", items: [{ id: "boundaryLine", label: "Boundary Line", icon: "line", key: "BL", tool: "boundary" }, { id: "workPlane", label: "Set Work Plane", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
+  { label: "Draw", items: [{ id: "boundaryLine", label: "Boundary Line", icon: "line", key: "BL", tool: "boundary" }, { id: "slopeArrow", label: "Slope Arrow", icon: "move", tool: "slopeArrow", roofOnly: true }, { id: "workPlane", label: "Set Work Plane", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
   { label: "Modify", items: [
     { id: "select", label: "Modify", icon: "modify", key: "MD", tool: "select" },
     { id: "trim", label: "Trim/Extend", icon: "trim", key: "TR", tool: "trim" },
@@ -411,7 +432,8 @@ SHORTCUTS.BL = ALL_ITEMS.find(i => i.id === "boundaryLine");
 let ribbonTab = app.prefs.ribbonTab || "Architecture";
 
 function runItem(it) {
-  if (app.sketch && !SKETCH_OK.has(it.id)) { app.toast("Finish or cancel the floor sketch first (Finish Edit Mode / Cancel Edit Mode)."); return; }
+  if (app.sketch && !SKETCH_OK.has(it.id)) { app.toast("Finish or cancel the sketch first (Finish Edit Mode / Cancel Edit Mode)."); return; }
+  if (it.roofOnly && app.sketch?.kind !== "roof") { app.toast("A slope arrow is for roof footprints."); return; }
   if (it.soon) { app.toast(`${it.label}: ${it.soon.toLowerCase()}.`); return; }
   if (it.tool) app.setTool(it.tool);
   else it.run?.();
@@ -426,7 +448,7 @@ function renderRibbon() {
   $("#ribbonTabs").innerHTML = TABS.map(t => `<button role="tab" type="button" aria-selected="${t.tab === ribbonTab}" data-tab="${t.tab}">${t.tab}</button>`).join("");
   $("#ribbonTabs").querySelectorAll("button").forEach(b => b.onclick = () => { ribbonTab = b.dataset.tab; app.prefs.ribbonTab = ribbonTab; app.savePrefs(); renderRibbon(); });
   const tab = TABS.find(t => t.tab === ribbonTab) || TABS[0];
-  $("#ribbonPanel").innerHTML = tab.groups.map(g => `<div class="sk-group"><div class="items">${g.items.map(it => {
+  $("#ribbonPanel").innerHTML = tab.groups.map(g => `<div class="sk-group"><div class="items">${g.items.filter(it => !it.roofOnly || app.sketch?.kind === "roof").map(it => {
     const tip = `${it.label}${it.key ? ` (${it.key})` : it.hint ? ` (${it.hint})` : ""}${it.soon ? ` · ${it.soon}` : ""}`;
     const pressed = it.tool && app.tool?.name === it.tool;
     return `<button type="button" class="sk-tool" data-id="${it.id}" title="${esc(tip)}" aria-pressed="${pressed}"${it.soon ? " disabled" : ""}${it.id === "undo" && !app.history.canUndo() ? " disabled" : ""}${it.id === "redo" && !app.history.canRedo() ? " disabled" : ""}>${icon(it.icon)}<span>${esc(it.label)}</span></button>`;
@@ -472,6 +494,7 @@ function renderProps() {
   const t = app.tool;
   if (app.sketch && (t?.name === "boundary" || ![...app.selection].some(id => app.lookup(id)))) {
     if (app.sketch.kind === "floor") { box.innerHTML = sketchProps(app, esc); wireSketchProps(app); }
+    else if (app.sketch.kind === "roof") { box.innerHTML = roofSketchProps(app, esc); wireRoofSketchProps(app, renderProps); }
     else { box.innerHTML = componentSketchProps(app, esc); wireComponentSketchProps(app, renderProps); }
     return;
   }
@@ -521,6 +544,8 @@ function renderProps() {
   const els = ids.map(app.lookup);
   if (els.every(e => app.doc.components.some(c => c.id === e.id) || app.doc.referencePlanes.some(r => r.id === e.id))) { box.innerHTML = componentProps(app, ids, esc); wireComponentProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.floors.some(f => f.id === e.id))) { box.innerHTML = floorProps(app, ids, esc); wireFloorProps(app, ids, renderProps, ui); return; }
+  if (els.every(e => app.doc.roofs.some(r => r.id === e.id))) { box.innerHTML = roofProps(app, ids, esc); wireRoofProps(app, ids, renderProps, ui); return; }
+  if (app.sketch?.kind === "roof" && els.every(e => e.kind === "sketch")) { box.innerHTML = roofLineProps(app, ids, esc); wireRoofLineProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.openings.some(o => o.id === e.id))) { box.innerHTML = openingProps(app, ids, esc); wireOpeningProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.isWall(e.id))) { box.innerHTML = wallProps(app, ids, esc); wireWallProps(app, ids, renderProps, typeId => wallTypeDialog(app, typeId, ui)); return; }
   const allLines = els.every(e => e.shape && e.kind);
@@ -559,7 +584,7 @@ function renderBrowser() {
 }
 
 function setLevel(id) {
-  if (app.sketch && id !== app.sketch.levelId) { app.toast("Finish or cancel the floor sketch before changing level."); renderBrowser(); return; }
+  if (app.sketch && id !== app.sketch.levelId) { app.toast("Finish or cancel the sketch before changing level."); renderBrowser(); return; }
   app.levelId = id; app.selection.clear(); app.view3d.invalidate();
   $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`;
   renderBrowser(); app.toolChanged();
@@ -616,6 +641,7 @@ function deleteSelection() {
     doc.lines = doc.lines.filter(l => !ids.includes(l.id));
     doc.walls = doc.walls.filter(w => !ids.includes(w.id));
     doc.floors = doc.floors.filter(f => !ids.includes(f.id));
+    doc.roofs = doc.roofs.filter(r => !ids.includes(r.id));
     doc.components = doc.components.filter(c => !ids.includes(c.id));
     doc.referencePlanes = doc.referencePlanes.filter(r => !ids.includes(r.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
@@ -677,6 +703,7 @@ canvas.addEventListener("contextmenu", e => e.preventDefault());
 canvas.addEventListener("dblclick", () => {
   const h = app.hoverId;
   if (app.tool.name === "select" && h && app.doc.floors.some(f => f.id === h)) startFloorSketch(app, h);
+  if (app.tool.name === "select" && h && app.doc.roofs.some(r => r.id === h)) editRoof(app, ui, h);
   const comp = h && app.doc.components.find(c => c.id === h && (c.kind === "extrusion" || c.kind === "sweep"));
   if (app.tool.name === "select" && comp) startComponentSketch(app, comp.kind, { editId: comp.id });
 });

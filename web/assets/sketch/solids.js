@@ -18,7 +18,9 @@ const ccw = poly => (G.polygonArea(poly) < 0 ? [...poly].reverse() : poly);
 
 /** Splits a simple polygon into triangles (ear clipping). */
 export function triangulate(poly) {
-  const pts = ccw(poly).map(p => ({ x: p.x, y: p.y }));
+  // repeated points (a quad that has closed to a triangle) would stop every ear from being found
+  const pts = ccw(poly).map(p => ({ x: p.x, y: p.y })).filter((p, i, a) => G.dist(p, a[(i + 1) % a.length]) > 1e-6);
+  if (pts.length < 3) return [];
   const tris = [];
   const isEar = (i, idx) => {
     const a = pts[idx[(i - 1 + idx.length) % idx.length]], b = pts[idx[i]], c = pts[idx[(i + 1) % idx.length]];

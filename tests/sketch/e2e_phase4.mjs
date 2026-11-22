@@ -60,11 +60,12 @@ await page.locator("#pType").selectOption("wn-1500");
 d = await model();
 check(d.openings.find(o => o.id === selId)?.typeId === "wn-1500", "the window is now W 1500x1200 sliding");
 // 4. Temporary dimension: type the distance from its edge to the next wall
+await page.waitForTimeout(200); // let the plan redraw so its clickable dimensions are current
 const dims = await S(() => window.__sketch.plan.hits.length);
 check(dims >= 2, `the selected window shows distances to the walls either side (${dims} clickable)`);
 // the dimension between the west wall's inner face (x 127.5) and the window's west edge
 const firstDim = await S(() => { const a = window.__sketch, r = document.getElementById("planCanvas").getBoundingClientRect(), p = a.plan.toScreen({ x: 1200, y: 8000 }); const h = a.plan.hits.reduce((b, h) => (!b || Math.hypot(h.cx - p.x, h.cy - p.y) < Math.hypot(b.cx - p.x, b.cy - p.y) ? h : b), null); return { x: r.left + h.cx, y: r.top + h.cy }; });
-await page.mouse.click(firstDim.x, firstDim.y); await page.waitForTimeout(60);
+await page.mouse.click(firstDim.x, firstDim.y); await page.locator("#inlineInput").waitFor({ state: "visible" });
 const shown = Number(await page.locator("#inlineInput").inputValue());
 await page.locator("#inlineInput").fill("1000"); await page.keyboard.press("Enter");
 d = await model();
