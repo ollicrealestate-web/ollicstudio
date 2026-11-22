@@ -41,10 +41,81 @@ export function copyOf(el) {
   return c;
 }
 
+// ---------------------------------------------------------------- every kind of element
+/** Collections whose elements Move, Copy, Rotate, Mirror, Scale and Array work on. */
+export const MOVABLE = ["walls", "lines", "openings", "floors", "roofs", "components", "dimensions", "texts", "referencePlanes"];
+const PREFIX = { walls: "wl", openings: null, floors: "fl", roofs: "rf", dimensions: "dm", texts: "tx", referencePlanes: "rp" };
+export function collectionOf(doc, id) { for (const k of MOVABLE) if ((doc[k] || []).some(x => x.id === id)) return k; return null; }
+/** Wall sweeps and reveals belong to their walls: they move with them, not on their own. */
+export const canTransform = (doc, id) => { const k = collectionOf(doc, id); if (!k) return false; if (k === "components") return doc.components.find(c => c.id === id).kind !== "wallSweep"; return true; };
+
+const lin = (M, v) => ({ x: M[0] * v.x + M[2] * v.y, y: M[1] * v.x + M[3] * v.y });
+/** Transforms any element in place (not walls' joins, not openings: see moveOpening). */
+export function transformAny(doc, el, coll, Mx) {
+  const each = (list, f) => (list || []).forEach(f);
+  const mir = det(Mx) < 0;
+  switch (coll) {
+    case "walls": case "lines": transform(el, Mx); break;
+    case "floors": each(el.boundary, c => transform(c, Mx)); break;
+    case "roofs":
+      if (el.method === "extrusion") { el.a = apply(Mx, el.a); el.b = apply(Mx, el.b); if (mir) { const s = el.start; el.start = -el.end; el.end = -s; } }
+      else { each(el.boundary, c => transform(c, Mx)); each(el.slopeArrows, a => { a.tail = apply(Mx, a.tail); a.head = apply(Mx, a.head); }); }
+      break;
+    case "components":
+      if (el.kind === "extrusion") each(el.boundary, c => transform(c, Mx));
+      else if (el.kind === "sweep") {
+        if (el.plane) { // drawn in an elevation: the path stays on its vertical plane; the plane moves
+          el.plane.o = apply(Mx, el.plane.o);
+          const k = Math.sqrt(Math.abs(det(Mx))) || 1;
+          el.plane.u = G.mul(lin(Mx, el.plane.u), 1 / k); el.plane.n = G.mul(lin(Mx, el.plane.n), 1 / k);
+          if (Math.abs(k - 1) > 1e-9) each(el.path, c => { if (c.shape === "line") { c.a = G.mul(c.a, k); c.b = G.mul(c.b, k); } else { c.c = G.mul(c.c, k); c.r *= k; } });
+        } else { each(el.path, c => transform(c, Mx)); if (mir) el.flip = !el.flip; }
+      }
+      break;
+    case "dimensions": el.a = apply(Mx, el.a); el.b = apply(Mx, el.b); if (mir) el.offset = -el.offset; break;
+    case "texts": el.p = apply(Mx, el.p); break;
+    case "referencePlanes": el.a = apply(Mx, el.a); el.b = apply(Mx, el.b); break;
+  }
+}
+
+/** Moves a door or window by a transform: along its wall, or onto another straight wall on the same level. */
+export function moveOpening(doc, o, Mx, hooks) {
+  const host = doc.walls.find(w => w.id === o.hostWallId);
+  if (!host || host.shape !== "line") throw new Error("Doors and windows move along straight walls in this version.");
+  const ax0 = hooks.wallAxis(doc, host), p = apply(Mx, G.add(ax0.c0, G.mul(ax0.u, o.positionAlongWall)));
+  let best = null;
+  for (const w of doc.walls) {
+    if (w.shape !== "line" || w.baseLevelId !== host.baseLevelId) continue;
+    const ax = hooks.wallAxis(doc, w), s = G.dot(G.sub(p, ax.c0), ax.u), d = Math.abs(G.dot(G.sub(p, ax.c0), ax.n));
+    if (s < 0 || s > ax.L || d > ax.h + 300) continue;
+    const score = d - (w.id === host.id ? 1 : 0);
+    if (!best || score < best.score) best = { w, s, score };
+  }
+  const name = o.kind === "door" ? "door" : "window";
+  if (!best) throw new Error(`A ${name} must stay in a wall: move it along its wall or onto another wall.`);
+  // keep which way it faces and which side it hinges, as transformed, on the new wall's axes
+  const F = lin(Mx, G.mul(ax0.n, o.flipFacing ? -1 : 1)), Hd = lin(Mx, G.mul(ax0.u, o.flipHand ? -1 : 1)), ax1 = hooks.wallAxis(doc, best.w);
+  o.flipFacing = G.dot(F, ax1.n) < 0; o.flipHand = G.dot(Hd, ax1.u) < 0;
+  o.hostWallId = best.w.id; o.positionAlongWall = Math.round(best.s * 10) / 10;
+}
+
 /** Copies (or moves) elements by a transform. Returns the new ids for copies. */
-export function transformIds(doc, ids, M, { copy = false } = {}) {
-  const out = [];
+export function transformIds(doc, ids, M, { copy = false, hooks } = {}) {
+  const out = [], set = new Set(ids);
   for (const id of ids) {
+    const coll = collectionOf(doc, id);
+    if (coll && coll !== "walls" && coll !== "lines") {
+      const el = doc[coll].find(x => x.id === id);
+      if (coll === "components" && el.kind === "wallSweep") continue;
+      if (coll === "openings" && set.has(el.hostWallId)) continue; // it goes with its wall
+      if (!copy && el.pinned) throw new Error("A pinned element cannot move. Unpin it first (UP).");
+      const target = copy ? JSON.parse(JSON.stringify(el)) : el;
+      if (copy) { target.id = newId(coll === "openings" ? (el.kind === "door" ? "dr" : "wn") : coll === "components" ? el.id.slice(0, 2) : PREFIX[coll]); delete target.pinned; }
+      if (coll === "openings") { if (!hooks) throw new Error("Doors and windows need their wall to move."); moveOpening(doc, target, M, hooks); }
+      else transformAny(doc, target, coll, M);
+      if (copy) { doc[coll].push(target); out.push(target.id); } else out.push(id);
+      continue;
+    }
     const el = doc.walls.find(w => w.id === id) || doc.lines.find(l => l.id === id);
     if (!el) continue;
     if (copy) {
@@ -65,20 +136,20 @@ export function transformIds(doc, ids, M, { copy = false } = {}) {
 }
 
 /** Linear array: n items in total (the original is the first); `step` is the vector to the 2nd item, or to the last with toLast. */
-export function arrayLinear(doc, ids, vec, n, toLast = false) {
+export function arrayLinear(doc, ids, vec, n, toLast = false, hooks) {
   if (!(n >= 2 && n <= 200)) throw new Error("An array needs between 2 and 200 items.");
   const step = toLast ? G.mul(vec, 1 / (n - 1)) : vec;
   const made = [];
-  for (let i = 1; i < n; i++) made.push(...transformIds(doc, ids, translation(G.mul(step, i)), { copy: true }));
+  for (let i = 1; i < n; i++) made.push(...transformIds(doc, ids, translation(G.mul(step, i)), { copy: true, hooks }));
   return made;
 }
 
 /** Radial array round a centre; angle is to the 2nd item, or the whole sweep with toLast. */
-export function arrayRadial(doc, ids, centre, angle, n, toLast = false) {
+export function arrayRadial(doc, ids, centre, angle, n, toLast = false, hooks) {
   if (!(n >= 2 && n <= 200)) throw new Error("An array needs between 2 and 200 items.");
   const step = toLast ? angle / (n - 1) : angle;
   const made = [];
-  for (let i = 1; i < n; i++) made.push(...transformIds(doc, ids, rotation(centre, step * i), { copy: true }));
+  for (let i = 1; i < n; i++) made.push(...transformIds(doc, ids, rotation(centre, step * i), { copy: true, hooks }));
   return made;
 }
 

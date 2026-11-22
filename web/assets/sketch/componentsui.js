@@ -9,6 +9,7 @@ import { COLORS } from "./plan.js";
 import { newId, levelLabel } from "./model.js";
 import { makeWall, wallHeights, checkWall, wallType } from "./walls.js";
 import * as LV from "./levels.js";
+import { startElevSweep, finishElevSweep, elevSweepProps, wireElevSweepProps } from "./elevsketch.js";
 import { addRoofParapet } from "./roofsui.js";
 
 const REF_COLOR = "#4ade80";
@@ -18,6 +19,9 @@ export const SKETCH_TITLES = { floor: "Modify | Create Floor Boundary", extrusio
 export function startComponentSketch(app, kind, opts = {}) {
   if (app.sketch) { app.toast("Finish or cancel the sketch you are in first."); return; }
   const comp = opts.editId && app.doc.components.find(c => c.id === opts.editId);
+  // a sweep is sketched in the elevation that is open (or the one it was drawn in)
+  if (kind === "sweep" && (comp?.plane || (!comp && app.elevSide))) return startElevSweep(app, opts);
+  if (app.elevSide) app.closeElevation();
   const p = app.prefs[kind] || {};
   app.sketch = {
     id: newId("sk"), kind, levelId: comp ? comp.levelId : app.levelId, editId: comp?.id || null, bad: new Set(), message: "",
@@ -40,6 +44,7 @@ export function startComponentSketch(app, kind, opts = {}) {
 
 export async function finishComponentSketch(app, ui) {
   const sk = app.sketch;
+  if (sk?.elev) return finishElevSweep(app, ui);
   const lines = app.doc.lines.filter(l => l.kind === "sketch" && l.sketchId === sk.id);
   const curves = lines.map(l => (l.shape === "arc" ? { shape: "arc", c: l.c, r: l.r, start: l.start, sweep: l.sweep } : { shape: "line", a: l.a, b: l.b }));
   let error = "";
@@ -67,6 +72,7 @@ export async function finishComponentSketch(app, ui) {
 }
 
 export function componentSketchProps(app, esc) {
+  if (app.sketch?.elev) return elevSweepProps(app, esc);
   const sk = app.sketch, doc = app.doc;
   const lv = doc.levels.find(l => l.id === sk.levelId);
   const common = `<div class="prow"><span>Solid / Void</span><select id="ckVoid"><option value="solid"${sk.isVoid ? "" : " selected"}>Solid</option><option value="void"${sk.isVoid ? " selected" : ""}>Void (cuts walls and floors)</option></select></div>
@@ -91,6 +97,7 @@ export function componentSketchProps(app, esc) {
 }
 
 export function wireComponentSketchProps(app, rerender) {
+  if (app.sketch?.elev) return wireElevSweepProps(app, rerender);
   const $ = s => document.querySelector(s), sk = app.sketch;
   const save = () => { app.prefs[sk.kind] = { start: sk.start, end: sk.end, material: sk.material, height: sk.height, profileId: sk.profileId, rectW: sk.rectW, rectH: sk.rectH }; app.savePrefs(); };
   const num = (id, k) => { const el = $(id); if (el) el.onchange = () => { const v = parseFloat(el.value); if (Number.isFinite(v)) { sk[k] = v; save(); } }; };
@@ -125,6 +132,8 @@ export function drawComponents(view, app) {
     try {
       if (c.kind === "extrusion" && c.levelId === app.levelId) {
         const r = checkSketch(c.boundary); if (r.ok) for (const l of r.loops) view.polygon(l, sel ? "rgba(59,130,246,.12)" : null, null), drawPoly(view, ext(l, true), col, sel ? 2 : 1, dash);
+      } else if (c.kind === "sweep" && c.plane && c.levelId === app.levelId) {
+        const st = C.sweepPlanStrip(doc, c); drawPoly(view, [...st, st[0]], col, sel ? 2 : 1, dash);
       } else if (c.kind === "sweep" && c.levelId === app.levelId) {
         const g = C.sweepGeometry(doc, c); bandOutline(view, g.pts, g.closed, g.prof, col, dash);
       } else if (c.kind === "wallSweep") {
@@ -155,6 +164,8 @@ export function componentsAt(app, p, tol) {
       if (c.kind === "extrusion" && c.levelId === app.levelId) {
         const r = checkSketch(c.boundary); if (!r.ok) continue;
         for (const l of r.loops) { if (G.pointInPolygon(p, l)) d = Math.min(d, tol * 0.9); l.forEach((q, i) => { d = Math.min(d, G.projectOnSegment(p, q, l[(i + 1) % l.length]).dist); }); }
+      } else if (c.kind === "sweep" && c.plane && c.levelId === app.levelId) {
+        const st = C.sweepPlanStrip(doc, c); if (G.pointInPolygon(p, st)) d = tol * 0.8; st.forEach((q, i) => { d = Math.min(d, G.projectOnSegment(p, q, st[(i + 1) % 4]).dist); });
       } else if (c.kind === "sweep" && c.levelId === app.levelId) {
         const g = C.sweepGeometry(doc, c), half = Math.max(...g.prof.map(q => Math.abs(q.x)));
         const pts = ext(g.pts, g.closed); for (let i = 0; i < pts.length - 1; i++) d = Math.min(d, Math.max(0, G.projectOnSegment(p, pts[i], pts[i + 1]).dist - half));
@@ -271,7 +282,7 @@ export function modelInPlaceDialog(app, ui) {
   ui.openDialog(`<h3>Model In-Place</h3><p>Choose what to make. Solid adds to the model; Void cuts walls and floors it passes through.</p>
     <div class="list">
       <button type="button" data-k="extrusion"><span>Extrusion</span><small>a closed profile pushed up from the level</small></button>
-      <button type="button" data-k="sweep"><span>Sweep</span><small>a profile run along a path (bands, copings, cornices)</small></button>
+      <button type="button" data-k="sweep"><span>Sweep</span><small>${app.elevSide ? "a profile run along a path you sketch on a wall face in this elevation" : "a profile run along a path on the level (bands, copings, cornices); open an elevation first to sketch it on a wall face"}</small></button>
       <button type="button" data-k="vextrusion"><span>Void Extrusion</span><small>cuts a hole or niche through walls and floors</small></button>
       <button type="button" data-k="vsweep"><span>Void Sweep</span><small>a profile cut along a path (shown, not yet cutting)</small></button>
     </div><div class="actions"><button class="btn" type="button" id="mCancel">Cancel</button></div>`, d => {

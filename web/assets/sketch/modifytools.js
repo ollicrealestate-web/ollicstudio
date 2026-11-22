@@ -4,6 +4,7 @@ import * as G from "./geom.js";
 import * as M from "./modify.js";
 import { COLORS } from "./plan.js";
 import { locationPolyline } from "./walls.js";
+import { wallAxis } from "./openings.js";
 
 const fake = () => ({ walls: [], lines: [] });
 const deg = r => Math.round((r * 180) / Math.PI * 100) / 100;
@@ -26,8 +27,18 @@ function ghost(view, el, color = COLORS.preview, dash = [6, 4]) {
   else view.drawLine({ ...el, style: "medium" }, color);
 }
 
+/** Ghosts of the selected elements as they would be after the transform. */
+function ghostIds(view, app, ids, Mx, color = COLORS.preview) {
+  for (const id of ids) for (const o of app.outlineOf(id)) {
+    const p = o.pts.map(q => M.apply(Mx, q));
+    for (let i = 0; i < p.length - 1; i++) view.segment(p[i], p[i + 1], color, 2, [6, 4]);
+    if (o.closed && p.length > 2) view.segment(p.at(-1), p[0], color, 2, [6, 4]);
+  }
+}
+const HOOKS = { wallAxis };
+
 function selectionCentre(app, ids) {
-  const pts = ids.map(app.lookup).filter(Boolean).flatMap(el => locationPolyline(el));
+  const pts = ids.flatMap(id => app.outlineOf(id).flatMap(o => o.pts));
   if (!pts.length) return { x: 0, y: 0 };
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
@@ -45,7 +56,7 @@ class StepTool {
   move(c) { this.cursor = c.pt; this.app.updateHover(c); this.app.redraw(); }
   escape() { if (this.picks.length) { this.picks = []; this.app.toolChanged(); return true; } return false; }
   done(label) { this.picks = []; this.app.toolChanged(); if (label) this.app.toast(label); }
-  get ids() { return [...this.app.selection].filter(id => M.isCurve(this.app.lookup(id))); }
+  get ids() { return [...this.app.selection].filter(id => M.canTransform(this.app.doc, id)); }
 }
 
 // ------------------------------------------------------------------ Move / Copy
@@ -75,9 +86,9 @@ export class MoveTool extends StepTool {
     const ids = this.ids, app = this.app;
     if (!ids.length) { app.toast("Nothing is selected."); return; }
     const made = app.commit(this.title, doc => {
-      if (this.copy) return M.transformIds(doc, ids, M.translation(delta), { copy: true });
+      if (this.copy) return M.transformIds(doc, ids, M.translation(delta), { copy: true, hooks: HOOKS });
       if (ids.some(id => app.lookup(id)?.pinned)) throw new Error("A pinned element cannot move. Unpin it first (UP).");
-      if (this.prefs.disjoin) M.transformIds(doc, ids, M.translation(delta));
+      if (this.prefs.disjoin) M.transformIds(doc, ids, M.translation(delta), { hooks: HOOKS });
       else app.translateWithJoins(doc, ids, delta);
       return ids;
     });
@@ -97,7 +108,7 @@ export class MoveTool extends StepTool {
   drawPreview(view) {
     if (!this.picks.length || !this.cursor) return;
     const d = this.constrainedDelta(G.sub(this.cursor, this.picks[0]));
-    for (const id of this.ids) { const c = M.copyOf(this.app.lookup(id)); M.transform(c, M.translation(d)); ghost(view, c); }
+    ghostIds(view, this.app, this.ids, M.translation(d));
     view.segment(this.picks[0], G.add(this.picks[0], d), COLORS.dim, 1, [4, 4]);
     if (G.len(d) > 1) view.tempDim(this.picks[0], G.add(this.picks[0], d), String(Math.round(G.len(d))));
   }
@@ -126,7 +137,7 @@ export class RotateTool extends StepTool {
   }
   apply(ang) {
     const app = this.app, ids = this.ids;
-    const made = app.commit("Rotate", doc => M.transformIds(doc, ids, M.rotation(this.centre, ang), { copy: !!this.prefs.copy }));
+    const made = app.commit("Rotate", doc => M.transformIds(doc, ids, M.rotation(this.centre, ang), { copy: !!this.prefs.copy, hooks: HOOKS }));
     if (!made) return;
     if (this.prefs.copy) { app.selection.clear(); made.forEach(id => app.selection.add(id)); }
     this.picks = []; app.setTool("select"); app.toast(`Rotated ${deg(ang)}°`);
@@ -139,7 +150,7 @@ export class RotateTool extends StepTool {
     if (!this.picks.length) { view.segment(c, this.cursor, COLORS.dim, 1, [4, 4]); return; }
     const a = G.angleOf(G.sub(this.cursor, c)) - G.angleOf(G.sub(this.picks[0], c));
     view.segment(c, this.picks[0], COLORS.dim, 1, [4, 4]); view.segment(c, this.cursor, COLORS.dim, 1, [4, 4]);
-    for (const id of this.ids) { const e = M.copyOf(this.app.lookup(id)); M.transform(e, M.rotation(c, a)); ghost(view, e); }
+    ghostIds(view, this.app, this.ids, M.rotation(c, a));
     view.label(G.add(c, { x: 0, y: view.px(-22) }), `${deg(((a % G.TAU) + G.TAU) % G.TAU)}°`, { color: COLORS.dim });
   }
 }
@@ -161,7 +172,7 @@ export class MirrorTool extends StepTool {
   }
   apply(a, b) {
     const app = this.app, ids = this.ids;
-    const made = app.commit("Mirror", doc => M.transformIds(doc, ids, M.mirrorAcross(a, b), { copy: !!this.prefs.copy }));
+    const made = app.commit("Mirror", doc => M.transformIds(doc, ids, M.mirrorAcross(a, b), { copy: !!this.prefs.copy, hooks: HOOKS }));
     if (!made) return;
     app.selection.clear(); made.forEach(id => app.selection.add(id));
     this.picks = []; app.setTool("select");
@@ -173,7 +184,7 @@ export class MirrorTool extends StepTool {
     else { const h = this.app.hoverId && this.app.lookup(this.app.hoverId); if (!h || h.shape !== "line") return; a = h.a; b = h.b; }
     if (G.dist(a, b) < 1) return;
     view.segment(a, b, COLORS.dim, 1, [10, 4, 2, 4]);
-    for (const id of this.ids) { const e = M.copyOf(this.app.lookup(id)); M.transform(e, M.mirrorAcross(a, b)); ghost(view, e); }
+    ghostIds(view, this.app, this.ids, M.mirrorAcross(a, b));
   }
 }
 
@@ -201,14 +212,14 @@ export class ScaleTool extends StepTool {
   }
   apply(origin, k) {
     if (!(k > 0)) { this.app.toast("The scale must be more than 0.", true); return; }
-    const made = this.app.commit("Scale", doc => M.transformIds(doc, this.ids, M.scaling(origin, k)));
+    const made = this.app.commit("Scale", doc => M.transformIds(doc, this.ids, M.scaling(origin, k), { hooks: HOOKS }));
     this.picks = [];
     if (made) { this.app.setTool("select"); this.app.toast(`Scaled by ${Math.round(k * 1000) / 1000}`); }
   }
   drawPreview(view) {
     if (this.prefs.mode !== "graphical" || this.picks.length < 2 || !this.cursor) return;
     const k = G.dist(this.picks[0], this.cursor) / Math.max(1, G.dist(this.picks[0], this.picks[1]));
-    for (const id of this.ids) { const e = M.copyOf(this.app.lookup(id)); M.transform(e, M.scaling(this.picks[0], k)); ghost(view, e); }
+    ghostIds(view, this.app, this.ids, M.scaling(this.picks[0], k));
   }
 }
 
@@ -240,14 +251,14 @@ export class ArrayTool extends StepTool {
     this.applyLinear(G.sub(c.pt, this.picks[0]));
   }
   applyLinear(vec) {
-    const made = this.app.commit("Array", doc => M.arrayLinear(doc, this.ids, vec, this.prefs.n, this.prefs.to === "last"));
+    const made = this.app.commit("Array", doc => M.arrayLinear(doc, this.ids, vec, this.prefs.n, this.prefs.to === "last", HOOKS));
     this.picks = []; if (made) this.app.setTool("select");
   }
   applyRadial() {
     const ang = (this.prefs.angle * Math.PI) / 180;
     const full = Math.abs(Math.abs(this.prefs.angle) - 360) < 1e-6 && this.prefs.to === "last";
     // a full turn spread to the "last" would put the last copy on the original, so divide by n instead
-    const made = this.app.commit("Array", doc => full ? M.arrayRadial(doc, this.ids, this.centre, ang / this.prefs.n, this.prefs.n, false) : M.arrayRadial(doc, this.ids, this.centre, ang, this.prefs.n, this.prefs.to === "last"));
+    const made = this.app.commit("Array", doc => full ? M.arrayRadial(doc, this.ids, this.centre, ang / this.prefs.n, this.prefs.n, false, HOOKS) : M.arrayRadial(doc, this.ids, this.centre, ang, this.prefs.n, this.prefs.to === "last", HOOKS));
     if (made) this.app.setTool("select");
   }
   typed(v) {
@@ -262,7 +273,7 @@ export class ArrayTool extends StepTool {
     if (p.kind === "radial") { const c = this.centre, s = view.px(8); view.segment(G.add(c, { x: -s, y: 0 }), G.add(c, { x: s, y: 0 }), COLORS.sel, 2); view.segment(G.add(c, { x: 0, y: -s }), G.add(c, { x: 0, y: s }), COLORS.sel, 2); return; }
     if (!this.picks.length || !this.cursor) return;
     const vec = G.sub(this.cursor, this.picks[0]), step = p.to === "last" ? G.mul(vec, 1 / (p.n - 1)) : vec;
-    for (let i = 1; i < p.n; i++) for (const id of this.ids) { const e = M.copyOf(this.app.lookup(id)); M.transform(e, M.translation(G.mul(step, i))); ghost(view, e); }
+    for (let i = 1; i < p.n; i++) ghostIds(view, this.app, this.ids, M.translation(G.mul(step, i)));
   }
 }
 

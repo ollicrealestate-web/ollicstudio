@@ -26,7 +26,11 @@ export class ElevationView {
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
     this.wire();
-    const loop = () => { if (this.open && this.dirty) { this.dirty = false; this.render(); } requestAnimationFrame(loop); };
+    const loop = () => {
+      if (this.open && this.dirty) { this.dirty = false; this.overlayDirty = false; this.render(); }
+      else if (this.open && this.overlayDirty) { this.overlayDirty = false; this.drawLevels(); }
+      requestAnimationFrame(loop);
+    };
     requestAnimationFrame(loop);
   }
 
@@ -45,6 +49,15 @@ export class ElevationView {
 
   // screen <-> elevation coordinates (u along the view in mm, z up in mm)
   toScreen(u, z) { return { x: (u - this.cu) * this.s + this.w / 2, y: this.h / 2 - (z - this.cz) * this.s }; }
+  toModel(x, y) { return { x: (x - this.w / 2) / this.s + this.cu, y: this.zAt(y) }; }
+  /** The element under a point (u, z) of this elevation, front-most first. */
+  pickId(p) {
+    const s = this.toScreen(p.x, p.y), ndc = new THREE.Vector2((s.x / this.w) * 2 - 1, -(s.y / this.h) * 2 + 1);
+    const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, this.camera);
+    const meshes = []; this.app.view3d.root.traverse(o => { if (o.isMesh && o.userData.id) meshes.push(o); });
+    return ray.intersectObjects(meshes, false)[0]?.object.userData.id || null;
+  }
+  invalidateOverlay() { this.overlayDirty = true; }
   zAt(sy) { return (this.h / 2 - sy) / this.s + this.cz; }
 
   /** Model extent in this view: u range and z range (mm) of everything in 3D plus the levels. */
@@ -106,6 +119,7 @@ export class ElevationView {
       ctx.font = "12px Archivo, system-ui, sans-serif"; ctx.fillText(levelLabel(z), x1 + 22, y + 12);
       this.heads.push({ id: l.id, y, x0: x1 - 4, x1: this.w });
     }
+    this.app.drawElevSketch?.(ctx, this);
     // view name
     ctx.fillStyle = "#374151"; ctx.font = "600 12px Archivo, system-ui, sans-serif"; ctx.textAlign = "left"; ctx.fillText(`${ELEVATIONS[this.side].name} Elevation`, 12, this.h - 12);
   }
@@ -115,9 +129,13 @@ export class ElevationView {
   wire() {
     const el = this.over;
     let pan = null;
+    const tool = () => (this.app.tool?.elev && this.app.sketch?.elev === this.side ? this.app.tool : null);
+    el.addEventListener("contextmenu", e => e.preventDefault());
     el.addEventListener("pointerdown", e => {
       const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-      const h = e.button === 0 && this.headAt(x, y);
+      el.focus();
+      if (tool() && e.button === 0) { tool().elevDown(this, this.toModel(x, y), e.shiftKey); this.overlayDirty = true; return; }
+      const h = e.button === 0 && !tool() && this.headAt(x, y);
       if (h) { const lv = this.app.doc.levels.find(l => l.id === h.id); this.drag = { id: h.id, z: lv.elevation, y0: y, z0: lv.elevation }; el.setPointerCapture(e.pointerId); this.dirty = true; return; }
       pan = { x: e.clientX, y: e.clientY }; el.setPointerCapture(e.pointerId);
     });
@@ -125,6 +143,7 @@ export class ElevationView {
       const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
       if (this.drag) { this.drag.z = Math.round((this.drag.z0 + (this.drag.y0 - y) / this.s) / 10) * 10; this.dirty = true; this.app.setPrompt?.(`Level height ${levelLabel(this.drag.z)}. Release to set it.`); return; }
       if (pan) { this.cu -= (e.clientX - pan.x) / this.s; this.cz += (e.clientY - pan.y) / this.s; pan = { x: e.clientX, y: e.clientY }; this.dirty = true; return; }
+      if (tool()) { tool().elevMove(this, this.toModel(x, y), e.shiftKey); el.style.cursor = "crosshair"; this.overlayDirty = true; this.app.setPrompt?.(); return; }
       const h = this.headAt(x, y); el.style.cursor = h ? "ns-resize" : "grab";
       if ((h?.id || null) !== (this.hover || null)) { this.hover = h?.id || null; this.dirty = true; }
     });
