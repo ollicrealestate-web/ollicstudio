@@ -207,10 +207,18 @@ export function modelGlb(root, THREE) {
     if (!o.isMesh || !o.geometry?.attributes?.position || o.visible === false) return;
     let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
     g.applyMatrix4(o.matrixWorld);
-    const pos = g.attributes.position.array instanceof Float32Array ? g.attributes.position.array : new Float32Array(g.attributes.position.array);
-    if (!pos.length) return;
-    g.computeVertexNormals();
-    const nor = new Float32Array(g.attributes.normal.array);
+    // flat normals per triangle; zero-area triangles (slivers from cutting) are left out, as glTF needs unit normals
+    const src = g.attributes.position.array, keep = [], nrm = [];
+    for (let i = 0; i + 8 < src.length; i += 9) {
+      const ax = src[i + 3] - src[i], ay = src[i + 4] - src[i + 1], az = src[i + 5] - src[i + 2];
+      const bx = src[i + 6] - src[i], by = src[i + 7] - src[i + 1], bz = src[i + 8] - src[i + 2];
+      const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx, L = Math.hypot(nx, ny, nz);
+      if (!(L > 1e-12)) continue;
+      for (let k = 0; k < 9; k++) keep.push(src[i + k]);
+      for (let k = 0; k < 3; k++) nrm.push(nx / L, ny / L, nz / L);
+    }
+    if (!keep.length) { g.dispose(); return; }
+    const pos = new Float32Array(keep), nor = new Float32Array(nrm);
     const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], pos[i + k]); max[k] = Math.max(max[k], pos[i + k]); }
     const pv = addView(new Float32Array(pos), 34962), nv = addView(nor, 34962);
