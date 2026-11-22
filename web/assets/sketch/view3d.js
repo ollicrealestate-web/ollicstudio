@@ -77,6 +77,33 @@ export class View3D {
     this.ground.visible = on;
   }
 
+  /**
+   * The current 3D view as a picture: same camera and visual style, at the size asked for (pixels), on a dark or
+   * white background, without the grid. Returns a canvas. The view on screen is put back as it was.
+   */
+  snapshot(width, height, { background = "dark", edgesDark = true } = {}) {
+    if (this.dirty) { this.dirty = false; this.rebuild(); }
+    const r = this.renderer, size = r.getSize(new THREE.Vector2()), ratio = r.getPixelRatio(), aspect = this.camera.aspect;
+    const clear = r.getClearColor(new THREE.Color()), alpha = r.getClearAlpha(), grid = this.grid.visible, hi = this.edgeHi?.visible;
+    const max = r.capabilities.maxTextureSize || 4096;
+    const k = Math.min(1, max / width, max / height), W = Math.round(width * k), H = Math.round(height * k);
+    try {
+      r.setPixelRatio(1); r.setSize(W, H, false);
+      this.camera.aspect = W / H; this.camera.updateProjectionMatrix();
+      this.grid.visible = false; if (this.edgeHi) this.edgeHi.visible = false;
+      r.setClearColor(background === "white" ? 0xffffff : 0x0c0c0e, 1);
+      r.render(this.scene, this.camera);
+      const out = document.createElement("canvas"); out.width = W; out.height = H;
+      out.getContext("2d").drawImage(r.domElement, 0, 0, W, H);
+      return out;
+    } finally {
+      r.setClearColor(clear, alpha); this.grid.visible = grid; if (this.edgeHi) this.edgeHi.visible = hi;
+      r.setPixelRatio(ratio); r.setSize(size.x, size.y, false);
+      this.camera.aspect = aspect; this.camera.updateProjectionMatrix();
+      this.needsRender = true;
+    }
+  }
+
   resize() {
     const r = this.host.getBoundingClientRect();
     const w = Math.max(1, r.width), h = Math.max(1, r.height);

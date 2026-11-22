@@ -1136,6 +1136,10 @@ function exportDialog() {
       <label>Scale <select id="xScale">${["50", "100", "200"].map(s => `<option value="${s}"${s === scale ? " selected" : ""}>1 : ${s}</option>`).join("")}</select></label></div>
       <div><button class="btn" type="button" id="xPng">PNG</button> <button class="btn primary" type="button" id="xPdf">PDF</button></div></div>
     <div class="opt"><div><b>DXF (CAD drawing)</b><small>The chosen level's plan as lines, arcs and text in millimetres; opens in AutoCAD, BricsCAD, LibreCAD and others.</small></div><div><button class="btn" type="button" id="xDxf">DXF</button></div></div>
+    <div class="opt"><div><b>3D view picture</b><small>The 3D view as you see it now (same angle and visual style), as a PNG image.</small>
+      <label>Size <select id="x3Size"><option value="1920x1080">Full HD 1920 x 1080</option><option value="3840x2160">4K 3840 x 2160</option><option value="2480x1754">A4 landscape at 300 dpi</option><option value="view">As on screen (x2)</option></select></label>
+      <label>Background <select id="x3Bg"><option value="white">White</option><option value="dark">Dark</option></select></label></div>
+      <div><button class="btn" type="button" id="x3Png">PNG</button></div></div>
     <div class="opt"><div><b>3D model (GLB)</b><small>Everything shown in the 3D view (levels you have hidden are left out), with colours. Opens in Blender, Windows 3D Viewer and online viewers.</small></div><div><button class="btn" type="button" id="xGlb">GLB</button></div></div>
     <div class="opt"><div><b>Project file</b><small>The whole sketch, to open again with Import.</small></div><div><button class="btn" type="button" id="xJson">JSON</button></div></div>
     <div class="opt"><div><b>IFC (building model)</b><small>IFC4, millimetres: walls, floors, roofs, doors, windows and other parts as building objects on their levels, shaped as in 3D, with colours. Opens in Revit (File > Open > IFC), ArchiCAD, BIM viewers and the studio.</small></div><div><button class="btn primary" type="button" id="xIfc">IFC</button></div></div>
@@ -1150,6 +1154,16 @@ function exportDialog() {
     d.querySelector("#xPdf").onclick = async () => { try { const sh = planSheet(app, lvId(), sc()); download(await pdfFromCanvas(sh.canvas, sh.paper.w, sh.paper.h), `${name} - ${lvName()} 1-${sc()}.pdf`); ok(`PDF exported: ${sh.paper.name} at 1:${sc()}. Print at 100% (actual size) to keep the scale.`); } catch (e) { err(e); } };
     d.querySelector("#xDxf").onclick = () => { try { const r = planDxf(app, lvId()); download(new Blob([r.text], { type: "application/dxf" }), `${name} - ${lvName()}.dxf`); ok(`DXF exported: ${r.counts.lines} lines, ${r.counts.arcs} arcs, ${r.counts.texts} texts, in millimetres.`); } catch (e) { err(e); } };
     d.querySelector("#xGlb").onclick = () => { try { const v3 = app.view3d; if (v3.dirty) { v3.dirty = false; v3.rebuild(); } const r = modelGlb(v3.root, THREE); download(r.blob, `${name}.glb`); ok(`3D model exported: ${r.objects} objects.`); } catch (e) { err(e); } };
+    d.querySelector("#x3Png").onclick = async () => {
+      try {
+        if (app.view3d.paused) setLive3D(true);
+        const v = d.querySelector("#x3Size").value, c = app.view3d.renderer.domElement;
+        const [w, h] = v === "view" ? [c.clientWidth * 2, c.clientHeight * 2] : v.split("x").map(Number);
+        const shot = app.view3d.snapshot(w, h, { background: d.querySelector("#x3Bg").value });
+        const blob = await new Promise(r => shot.toBlob(r, "image/png"));
+        download(blob, `${name} - 3D.png`); ok(`3D picture exported: ${shot.width} x ${shot.height} px.`);
+      } catch (e) { err(e); }
+    };
     d.querySelector("#xIfc").onclick = () => { try { const r = modelIfc(app, THREE, { name: app.doc.name || "Sketch", typeMark: o => OP.typeMark(app.doc, o) }); download(new Blob([r.text], { type: "application/x-step" }), `${name}.ifc`); const c = r.counts; ok(`IFC exported: ${c.IFCWALL || 0} walls, ${c.IFCSLAB || 0} floors, ${c.IFCROOF || 0} roofs, ${c.IFCDOOR || 0} doors, ${c.IFCWINDOW || 0} windows, ${c.IFCBUILDINGELEMENTPROXY || 0} other parts.`); } catch (e) { err(e); } };
     d.querySelector("#xJson").onclick = () => { download(new Blob([JSON.stringify(app.doc, null, 1)], { type: "application/json" }), `${name}.ollic-sketch.json`); ok("Project file exported."); };
   });

@@ -200,6 +200,12 @@ const jsonLen = glb.buf.readUInt32LE(12), gj = JSON.parse(glb.buf.slice(20, 20 +
 check(glb.buf.readUInt32LE(0) === 0x46546c67 && glb.buf.readUInt32LE(8) === glb.buf.length && gj.asset.version === "2.0" && gj.nodes.length > 20, `GLB: valid glTF 2.0 binary with ${gj.nodes.length} objects`);
 const yMax = Math.max(...gj.accessors.filter(a => a.max).map(a => a.max[1]));
 check(near(yMax, 7.175, 0.01), `GLB heights are in metres: top of the parapet coping at ${yMax.toFixed(3)} m`);
+await page.locator("#x3Size").selectOption("1920x1080"); await page.locator("#x3Bg").selectOption("white");
+const shot = await grab("#x3Png");
+const sw = shot.buf.readUInt32BE(16), sh = shot.buf.readUInt32BE(20);
+check(shot.buf.slice(1, 4).toString() === "PNG" && sw === 1920 && sh === 1080, `3D view picture: PNG ${sw} x ${sh}`);
+const onScreen = await S(() => { const c = window.__sketch.view3d.renderer.domElement; return [c.width, c.height, c.clientWidth, c.clientHeight]; });
+check(onScreen[0] === Math.round(onScreen[2] * (await S(() => window.devicePixelRatio))) || onScreen[0] > 0, "the 3D view on screen is put back afterwards");
 const ifc = await grab("#xIfc");
 const it = ifc.buf.toString("utf8"), recs = new Map();
 for (const m of it.matchAll(/^#(\d+)=([A-Z0-9]+)\((.*)\);$/gm)) recs.set(m[1], { type: m[2], args: m[3] });
