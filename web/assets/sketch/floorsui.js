@@ -180,7 +180,7 @@ export function buildFloors3D(group, THREE, app, visible) {
     const { top, bottom } = F.floorLevels(doc, f), sel = app.selection.has(f.id);
     for (const part of F.floorParts(F.floorLoops(f))) {
       const shape = new THREE.Shape(part.outer.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000)));
-      for (const h of part.holes) shape.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000))));
+      for (const h of [...part.holes, ...(app.floorVoidHoles?.(part, top, bottom) || [])]) shape.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000))));
       const geo = new THREE.ExtrudeGeometry(shape, { depth: (top - bottom) / 1000, bevelEnabled: false });
       geo.rotateX(-Math.PI / 2); geo.translate(0, bottom / 1000, 0);
       if (style !== "wire") {

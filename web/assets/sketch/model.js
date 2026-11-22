@@ -45,7 +45,7 @@ export function defaultTypes() {
       { id: "wn-1800", name: "W 1800x1500", width: 1800, height: 1500, frame: 50, style: "casement", sill: 600 },
       { id: "wn-fixed", name: "W fixed glass 1200x1200", width: 1200, height: 1200, frame: 50, style: "fixed", sill: 900 },
     ],
-    profiles: [],
+    profiles: [], // the library of sweep profiles lives in components.js; custom profiles are added here
   };
 }
 

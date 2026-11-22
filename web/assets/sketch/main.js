@@ -16,6 +16,9 @@ import { OpeningTool, drawOpenings, drawOpeningDims, openingsAt, buildOpenings3D
 import * as OP from "./openings.js";
 import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
 import { floorLoops, floorParts } from "./floors.js";
+import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSketchProps, wireComponentSketchProps, drawComponents, drawRefPlanes, componentsAt, cutWallSolids, cutWallPlan, floorVoidHoles, buildComponents3D, RefPlaneTool, modelInPlaceDialog, wallSweepDialog, parapetDialog, componentProps, wireComponentProps, workPlaneDialog } from "./componentsui.js";
+import { checkSketch } from "./floors.js";
+import { chainPath as sweepChain } from "./components.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { icon } from "./icons.js";
 
@@ -59,6 +62,7 @@ app.snapCurves = () => {
     if (w.shape === "arc") out.push({ type: "arc", c: w.c, r: w.r, start: w.start, sweep: w.sweep, id: w.id });
     else out.push({ type: "seg", a: w.a, b: w.b, id: w.id });
   }
+  for (const rp of app.doc.referencePlanes) out.push({ type: "seg", a: rp.a, b: rp.b, id: rp.id });
   for (const f of app.doc.floors) if (f.levelId === app.levelId && f.id !== app.sketch?.editFloorId) for (const l of floorLoops(f)) l.forEach((p, i) => out.push({ type: "seg", a: p, b: l[(i + 1) % l.length], id: f.id }));
   // faces of walls being dragged are left out, so a moving wall does not snap to itself
   const skip = app.excludeFromSnap || new Set();
@@ -108,7 +112,11 @@ app.chainOf = id => {
 };
 app.setLevel = id => setLevel(id);
 app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
-app.drawModel = view => { drawFloors(view, app); drawWalls(view, app); drawOpenings(view, app); };
+app.drawModel = view => { drawFloors(view, app); drawWalls(view, app); drawOpenings(view, app); drawComponents(view, app); drawRefPlanes(view, app); };
+app.cutWallSolids = (w, solids) => cutWallSolids(app.doc, w, solids);
+app.cutWallPlan = (w, pieces, cutZ) => cutWallPlan(app.doc, w, pieces, cutZ);
+app.floorVoidHoles = (part, top, bottom) => floorVoidHoles(app.doc, part, top, bottom);
+app.buildComponents3D = (group, THREE, visible) => buildComponents3D(group, THREE, app, visible);
 app.buildFloors3D = (group, THREE, visible) => buildFloors3D(group, THREE, app, visible);
 app.sketch = null;
 app.sketchChanged = () => { renderRibbon(); renderOptions(); renderProps(); setPrompt(); app.redraw(true); };
@@ -132,6 +140,10 @@ app.commit = (label, fn) => {
       doc.openings = doc.openings.filter(o => doc.walls.some(w => w.id === o.hostWallId));
       doc.tags = doc.tags.filter(t => doc.openings.some(o => o.id === t.hostId));
       for (const w of doc.walls) if (w.attachTopTo && !doc.floors.some(f => f.id === w.attachTopTo)) delete w.attachTopTo;
+      // wall sweeps and reveals lose deleted walls, and go when none are left
+      const wallIds = new Set(doc.walls.map(w => w.id));
+      for (const c of doc.components) if (c.kind === "wallSweep") c.wallIds = c.wallIds.filter(id => wallIds.has(id));
+      doc.components = doc.components.filter(c => c.kind !== "wallSweep" || c.wallIds.length);
       // locked alignments hold whatever moved; then every wall must still be valid
       if (doc.constraints?.length) enforceLocks(doc, w => wallFootprints(doc, w.baseLevelId).get(w.id), (dd, id, d) => app.translateWithJoins(dd, [id], d));
       for (const w of doc.walls) checkWall(doc, w);
@@ -161,6 +173,16 @@ app.elementsInRect = (r, crossing) => {
       pieces.some(pc => pc.some((a, i) => corners.some((c, k) => G.segIntersect(a, pc[(i + 1) % pc.length], c, corners[(k + 1) % 4]))))));
     if (touched) ids.push(w.id);
   }
+  for (const c of app.doc.components) {
+    if (app.sketch) break;
+    let pts = [];
+    try {
+      if (c.kind === "extrusion" && c.levelId === app.levelId) { const r = checkSketch(c.boundary); pts = r.ok ? r.loops.flat() : []; }
+      else if (c.kind === "sweep" && c.levelId === app.levelId) pts = sweepChain(c.path).pts;
+    } catch { pts = []; }
+    if (pts.length && (crossing ? pts.some(inside) : pts.every(inside))) ids.push(c.id);
+  }
+  for (const rp of app.doc.referencePlanes) if (crossing ? [rp.a, rp.b].some(inside) : [rp.a, rp.b].every(inside)) ids.push(rp.id);
   for (const fl of app.doc.floors) {
     if (fl.levelId !== app.levelId || app.sketch) continue;
     const pts = floorLoops(fl).flat();
@@ -188,7 +210,7 @@ app.updateHover = c => {
     cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
   }
   cands.push(...openingsAt(app, c.raw));
-  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol));
+  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol));
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
   const first = list[0];
@@ -256,6 +278,7 @@ const TOOLS = {
   wall: () => new WallTool(app),
   door: () => new OpeningTool(app, "door"),
   boundary: () => new BoundaryTool(app),
+  refPlane: () => new RefPlaneTool(app),
   window: () => new OpeningTool(app, "window"),
   move: () => new MoveTool(app, false),
   copy: () => new MoveTool(app, true),
@@ -296,12 +319,17 @@ const RIBBON = [
       { id: "wall", label: "Wall", icon: "wall", key: "WA", tool: "wall" },
       { id: "door", label: "Door", icon: "door", key: "DR", tool: "door" },
       { id: "window", label: "Window", icon: "window", key: "WN", tool: "window" },
-      { id: "component", label: "Component", icon: "component", ...SOON(6) },
+      { id: "component", label: "Component", icon: "component", run: () => modelInPlaceDialog(app, ui) },
       { id: "floor", label: "Floor", icon: "floor", key: "SB", run: () => startFloorSketch(app) },
       { id: "roof", label: "Roof", icon: "roof", ...SOON(7) },
     ] },
+    { label: "Wall details", items: [
+      { id: "wallSweep", label: "Wall Sweep", icon: "sweep", run: () => wallSweepDialog(app, ui, false) },
+      { id: "wallReveal", label: "Wall Reveal", icon: "sweep", run: () => wallSweepDialog(app, ui, true) },
+      { id: "parapet", label: "Parapet", icon: "wall", run: () => parapetDialog(app, ui) },
+    ] },
     { label: "Model", items: [{ id: "modelLine", label: "Model Line", icon: "line", key: "LI", tool: "modelLine" }] },
-    { label: "Work Plane", items: [{ id: "refPlane", label: "Ref Plane", icon: "section", key: "RP", ...SOON(6) }] },
+    { label: "Work Plane", items: [{ id: "refPlane", label: "Ref Plane", icon: "section", key: "RP", tool: "refPlane" }, { id: "workPlane", label: "Set", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
   ] },
   { tab: "Modify", groups: [
     { label: "Select", items: [{ id: "select", label: "Modify", icon: "modify", key: "MD", tool: "select" }] },
@@ -360,10 +388,10 @@ const RIBBON = [
 ];
 const SKETCH_TAB = { tab: "Modify | Create Floor Boundary", groups: [
   { label: "Mode", items: [
-    { id: "finishSketch", label: "Finish Edit Mode", icon: "fit", run: () => finishSketch(app, ui) },
+    { id: "finishSketch", label: "Finish Edit Mode", icon: "fit", run: () => (app.sketch?.kind === "floor" ? finishSketch(app, ui) : finishComponentSketch(app, ui)) },
     { id: "cancelSketch", label: "Cancel Edit Mode", icon: "del", run: () => cancelSketch(app) },
   ] },
-  { label: "Draw", items: [{ id: "boundaryLine", label: "Boundary Line", icon: "line", key: "BL", tool: "boundary" }] },
+  { label: "Draw", items: [{ id: "boundaryLine", label: "Boundary Line", icon: "line", key: "BL", tool: "boundary" }, { id: "workPlane", label: "Set Work Plane", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
   { label: "Modify", items: [
     { id: "select", label: "Modify", icon: "modify", key: "MD", tool: "select" },
     { id: "trim", label: "Trim/Extend", icon: "trim", key: "TR", tool: "trim" },
@@ -375,7 +403,7 @@ const SKETCH_TAB = { tab: "Modify | Create Floor Boundary", groups: [
   ] },
   { label: "Undo", items: [{ id: "undo", label: "Undo", icon: "undo", run: () => undo() }, { id: "redo", label: "Redo", icon: "redo", run: () => redo() }] },
 ] };
-const SKETCH_OK = new Set(SKETCH_TAB.groups.flatMap(g => g.items.map(i => i.id)).concat(["zoomFit", "tile", "planOnly", "threeOnly", "view3d", "units", "snapsDlg", "shortcuts", "align", "mirrorPick", "mirrorDraw", "rotate", "chamfer", "fillet", "array", "scale"]));
+const SKETCH_OK = new Set(SKETCH_TAB.groups.flatMap(g => g.items.map(i => i.id)).concat(["workPlane", "zoomFit", "tile", "planOnly", "threeOnly", "view3d", "units", "snapsDlg", "shortcuts", "align", "mirrorPick", "mirrorDraw", "rotate", "chamfer", "fillet", "array", "scale"]));
 const ALL_ITEMS = [...RIBBON, SKETCH_TAB].flatMap(t => t.groups.flatMap(g => g.items));
 const SHORTCUTS = Object.fromEntries(ALL_ITEMS.filter(i => i.key).map(i => [i.key, i]));
 SHORTCUTS.ZE = SHORTCUTS.ZA = SHORTCUTS.ZF;
@@ -390,9 +418,11 @@ function runItem(it) {
 }
 
 function renderRibbon() {
+  SKETCH_TAB.tab = SKETCH_TITLES[app.sketch?.kind] || SKETCH_TITLES.floor;
+  SKETCH_TAB.groups[1].items[0].label = app.sketch?.kind === "sweep" ? "Path Line" : "Boundary Line";
   const TABS = app.sketch ? [SKETCH_TAB, ...RIBBON.filter(t => t.tab === "View")] : RIBBON;
   if (app.sketch && !TABS.some(t => t.tab === ribbonTab)) ribbonTab = SKETCH_TAB.tab;
-  if (!app.sketch && ribbonTab === SKETCH_TAB.tab) ribbonTab = "Architecture";
+  if (!app.sketch && Object.values(SKETCH_TITLES).includes(ribbonTab)) ribbonTab = "Architecture";
   $("#ribbonTabs").innerHTML = TABS.map(t => `<button role="tab" type="button" aria-selected="${t.tab === ribbonTab}" data-tab="${t.tab}">${t.tab}</button>`).join("");
   $("#ribbonTabs").querySelectorAll("button").forEach(b => b.onclick = () => { ribbonTab = b.dataset.tab; app.prefs.ribbonTab = ribbonTab; app.savePrefs(); renderRibbon(); });
   const tab = TABS.find(t => t.tab === ribbonTab) || TABS[0];
@@ -440,7 +470,11 @@ function renderOptions() {
 function renderProps() {
   const box = $("#props");
   const t = app.tool;
-  if (app.sketch && (t?.name === "boundary" || ![...app.selection].some(id => app.lookup(id)))) { box.innerHTML = sketchProps(app, esc); wireSketchProps(app); return; }
+  if (app.sketch && (t?.name === "boundary" || ![...app.selection].some(id => app.lookup(id)))) {
+    if (app.sketch.kind === "floor") { box.innerHTML = sketchProps(app, esc); wireSketchProps(app); }
+    else { box.innerHTML = componentSketchProps(app, esc); wireComponentSketchProps(app, renderProps); }
+    return;
+  }
   if (t && t.name === "wall") {
     box.innerHTML = `<div class="ptype"><div class="row"><span>Basic Wall</span><button class="btn" type="button" id="pEditType">Edit Type</button></div>
       <select id="pType" aria-label="Wall type">${app.doc.wallTypes.map(w => `<option value="${esc(w.id)}"${w.id === t.typeId ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select></div>
@@ -485,6 +519,7 @@ function renderProps() {
     return;
   }
   const els = ids.map(app.lookup);
+  if (els.every(e => app.doc.components.some(c => c.id === e.id) || app.doc.referencePlanes.some(r => r.id === e.id))) { box.innerHTML = componentProps(app, ids, esc); wireComponentProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.floors.some(f => f.id === e.id))) { box.innerHTML = floorProps(app, ids, esc); wireFloorProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.doc.openings.some(o => o.id === e.id))) { box.innerHTML = openingProps(app, ids, esc); wireOpeningProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.isWall(e.id))) { box.innerHTML = wallProps(app, ids, esc); wireWallProps(app, ids, renderProps, typeId => wallTypeDialog(app, typeId, ui)); return; }
@@ -581,6 +616,8 @@ function deleteSelection() {
     doc.lines = doc.lines.filter(l => !ids.includes(l.id));
     doc.walls = doc.walls.filter(w => !ids.includes(w.id));
     doc.floors = doc.floors.filter(f => !ids.includes(f.id));
+    doc.components = doc.components.filter(c => !ids.includes(c.id));
+    doc.referencePlanes = doc.referencePlanes.filter(r => !ids.includes(r.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
     doc.tags = doc.tags.filter(t => !ids.includes(t.id) && doc.openings.some(o => o.id === t.hostId));
     doc.constraints = (doc.constraints || []).filter(k => !ids.includes(k.ref) && !ids.includes(k.el));
@@ -640,6 +677,8 @@ canvas.addEventListener("contextmenu", e => e.preventDefault());
 canvas.addEventListener("dblclick", () => {
   const h = app.hoverId;
   if (app.tool.name === "select" && h && app.doc.floors.some(f => f.id === h)) startFloorSketch(app, h);
+  const comp = h && app.doc.components.find(c => c.id === h && (c.kind === "extrusion" || c.kind === "sweep"));
+  if (app.tool.name === "select" && comp) startComponentSketch(app, comp.kind, { editId: comp.id });
 });
 canvas.addEventListener("pointerdown", ev => {
   canvas.focus();

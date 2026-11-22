@@ -64,6 +64,12 @@ export class WallTool extends LineTool {
 
   add(elements, label) {
     const app = this.app;
+    // Rectangle, Polygon and Circle make closed loops: draw them clockwise so the exterior face is outside
+    if (elements.length >= 3 && elements.every(e => e.shape !== "arc") && G.dist(elements[0].a, elements.at(-1).b) < 1) {
+      if (G.polygonArea(elements.map(e => e.a)) > 0) elements = [...elements].reverse().map(e => ({ shape: "line", a: e.b, b: e.a }));
+    } else if (elements.length === 1 && elements[0].shape === "arc" && G.isCircle(elements[0]) && elements[0].sweep > 0) {
+      elements = [{ ...elements[0], sweep: -elements[0].sweep }];
+    }
     const ids = app.commit(label, doc => {
       const made = [];
       for (const e of elements) {
@@ -165,7 +171,8 @@ export function drawWalls(view, app) {
     if (!f) continue;
     const isCut = f.z1 >= cutZ && f.z0 <= cutZ;
     // doors and windows that pass through the cut plane leave gaps in the cut wall
-    (isCut ? cut : below).push({ w, f: isCut ? { ...f, pieces: wallPlanPieces(doc, w, f, cutZ) } : f });
+    const planPieces = isCut ? (app.cutWallPlan ? app.cutWallPlan(w, wallPlanPieces(doc, w, f, cutZ), cutZ) : wallPlanPieces(doc, w, f, cutZ)) : null;
+    (isCut ? cut : below).push({ w, f: isCut ? { ...f, pieces: planPieces } : f });
   }
   // walls below the cut plane (e.g. low walls): thin lines, no fill
   for (const { w, f } of below) for (const p of f.pieces) view.polygon(p, null, view.colorFor(w.id, "#9a9aa6"), 1);
@@ -280,7 +287,8 @@ export function buildWalls3D(v3, THREE, app) {
       return geo;
     };
     // faces: the wall cut round its doors and windows
-    if (style !== "wire") for (const solid of wallSolids(doc, w, f)) {
+    const solids = app.cutWallSolids ? app.cutWallSolids(w, wallSolids(doc, w, f)) : wallSolids(doc, w, f);
+    if (style !== "wire") for (const solid of solids) {
       const geo = extrude(solid.poly, solid.z0, solid.z1);
       const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: sel ? 0x9cc0ff : 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
         : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
@@ -301,6 +309,7 @@ export function buildWalls3D(v3, THREE, app) {
   }
   app.buildOpenings3D?.(group, THREE, visible);
   app.buildFloors3D?.(group, THREE, visible);
+  app.buildComponents3D?.(group, THREE, visible);
   v3.root.add(group);
   v3.setShadows?.(style === "realistic");
 }
