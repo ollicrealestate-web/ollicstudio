@@ -274,7 +274,9 @@ export function buildWalls3D(v3, THREE, app) {
   const fpAll = new Map();
   for (const l of doc.levels) for (const [id, f] of app.footprints(l.id)) fpAll.set(id, f);
   const group = new THREE.Group();
-  for (const w of doc.walls) {
+  const failed = [];
+  v3.root.add(group); // added first: one element that cannot be drawn must not blank the whole 3D view
+  for (const w of doc.walls) { try {
     if (visible && !visible.has(w.baseLevelId)) continue;
     const f = fpAll.get(w.id); if (!f) continue;
     const sel = app.selection.has(w.id);
@@ -313,13 +315,12 @@ export function buildWalls3D(v3, THREE, app) {
       group.add(edges);
       geo.dispose();
     }
+  } catch (e) { failed.push(`wall: ${e.message}`); } }
+  for (const [name, fn] of [["doors and windows", app.buildOpenings3D], ["floors", app.buildFloors3D], ["components", app.buildComponents3D], ["roofs", app.buildRoofs3D]]) {
+    try { fn?.(group, THREE, visible); } catch (e) { failed.push(`${name}: ${e.message}`); }
   }
-  app.buildOpenings3D?.(group, THREE, visible);
-  app.buildFloors3D?.(group, THREE, visible);
-  app.buildComponents3D?.(group, THREE, visible);
-  app.buildRoofs3D?.(group, THREE, visible);
-  v3.root.add(group);
   v3.setShadows?.(style === "realistic");
+  app.report3DProblems?.(failed);
 }
 
 // --------------------------------------------------------------------------- properties

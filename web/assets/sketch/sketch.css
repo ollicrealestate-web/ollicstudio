@@ -26,9 +26,12 @@ button { cursor: pointer; }
 .sk-mark svg { width: 22px; height: 22px; fill: none; stroke: var(--red-text); stroke-width: 1.8; display: block; }
 .sk-name input { background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; width: min(320px, 30vw); }
 .sk-name input:hover, .sk-name input:focus { border-color: var(--line-strong); background: var(--surface-2); }
-.sk-save { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sk-save { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; }
 .sk-save.warn { color: var(--warn); }
-.sk-file { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+.sk-file { margin-left: auto; display: flex; gap: 4px; flex-wrap: nowrap; flex-shrink: 0; }
+.sk-file .icon-btn { padding: 5px 8px; display: inline-flex; align-items: center; }
+.sk-file .icon-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+@media (max-width: 900px) { .sk-file { flex-wrap: wrap; flex-shrink: 1; } }
 .sk-file button, .btn { background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 7px; padding: 5px 10px; min-height: 32px; }
 .sk-file button:hover, .btn:hover { border-color: var(--muted); }
 .sk-file .primary, .btn.primary { background: var(--red); border-color: var(--red); color: #fff; }
