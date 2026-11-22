@@ -49,13 +49,30 @@ check(await S(() => window.__sketch.view3d.paused) && !(await page.locator("#vLi
 await page.locator("#vLive").check();
 // ---- full screen
 await page.locator("#viewFull").click(); await page.waitForTimeout(300);
-check(await S(() => !!document.fullscreenElement) && (await page.locator("#viewFull").innerText()) === "Exit full screen", "Full screen fills the screen; the button now says Exit full screen");
+check(await S(() => !!document.fullscreenElement) && (await page.locator("#viewFull").getAttribute("aria-label")) === "Exit full screen", "Full screen fills the screen; the button now says Exit full screen");
 await page.screenshot({ path: `${OUT}/toggles-fullscreen.png` });
 await page.locator("#viewFull").click(); await page.waitForTimeout(300);
-check(await S(() => !document.fullscreenElement) && (await page.locator("#viewFull").innerText()) === "Full screen", "and leaves it again");
+check(await S(() => !document.fullscreenElement) && (await page.locator("#viewFull").getAttribute("aria-label")) === "Full screen", "and leaves it again");
 await page.locator("#ribbonTabs button", { hasText: "View" }).click();
 check(await page.locator(".sk-tool[data-id='fullScreen']").isVisible() && await page.locator(".sk-tool[data-id='live3d']").isVisible(), "View tab has Live 3D and Full Screen buttons too");
-check(!errors.length, `no page errors ${errors.join(" | ")}`);
+// ---- the 3D view keeps showing the model when one element cannot be drawn, and Zoom to fit puts things right
+await page.locator("#vLive").check();
+await S(() => { const a = window.__sketch; a._keepFloors = a.buildFloors3D; a.buildFloors3D = () => { throw new Error("test fault"); }; a.redraw(true); });
+await page.waitForTimeout(500);
+check((await meshes3d()) >= 4, "a broken element does not blank the 3D view: the walls still show");
+check((await page.locator("#toast").innerText()).includes("could not be shown in 3D"), "and it says part of the model could not be shown");
+await S(() => { const a = window.__sketch; a.buildFloors3D = a._keepFloors; a.redraw(true); });
+await S(() => { const a = window.__sketch; a.prefs.hidden3D = a.doc.levels.map(l => l.id); a.view3d.invalidate(); });
+await page.waitForTimeout(300);
+check((await meshes3d()) === 0, "with every level unticked under Levels, 3D shows nothing");
+await page.locator("#v3Fit").click(); await page.waitForTimeout(300);
+check((await meshes3d()) >= 4 && (await page.locator("#toast").innerText()).includes("all levels are shown again"), "Zoom to fit shows the levels again and says so");
+await S(() => window.__sketch.toggleSectionBox(true));
+await S(() => { const a = window.__sketch, b = { x0: 50000, x1: 60000, y0: 50000, y1: 60000, z0: 0, z1: 3000 }; a.prefs.sectionBox = a.prefs.sectionBoxMm = b; });
+await page.locator("#v3Fit").click(); await page.waitForTimeout(300);
+check(await S(() => window.__sketch.prefs.sectionBox.x0 < 1000) && (await page.locator("#toast").innerText()).includes("section box"), "a section box away from the model is fitted back to it by Zoom to fit");
+await S(() => window.__sketch.toggleSectionBox(false));
+check(!errors.filter(e => !/3D:/.test(e)).length, `no page errors ${errors.join(" | ")}`);
 await browser.close(); srv.close();
 console.log(fails.length ? `\nVIEW TOGGLES BROWSER TEST FAILED (${fails.length})` : "\nVIEW TOGGLES BROWSER TEST PASSED");
 process.exit(fails.length ? 1 : 0);

@@ -156,6 +156,11 @@ app.sketchChanged = () => { renderRibbon(); renderOptions(); renderProps(); setP
 app.buildOpenings3D = (group, THREE, visible) => buildOpenings3D(group, THREE, app, visible);
 app.drawUnderlay = view => drawUnderlay(view, app);
 app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
+app.report3DProblems = list => {
+  const key = list.join("|");
+  if (list.length && key !== app._last3DProblem) { app.toast(`Part of the model could not be shown in 3D (${list[0]}). The rest is shown. Undo the last change if it looks wrong.`, true); console.warn("3D:", list); }
+  app._last3DProblem = key;
+};
 const boxOf = p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) });
 app.extraBoxes = () => [
   ...[...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(boxOf),
@@ -203,7 +208,6 @@ app.hoverCandidate = () => app.hoverId;
 app.selectionChanged = () => { renderProps(); renderOptions(); setPrompt(); app.redraw(true); };
 app.toolChanged = () => { renderOptions(); renderProps(); setPrompt(); app.redraw(); };
 app.renameSilently = name => { app.doc.name = name; $("#projName").value = name; };
-app.visibleLevels3D = () => null;
 
 app.elementsInRect = (r, crossing) => {
   const ids = linesInPlan(app.doc, app.levelId).filter(l => inRect(l, r, crossing)).map(l => l.id);
@@ -653,7 +657,7 @@ function renderBrowser() {
     </ul></ul>`;
   $("#browser").querySelectorAll("[data-level]").forEach(b => b.onclick = () => { closeElevation(); setLevel(b.dataset.level); });
   $("#browser").querySelectorAll("[data-elev]").forEach(b => b.onclick = () => openElevation(b.dataset.elev));
-  $("#browser").querySelector("[data-view='3d']").onclick = () => { setLayout(app.prefs.layout === "plan-only" ? "tile" : app.prefs.layout || "tile"); app.view3d.fit(); };
+  $("#browser").querySelector("[data-view='3d']").onclick = () => { setLayout(app.prefs.layout === "plan-only" ? "tile" : app.prefs.layout || "tile"); fit3D(); };
 }
 
 function setLevel(id) {
@@ -681,7 +685,7 @@ function renderViewBars() {
     <details class="lvpick"><summary>Levels</summary><div>${LV.sorted(app.doc).map(l => `<label><input type="checkbox" data-l3="${l.id}"${(app.prefs.hidden3D || []).includes(l.id) ? "" : " checked"}> ${esc(l.name)}</label>`).join("")}</div></details>
     <button type="button" data-corner="sw">SW</button><button type="button" data-corner="se">SE</button><button type="button" data-corner="ne">NE</button><button type="button" data-corner="nw">NW</button><button type="button" data-corner="top">Top</button>`;
   $("#vStyle").onchange = e => { app.prefs.visual = e.target.value; app.savePrefs(); app.view3d.style = e.target.value; app.view3d.invalidate(); };
-  $("#v3Fit").onclick = () => app.view3d.fit();
+  $("#v3Fit").onclick = () => fit3D();
   $("#bar3d").querySelectorAll("[data-l3]").forEach(c => c.onchange = () => {
     app.prefs.hidden3D = [...$("#bar3d").querySelectorAll("[data-l3]")].filter(x => !x.checked).map(x => x.dataset.l3);
     app.savePrefs(); app.redraw(true);
@@ -744,13 +748,30 @@ function toggleFullScreen() {
   catch { app.toast("The browser did not allow full screen just now. Try the button again.", true); }
 }
 app.toggleFullScreen = toggleFullScreen;
-const syncFull = () => { const on = !!fsEl(); $("#viewFull").textContent = on ? "Exit full screen" : "Full screen"; document.body.classList.toggle("sk-full", on); renderRibbon(); };
+const syncFull = () => { const on = !!fsEl(), b = $("#viewFull"); b.title = on ? "Exit full screen (Esc)" : "Full screen (FS). Esc leaves it."; b.setAttribute("aria-label", on ? "Exit full screen" : "Full screen"); b.classList.toggle("on", on); document.body.classList.toggle("sk-full", on); renderRibbon(); };
 document.addEventListener("fullscreenchange", syncFull); document.addEventListener("webkitfullscreenchange", syncFull);
 $("#viewFull").onclick = toggleFullScreen;
 
+/** Zoom to fit in 3D, and when nothing can be seen, say why and put it right. */
+function fit3D() {
+  const v3 = app.view3d;
+  if (v3.paused) setLive3D(true);
+  if (v3.dirty) { v3.dirty = false; v3.rebuild(); }
+  const hidden = app.prefs.hidden3D || [];
+  if (hidden.length && app.doc.levels.every(l => hidden.includes(l.id))) { app.prefs.hidden3D = []; app.savePrefs(); v3.rebuild(); renderViewBars(); app.toast("Every level was hidden in 3D: all levels are shown again."); }
+  const sb = app.prefs.sectionBox;
+  if (sb) { // a section box that misses the model cuts everything away: fit it to the model
+    const m = modelBoxMm(v3), misses = sb.x1 < m.x0 || sb.x0 > m.x1 || sb.y1 < m.y0 || sb.y0 > m.y1 || sb.z1 < m.z0 || sb.z0 > m.z1;
+    if (misses) { app.prefs.sectionBox = app.prefs.sectionBoxMm = m; app.savePrefs(); applySectionBox(v3, m); renderViewBars(); app.toast("The section box was away from the model: it now fits the model."); }
+  }
+  let n = 0; v3.root.traverse(o => { if (o.isMesh) n++; });
+  if (!n && app.doc.walls.length + app.doc.floors.length + app.doc.roofs.length + app.doc.components.length) app.toast("Nothing can be shown in 3D on the levels ticked under Levels.", true);
+  v3.fit();
+}
+app.fit3D = fit3D;
 function zoomFit() {
   if (app.prefs.layout !== "three-only") { if (app.elevSide) app.elev.fit(); else app.plan.fit(app.plan.contentBox()); }
-  if (app.prefs.layout !== "plan-only") app.view3d.fit();
+  if (app.prefs.layout !== "plan-only") fit3D();
 }
 
 // --------------------------------------------------------------------------- status bar
