@@ -18,7 +18,8 @@ const mmText = v => String(Math.round(v));
 
 // ------------------------------------------------------------------ Select / Modify
 /** Copies of the editable collections, so a live drag preview can be undone exactly. */
-const DRAGGED = ["walls", "lines", "openings", "floors"];
+// every collection a drag can move: each step starts again from the snapshot, so nothing moves twice
+const DRAGGED = ["walls", "lines", "openings", "floors", "roofs", "components", "dimensions", "texts", "referencePlanes"];
 function snapshot(doc) { return Object.fromEntries(DRAGGED.map(k => [k, JSON.stringify(doc[k])])); }
 function restore(doc, snap) { for (const k of DRAGGED) doc[k] = JSON.parse(snap[k]); }
 /** Dragging a straight wall's end also drags the ends of walls joined there. */

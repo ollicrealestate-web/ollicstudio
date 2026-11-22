@@ -167,6 +167,9 @@ app.extraBoxes = () => [
   ...app.doc.floors.filter(f => f.levelId === app.levelId).flatMap(f => floorLoops(f)).filter(l => l.length).map(boxOf),
   ...app.doc.roofs.filter(r => roofOnPlan(app.doc, r, app.levelId)).map(r => { try { return boxOf(roofGeometry(app.doc, r).outline); } catch { return null; } }).filter(Boolean),
   ...annotationBox(app, app.levelId),
+  // components and reference planes, so Zoom to fit finds them too
+  ...app.doc.components.filter(c => c.levelId === app.levelId).map(c => { try { const o = app.outlineOf(c.id).flatMap(x => x.pts); return o.length ? boxOf(o) : null; } catch { return null; } }).filter(Boolean),
+  ...app.doc.referencePlanes.map(r => boxOf([r.a, r.b])),
 ];
 app.pick3D = id => { app.selection.clear(); if (id) app.selection.add(id); app.selectionChanged(); };
 const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc, ask: (m, ok) => app.ask(m, ok), askText: (l, v) => app.askText(l, v) };
