@@ -432,6 +432,8 @@ const RIBBON = [
       { id: "tile", label: "Tile", icon: "tile", key: "WT", run: () => setLayout("tile") },
       { id: "planOnly", label: "Plan", icon: "plan", run: () => setLayout("plan-only") },
       { id: "threeOnly", label: "3D", icon: "threed", run: () => setLayout("three-only") },
+      { id: "live3d", label: "Live 3D", icon: "threed", key: "LV", run: () => setLive3D(app.prefs.layout === "plan-only") },
+      { id: "fullScreen", label: "Full Screen", icon: "fit", key: "FS", run: () => toggleFullScreen() },
     ] },
     { label: "Schedules", items: [{ id: "schedule", label: "Door/Window Schedule", icon: "types", run: () => scheduleDialog(app, ui) }] },
     { label: "Navigate", items: [{ id: "zoomFit", label: "Zoom to Fit", icon: "fit", key: "ZF", run: () => zoomFit() }] },
@@ -642,11 +644,13 @@ function renderViewBars() {
   const scale = app.prefs.scale || "100";
   $("#planBar").innerHTML = `<label>Scale <select id="vScale">${["50", "100", "200"].map(s => `<option value="${s}"${s === scale ? " selected" : ""}>1 : ${s}</option>`).join("")}</select></label>
     <button type="button" id="vFit" title="Zoom to fit (ZF)">Zoom to fit</button>
+    <label title="Show the 3D view beside the plan and update it as you draw (LV)"><input type="checkbox" id="vLive"${app.prefs.layout === "plan-only" ? "" : " checked"}> Live 3D</label>
     <label><input type="checkbox" id="vUnder"${app.prefs.underlay ? " checked" : ""}> Underlay: level below</label>
     <span>Snaps: ${app.snapsEnabled.size ? "on" : "off"}</span>`;
   $("#vScale").onchange = e => { app.prefs.scale = e.target.value; app.savePrefs(); };
   $("#vFit").onclick = () => (app.elevSide ? app.elev.fit() : app.plan.fit(app.plan.contentBox()));
   $("#vUnder").onchange = e => { app.prefs.underlay = e.target.checked; app.savePrefs(); app.redraw(); };
+  $("#vLive").onchange = e => setLive3D(e.target.checked);
   const vs = app.prefs.visual || "shaded";
   $("#bar3d").innerHTML = `<label>Visual style <select id="vStyle">${[["wire", "Wireframe"], ["hidden", "Hidden Line"], ["shaded", "Shaded"], ["consistent", "Consistent Colours"], ["realistic", "Realistic"]].map(([k, v]) => `<option value="${k}"${k === vs ? " selected" : ""}>${v}</option>`).join("")}</select></label>
     <button type="button" id="v3Fit">Zoom to fit</button>
@@ -693,7 +697,32 @@ function renderViewBars() {
 function setLayout(layout) {
   app.prefs.layout = layout; app.savePrefs();
   const v = $("#views"); v.classList.remove("tile", "plan-only", "three-only"); v.classList.add(layout);
+  // Live 3D is off when only the plan shows: the 3D view stops rebuilding while you draw
+  const live = layout !== "plan-only";
+  if (!!app.view3d.paused === live) { app.view3d.paused = !live; if (live) { app.view3d.invalidate(); app.view3d.resize(); } }
+  const t = $("#vLive"); if (t) t.checked = live;
 }
+function setLive3D(on) {
+  if (on) setLayout(app.prefs.lastLayout && app.prefs.lastLayout !== "plan-only" ? app.prefs.lastLayout : "tile");
+  else { if (app.prefs.layout !== "plan-only") app.prefs.lastLayout = app.prefs.layout; setLayout("plan-only"); }
+  app.toast(on ? "Live 3D on: the 3D view follows every change." : "Live 3D off: the plan uses the whole width. Turn it on again any time.");
+}
+app.setLive3D = setLive3D;
+
+// --------------------------------------------------------------------------- full screen
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+function toggleFullScreen() {
+  const root = document.documentElement;
+  if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); return; }
+  const req = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (!req) { app.toast("This browser cannot go full screen from the page. Use its own full-screen option (on iPad: Share > Add to Home Screen).", true); return; }
+  try { const r = req.call(root, { navigationUI: "hide" }); if (r?.catch) r.catch(() => app.toast("The browser did not allow full screen just now. Try the button again.", true)); }
+  catch { app.toast("The browser did not allow full screen just now. Try the button again.", true); }
+}
+app.toggleFullScreen = toggleFullScreen;
+const syncFull = () => { const on = !!fsEl(); $("#viewFull").textContent = on ? "Exit full screen" : "Full screen"; document.body.classList.toggle("sk-full", on); renderRibbon(); };
+document.addEventListener("fullscreenchange", syncFull); document.addEventListener("webkitfullscreenchange", syncFull);
+$("#viewFull").onclick = toggleFullScreen;
 
 function zoomFit() {
   if (app.prefs.layout !== "three-only") { if (app.elevSide) app.elev.fit(); else app.plan.fit(app.plan.contentBox()); }
