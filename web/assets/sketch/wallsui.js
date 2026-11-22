@@ -379,9 +379,9 @@ export function wallTypeDialog(app, typeId, ui) {
       app.commit("Edit wall type", dd => { Object.assign(dd.wallTypes.find(x => x.id === t.id), v); });
       ui.closeDialog();
     };
-    d.querySelector("#tDup").onclick = () => {
+    d.querySelector("#tDup").onclick = async () => {
       const v = read();
-      const name = prompt("Name for the new type", `${v.name || t.name} 2`);
+      const name = await ui.askText("Name for the new type", `${v.name || t.name} 2`);
       if (!name) return;
       if (doc.wallTypes.some(x => x.name.toLowerCase() === name.trim().toLowerCase())) { d.querySelector("#tErr").innerHTML = `<div class="err">Another wall type already has that name.</div>`; return; }
       const nt = { ...t, ...v, id: newId("wt"), name: name.trim() };
@@ -427,11 +427,11 @@ export function levelsDialog(app, ui) {
         const hh = tr.querySelector('[data-f="height"]');
         if (hh) hh.onchange = e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) commit("Floor-to-floor height", dd => LV.setHeightAbove(dd, id, v)); };
       });
-      d.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+      d.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
         const id = b.dataset.del, on = LV.elementsOn(doc, id), lvName = doc.levels.find(l => l.id === id).name;
         const parts = [on.walls && `${on.walls} wall${on.walls > 1 ? "s" : ""}`, on.lines && `${on.lines} line${on.lines > 1 ? "s" : ""}`, on.floors && `${on.floors} floor${on.floors > 1 ? "s" : ""}`].filter(Boolean);
         const msg = parts.length ? `Delete ${lvName}? This also deletes ${parts.join(", ")} on it${on.topped ? `, and ${on.topped} wall${on.topped > 1 ? "s" : ""} that rise to it become unconnected at their current height` : ""}. Undo brings it all back.` : `Delete ${lvName}?`;
-        if (!confirm(msg)) return;
+        if (!(await ui.ask(msg, "Delete level"))) return;
         commit("Delete level", dd => LV.deleteLevel(dd, id), true);
         if (app.levelId === id) app.setLevel(LV.sorted(app.doc)[0].id);
       });

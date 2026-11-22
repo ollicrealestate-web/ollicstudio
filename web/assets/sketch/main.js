@@ -98,7 +98,7 @@ app.drawUnderlay = view => drawUnderlay(view, app);
 app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
 app.extraBoxes = () => [...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) }));
 app.pick3D = id => { app.selection.clear(); if (id) app.selection.add(id); app.selectionChanged(); };
-const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc };
+const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc, ask: (m, ok) => app.ask(m, ok), askText: (l, v) => app.askText(l, v) };
 app.toast = (msg, bad = false) => {
   const t = $("#toast"); t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("show");
   clearTimeout(app._toastT); app._toastT = setTimeout(() => t.classList.remove("show"), bad ? 4200 : 2600);
@@ -599,6 +599,7 @@ let keyBuf = "", keyTimer = 0;
 document.addEventListener("keydown", ev => {
   const t = ev.target;
   const typing = t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement;
+  if (!$("#askWrap").hidden) return;
   if (!$("#dialogWrap").hidden) { if (ev.key === "Escape") closeDialog(); return; }
   if (typing) { if (ev.key === "Escape") t.blur(); return; }
   const k = ev.key, ctrl = ev.ctrlKey || ev.metaKey;
@@ -670,6 +671,31 @@ function openDialog(html, wire) {
   $("#dialog").querySelector("input, button")?.focus();
 }
 function closeDialog() { $("#dialogWrap").hidden = true; $("#planCanvas").focus(); }
+
+/** In-page confirmation (browser confirm boxes are not used): resolves true or false. */
+app.ask = (message, okLabel = "OK") => new Promise(resolve => {
+  const w = $("#askWrap"), box = $("#ask");
+  box.innerHTML = `<p style="color:var(--ink)">${esc(message)}</p><div class="actions"><button class="btn" type="button" id="askNo">Cancel</button><button class="btn primary" type="button" id="askYes">${esc(okLabel)}</button></div>`;
+  w.hidden = false;
+  const done = v => { w.hidden = true; document.removeEventListener("keydown", key, true); resolve(v); };
+  const key = e => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(false); } };
+  document.addEventListener("keydown", key, true);
+  box.querySelector("#askNo").onclick = () => done(false);
+  box.querySelector("#askYes").onclick = () => done(true);
+  box.querySelector("#askYes").focus();
+});
+/** In-page text question: resolves the text, or null when cancelled. */
+app.askText = (label, value = "") => new Promise(resolve => {
+  const w = $("#askWrap"), box = $("#ask");
+  box.innerHTML = `<label style="display:grid;gap:6px"><span>${esc(label)}</span><input type="text" class="wide" id="askIn" maxlength="80" value="${esc(value)}"></label><div class="actions"><button class="btn" type="button" id="askNo">Cancel</button><button class="btn primary" type="button" id="askYes">OK</button></div>`;
+  w.hidden = false;
+  const inp = box.querySelector("#askIn");
+  const done = v => { w.hidden = true; resolve(v); };
+  inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); done(inp.value.trim() || null); } if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); } };
+  box.querySelector("#askNo").onclick = () => done(null);
+  box.querySelector("#askYes").onclick = () => done(inp.value.trim() || null);
+  inp.focus(); inp.select();
+});
 $("#dialogWrap").addEventListener("pointerdown", e => { if (e.target === $("#dialogWrap")) closeDialog(); });
 
 function snapsDialog() {
@@ -724,8 +750,8 @@ $("#projName").addEventListener("change", e => {
   if (!v) { e.target.value = app.doc.name; return; }
   app.commit("Rename", doc => { doc.name = v; });
 });
-$("#fileNew").onclick = () => {
-  if (app.store.signedIn && app.store.unsaved() && !confirm("Start a new sketch? Changes not yet saved to your account are kept only in this browser's autosave until you save.")) return;
+$("#fileNew").onclick = async () => {
+  if (app.store.signedIn && app.store.unsaved() && !(await app.ask("Start a new sketch? Changes to this one that are not saved to your account yet will be lost.", "Start new"))) return;
   app.store.startNew(newProject());
 };
 $("#fileOpen").onclick = openDialogList;

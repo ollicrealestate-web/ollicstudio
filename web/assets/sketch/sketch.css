@@ -156,3 +156,5 @@ button { cursor: pointer; }
 .lvpick > div { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; display: grid; gap: 2px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 8px; min-width: 160px; }
 .sk-dialog select { background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 5px; padding: 4px 6px; width: 100%; }
 .muted { color: var(--muted); }
+.sk-dialog-wrap.ask { z-index: 45; }
+.sk-dialog input[type="text"].wide { width: 100%; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 8px; }
