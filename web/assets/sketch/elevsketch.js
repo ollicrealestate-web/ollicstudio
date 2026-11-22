@@ -9,6 +9,7 @@ import { makeLine, makeArc } from "./elements.js";
 import { newId, levelLabel } from "./model.js";
 import { wallAxis } from "./openings.js";
 import * as LV from "./levels.js";
+import { checkSketch } from "./floors.js";
 
 /** In plan: the direction towards someone looking at that side, and the elevation's left-to-right direction. */
 export const TOWARD_VIEWER = { south: { x: 0, y: -1 }, north: { x: 0, y: 1 }, east: { x: 1, y: 0 }, west: { x: -1, y: 0 } };
@@ -48,20 +49,23 @@ const sketchCurves = app => app.doc.lines.filter(l => l.kind === "sketch" && l.s
 const asSnap = l => (l.shape === "arc" ? { type: "arc", c: l.c, r: l.r, start: l.start, sweep: l.sweep, id: l.id } : { type: "seg", a: l.a, b: l.b, id: l.id });
 
 // --------------------------------------------------------------------------- sketch mode
-/** Starts a sweep sketched in the open elevation (or edits one): first pick a wall face as the work plane. */
-export function startElevSweep(app, opts = {}) {
+/** Starts a sweep or extrusion sketched in the open elevation (or edits one): first pick a wall face as the work plane. */
+export function startElevSketch(app, kind, opts = {}) {
   if (app.sketch) { app.toast("Finish or cancel the sketch you are in first."); return; }
   const comp = opts.editId && app.doc.components.find(c => c.id === opts.editId);
   const side = comp?.plane?.side || app.elevSide;
-  if (!side) { app.toast("Open an elevation first (View > Elevations), then choose Sweep."); return; }
+  if (!side) { app.toast(`Open an elevation first (View > Elevations), then choose ${kind === "sweep" ? "Sweep" : "Extrusion"}.`); return; }
   if (app.elevSide !== side) app.openElevation(side);
-  const p = app.prefs.sweep || {};
+  const isVoid = comp ? comp.isVoid : !!opts.isVoid;
+  const p = app.prefs[kind === "sweep" ? "sweep" : isVoid ? "elevVoid" : "elevExtrusion"] || {};
   app.sketch = {
-    id: newId("sk"), kind: "sweep", elev: side, plane: comp ? { ...comp.plane } : null, levelId: comp?.levelId || app.levelId, editId: comp?.id || null,
-    bad: new Set(), message: "", isVoid: comp ? comp.isVoid : !!opts.isVoid, material: comp?.material || p.material || "#d9d4ca", height: 0,
+    id: newId("sk"), kind, elev: side, plane: comp ? { ...comp.plane } : null, levelId: comp?.levelId || app.levelId, editId: comp?.id || null,
+    bad: new Set(), message: "", isVoid: comp ? comp.isVoid : !!opts.isVoid, material: comp?.material || p.material || (kind === "sweep" ? "#d9d4ca" : "#c8c2b6"), height: 0,
     profileId: comp?.profileId || p.profileId || "pf-cornice", rectW: comp?.rectW ?? p.rectW ?? 100, rectH: comp?.rectH ?? p.rectH ?? 100, flip: comp?.flip ?? false,
+    // extrusion: from Start to End, measured out from the face (negative goes into the wall)
+    start: comp?.start ?? p.start ?? 0, end: comp?.end ?? p.end ?? (opts.isVoid ? -300 : 250),
   };
-  if (comp) app.commit("Edit sketch", doc => { for (const c of comp.path) { const l = c.shape === "arc" ? makeArc("sketch", null, "sketch", c) : makeLine("sketch", null, "sketch", c.a, c.b); Object.assign(l, { sketchId: app.sketch.id, elev: true, levelId: null }); doc.lines.push(l); } });
+  if (comp) app.commit("Edit sketch", doc => { for (const c of (kind === "sweep" ? comp.path : comp.boundary)) { const l = c.shape === "arc" ? makeArc("sketch", null, "sketch", c) : makeLine("sketch", null, "sketch", c.a, c.b); Object.assign(l, { sketchId: app.sketch.id, elev: true, levelId: null }); doc.lines.push(l); } });
   app.selection.clear();
   app.setTool("elevSketch");
   app.sketchChanged();
@@ -77,11 +81,15 @@ export function planeFromWall(doc, w, side) {
   return { o: G.sub(face, G.mul(R, G.dot(face, R))), u: { ...R }, n: nf, side, wallId: w.id };
 }
 
-export async function finishElevSweep(app, ui) {
+export const startElevSweep = (app, opts) => startElevSketch(app, "sweep", opts);
+
+export async function finishElevSketch(app, ui) {
   const sk = app.sketch, lines = sketchCurves(app);
   const curves = lines.map(l => (l.shape === "arc" ? { shape: "arc", c: l.c, r: l.r, start: l.start, sweep: l.sweep } : { shape: "line", a: l.a, b: l.b }));
-  let error = !sk.plane ? "Pick the wall face to sketch on first." : "";
-  if (!error) try { C.chainPath(curves); } catch (e) { error = e.message; sk.bad = new Set(lines.map(l => l.id)); }
+  let error = !sk.plane ? "Pick the wall face to sketch on first." : !curves.length ? "Draw the shape first." : "";
+  if (!error && sk.kind === "sweep") try { C.chainPath(curves); } catch (e) { error = e.message; sk.bad = new Set(lines.map(l => l.id)); }
+  if (!error && sk.kind === "extrusion") { const r = checkSketch(curves); if (!r.ok) { error = r.message.replace(/floor/g, "extrusion"); sk.bad = new Set(r.bad.map(i => lines[i]?.id).filter(Boolean)); } }
+  if (!error && sk.kind === "extrusion" && Math.abs(sk.end - sk.start) < 1) error = "Extrusion Start and End must differ.";
   if (error) {
     sk.message = error; app.redraw();
     ui.openDialog(`<h3>Cannot finish</h3><p>${ui.esc(error)}</p><div class="actions"><button class="btn primary" type="button" id="fOk">Continue sketching</button></div>`, d => { d.querySelector("#fOk").onclick = ui.closeDialog; });
@@ -91,15 +99,20 @@ export async function finishElevSweep(app, ui) {
   const zMin = Math.min(...curves.flatMap(c => (c.shape === "arc" ? [c.c.y - c.r] : [c.a.y, c.b.y])));
   const lv = [...LV.sorted(app.doc)].reverse().find(l => l.elevation <= zMin + 1) || LV.sorted(app.doc)[0];
   const ids = new Set(lines.map(l => l.id));
-  const id = app.commit(sk.isVoid ? "Void sweep" : "Sweep", doc => {
+  const ext = sk.kind === "extrusion";
+  const id = app.commit(ext ? (sk.isVoid ? "Void extrusion" : "Extrusion") : (sk.isVoid ? "Void sweep" : "Sweep"), doc => {
     doc.lines = doc.lines.filter(l => !ids.has(l.id));
-    const fields = { levelId: lv.id, height: 0, path: curves, plane: { ...sk.plane }, profileId: sk.profileId, rectW: sk.rectW, rectH: sk.rectH, flip: sk.flip, material: sk.material, isVoid: sk.isVoid };
+    const fields = ext
+      ? { levelId: lv.id, boundary: curves, plane: { ...sk.plane }, start: sk.start, end: sk.end, material: sk.material, isVoid: sk.isVoid }
+      : { levelId: lv.id, height: 0, path: curves, plane: { ...sk.plane }, profileId: sk.profileId, rectW: sk.rectW, rectH: sk.rectH, flip: sk.flip, material: sk.material, isVoid: sk.isVoid };
     let c = sk.editId && doc.components.find(x => x.id === sk.editId);
-    if (c) Object.assign(c, fields); else { c = C.makeSweep(doc, fields); c.plane = fields.plane; doc.components.push(c); }
+    if (c) Object.assign(c, fields); else { c = ext ? C.makeExtrusion(doc, fields) : C.makeSweep(doc, fields); Object.assign(c, { plane: fields.plane, start: fields.start ?? c.start, end: fields.end ?? c.end }); doc.components.push(c); }
     return c.id;
   });
   if (!id) return;
-  app.prefs.sweep = { ...(app.prefs.sweep || {}), profileId: sk.profileId, rectW: sk.rectW, rectH: sk.rectH, material: sk.material }; app.savePrefs();
+  if (ext) app.prefs[sk.isVoid ? "elevVoid" : "elevExtrusion"] = { start: sk.start, end: sk.end, material: sk.material };
+  else app.prefs.sweep = { ...(app.prefs.sweep || {}), profileId: sk.profileId, rectW: sk.rectW, rectH: sk.rectH, material: sk.material };
+  app.savePrefs();
   app.sketch = null; app.setTool("select"); app.selection.clear(); app.selection.add(id); app.sketchChanged();
 }
 
@@ -112,6 +125,15 @@ export class ElevSketchTool {
     this.pts = []; this.cursor = null; this.snap = null; this.hoverEdge = null;
   }
   get mode() { return this.prefs.mode || "line"; }
+  /** An edge picked in the 3D view, laid flat onto the work plane. */
+  add3DEdge(a, b) {
+    const pl = this.app.sketch?.plane;
+    if (!pl) { this.app.toast("Click a wall in the elevation first: its face is where the shape is drawn.", true); return; }
+    const to = p => ({ x: Math.round(G.dot(G.sub(p, pl.o), pl.u) * 10) / 10, y: Math.round(p.z * 10) / 10 });
+    const A = to(a), B = to(b);
+    if (G.dist(A, B) < 1) { this.app.toast("That edge points straight at the face: pick one that runs along it.", true); return; }
+    this.add([{ shape: "line", a: A, b: B }], "Pick edge");
+  }
   options() {
     const app = this.app;
     if (!app.sketch?.plane) return [{ type: "text", text: "Work Plane", cls: "modename" }, { type: "text", text: "Click a wall in this elevation: the path is sketched on its face." }];
@@ -121,9 +143,9 @@ export class ElevSketchTool {
     return o;
   }
   prompt() {
-    if (!this.app.sketch?.plane) return "Click a wall you see square-on: the sweep's path is sketched on its face.";
+    if (!this.app.sketch?.plane) return `Click a wall you see square-on: the ${this.app.sketch?.kind === "extrusion" ? "extrusion's shape" : "sweep's path"} is sketched on its face.`;
     const n = this.pts.length;
-    if (this.mode === "pick") return "Click an edge of the model (a wall end, window, slab or level line) to use it as path.";
+    if (this.mode === "pick") return "Click an edge of the model here or in the 3D view (a wall end or top, window, slab or level line) to use it.";
     if (this.mode === "rect") return n ? "Click the opposite corner." : "Click the first corner.";
     if (this.mode === "arc3") return ["Click the start of the arc.", "Click the end of the arc.", "Click a point the arc passes through."][n];
     return n ? "Click the next point, or type a length and press Enter. Esc ends the chain." : "Click the start of the path.";
@@ -167,7 +189,7 @@ export class ElevSketchTool {
       const w = id && app.doc.walls.find(x => x.id === id);
       if (!w) { app.toast("Click a wall to sketch on its face."); return; }
       try { app.sketch.plane = planeFromWall(app.doc, w, ev.side); } catch (e) { app.toast(e.message, true); return; }
-      app.toast(`Work plane: the face of that wall. Now draw the path.`); app.toolChanged(); app.sketchChanged(); return;
+      app.toast(`Work plane: the face of that wall. Now draw the ${app.sketch.kind === "extrusion" ? "shape" : "path"}.`); app.toolChanged(); app.sketchChanged(); return;
     }
     if (this.mode === "pick") { if (this.hoverEdge) this.add([{ shape: "line", a: { ...this.hoverEdge.a }, b: { ...this.hoverEdge.b } }], "Pick line"); return; }
     const p = this.resolve(ev, raw, shift).pt;
@@ -226,6 +248,14 @@ export function drawElevSketch(ctx, ev, app) {
 
 export function elevSweepProps(app, esc) {
   const sk = app.sketch, doc = app.doc, profiles = C.defaultProfiles().concat(doc.profiles || []);
+  if (sk.kind === "extrusion") return `<div class="ptype"><div class="row"><span>${sk.isVoid ? "Void Extrusion" : "Extrusion"}</span><span>Sketch mode</span></div></div>
+    <div class="pgroup">Constraints</div>
+    <div class="prow"><span>Extrusion Start</span><input id="ckStart" type="number" step="10" value="${sk.start}"></div>
+    <div class="prow"><span>Extrusion End</span><input id="ckEnd" type="number" step="10" value="${sk.end}"></div>
+    <div class="prow"><span>Solid / Void</span><select id="ckVoid"><option value="solid"${sk.isVoid ? "" : " selected"}>Solid</option><option value="void"${sk.isVoid ? " selected" : ""}>Void (cuts walls and floors)</option></select></div>
+    <div class="prow"><span>Material</span><input id="ckMat" type="color" value="${sk.material}"${sk.isVoid ? " disabled" : ""}></div>
+    <div class="prow"><span>Work Plane</span><input readonly value="${sk.plane ? `Wall face (${ELEVATIONS[sk.elev].name} elevation)` : "Pick a wall"}"></div>
+    <div class="pnote">Draw the shape as closed loops on the wall face (an inner loop is a hole): Line, Rectangle, Arc, or <b>Pick Lines</b> on edges here or in the 3D view. Start and End are in mm out from the face; negative goes into the wall, so a Void from 0 to -300 cuts a 300 deep recess or, through a thinner wall, an opening. Then choose <b>Finish Edit Mode</b>.${sk.message ? `<br><span style="color:#ff8a8d">${esc(sk.message)}</span>` : ""}</div>`;
   const w = sk.plane?.wallId && doc.walls.find(x => x.id === sk.plane.wallId);
   return `<div class="ptype"><div class="row"><span>${sk.isVoid ? "Void Sweep" : "Sweep"}</span><span>Sketch mode</span></div></div>
     <div class="pgroup">Profile</div>
@@ -238,6 +268,12 @@ export function elevSweepProps(app, esc) {
 }
 export function wireElevSweepProps(app, renderProps) {
   const $ = s => document.querySelector(s), sk = app.sketch;
+  if (sk.kind === "extrusion") {
+    for (const [id, k] of [["#ckStart", "start"], ["#ckEnd", "end"]]) $(id).onchange = e => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) sk[k] = v; else { app.toast("Type a distance in mm.", true); renderProps(); } };
+    $("#ckVoid").onchange = e => { sk.isVoid = e.target.value === "void"; renderProps(); };
+    $("#ckMat").onchange = e => { sk.material = e.target.value; };
+    return;
+  }
   $("#ckProf").onchange = e => { sk.profileId = e.target.value; renderProps(); };
   const w = $("#ckW"); if (w) w.onchange = e => { const v = parseFloat(e.target.value); if (v >= 5) sk.rectW = v; };
   const h = $("#ckH"); if (h) h.onchange = e => { const v = parseFloat(e.target.value); if (v >= 5) sk.rectH = v; };

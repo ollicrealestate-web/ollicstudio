@@ -53,13 +53,60 @@ export function extrusionPrisms(doc, c) {
   return out;
 }
 
-/** Void extrusions as cutters for walls and floors. */
+/** Void extrusions as cutters for walls and floors: upright prisms { polys (plan), z0, z1 }. */
 export function voidCutters(doc) {
-  return doc.components.filter(c => c.kind === "extrusion" && c.isVoid).map(c => {
-    const r = checkSketch(c.boundary); if (!r.ok) return null;
+  const out = [];
+  for (const c of doc.components) {
+    if (c.kind !== "extrusion" || !c.isVoid) continue;
+    if (c.plane) { out.push(...planeExtrusionBands(doc, c)); continue; }
+    const r = checkSketch(c.boundary); if (!r.ok) continue;
     const { z0, z1 } = extrusionRange(doc, c);
-    return { id: c.id, polys: floorParts(r.loops).map(p => p.outer), z0, z1 };
-  }).filter(Boolean);
+    out.push({ id: c.id, polys: floorParts(r.loops).map(p => p.outer), z0, z1 });
+  }
+  return out;
+}
+
+// --------------------------------------------------------------------------- extrusions drawn in an elevation
+/** A point of a vertical work plane: s along it, n out from it (mm). */
+export const planeAt = (pl, s, n) => ({ x: pl.o.x + pl.u.x * s + pl.n.x * n, y: pl.o.y + pl.u.y * s + pl.n.y * n });
+/** Depth range of an extrusion drawn in an elevation: distances out from its face. */
+export function planeDepth(c) { return { d0: Math.min(c.start ?? 0, c.end ?? 250), d1: Math.max(c.start ?? 0, c.end ?? 250) }; }
+
+/**
+ * An extrusion drawn in an elevation, as upright prisms (for cutting walls and floors): the profile is cut into
+ * horizontal bands; each band's spans become plan rectangles across the depth. Exact for square-cornered shapes,
+ * stepped every 20 mm or less on sloped and curved edges.
+ */
+export function planeExtrusionBands(doc, c) {
+  const r = checkSketch(c.boundary); if (!r.ok) return [];
+  const loops = r.loops, { d0, d1 } = planeDepth(c), pl = c.plane;
+  if (d1 - d0 < 0.5) return [];
+  const edges = loops.flatMap(l => l.map((p, i) => [p, l[(i + 1) % l.length]]));
+  const zs = [...new Set(loops.flat().map(p => Math.round(p.y * 1000) / 1000))].sort((a, b) => a - b);
+  const bands = [];
+  for (let i = 0; i + 1 < zs.length; i++) {
+    const za = zs[i], zb = zs[i + 1], sloped = edges.some(([p, q]) => Math.min(p.y, q.y) <= za + 1e-6 && Math.max(p.y, q.y) >= zb - 1e-6 && Math.abs(p.x - q.x) > 0.5);
+    const n = sloped ? Math.min(200, Math.max(1, Math.ceil((zb - za) / 20))) : 1;
+    for (let k = 0; k < n; k++) bands.push([za + ((zb - za) * k) / n, za + ((zb - za) * (k + 1)) / n]);
+  }
+  const out = [];
+  for (const [z0, z1] of bands) {
+    const zm = (z0 + z1) / 2, xs = [];
+    for (const [p, q] of edges) if ((p.y > zm) !== (q.y > zm)) xs.push(p.x + ((zm - p.y) * (q.x - p.x)) / (q.y - p.y));
+    xs.sort((a, b) => a - b);
+    const polys = [];
+    for (let k = 0; k + 1 < xs.length; k += 2) { const s0 = xs[k], s1 = xs[k + 1]; if (s1 - s0 > 0.5) polys.push([planeAt(pl, s0, d0), planeAt(pl, s1, d0), planeAt(pl, s1, d1), planeAt(pl, s0, d1)]); }
+    if (polys.length) out.push({ id: c.id, polys, z0, z1 });
+  }
+  return out;
+}
+
+/** Plan footprint of anything drawn in an elevation (extrusion or sweep): the strip it covers. */
+export function componentPlanStrip(doc, c) {
+  if (c.kind === "sweep") return sweepPlanStrip(doc, c);
+  const r = checkSketch(c.boundary); if (!r.ok) throw new Error(r.message);
+  const ss = r.loops.flat().map(p => p.x), { d0, d1 } = planeDepth(c), s0 = Math.min(...ss), s1 = Math.max(...ss);
+  return [planeAt(c.plane, s0, d0), planeAt(c.plane, s1, d0), planeAt(c.plane, s1, d1), planeAt(c.plane, s0, d1)];
 }
 
 // --------------------------------------------------------------------------- sweeps

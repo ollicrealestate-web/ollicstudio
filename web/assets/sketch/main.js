@@ -18,7 +18,7 @@ import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors,
 import { floorLoops, floorParts, curvePoints as curvePts } from "./floors.js";
 import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSketchProps, wireComponentSketchProps, drawComponents, drawRefPlanes, componentsAt, cutWallSolids, cutWallPlan, floorVoidHoles, buildComponents3D, RefPlaneTool, modelInPlaceDialog, wallSweepDialog, parapetDialog, componentProps, wireComponentProps, workPlaneDialog } from "./componentsui.js";
 import { checkSketch } from "./floors.js";
-import { chainPath as sweepChain, sweepPlanStrip } from "./components.js";
+import { chainPath as sweepChain, componentPlanStrip } from "./components.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { startRoofSketch, finishRoofSketch, RoofBoundaryTool, SlopeArrowTool, RoofExtrusionTool, drawRoofs, roofsAt, buildRoofs3D, cutWallsByRoof, slopedPrismGeometry, roofSketchProps, wireRoofSketchProps, roofLineProps, wireRoofLineProps, roofProps, wireRoofProps, editRoof, roofOnPlan, drawRoofSketchMarks } from "./roofsui.js";
 import { roofGeometry } from "./roofs.js";
@@ -89,8 +89,9 @@ app.outlineOf = id => {
   if (doc.floors.includes(el)) return curvesPts(el.boundary);
   if (doc.roofs.includes(el)) { try { return [{ pts: roofGeometry(doc, el).outline, closed: true }]; } catch { return []; } }
   if (doc.components.includes(el)) {
+    if (el.plane) return [{ pts: componentPlanStrip(doc, el), closed: true }];
     if (el.kind === "extrusion") return curvesPts(el.boundary);
-    if (el.kind === "sweep") return el.plane ? [{ pts: sweepPlanStrip(doc, el), closed: true }] : curvesPts(el.path);
+    if (el.kind === "sweep") return curvesPts(el.path);
     return [];
   }
   if (doc.dimensions.includes(el)) return [{ pts: [el.a, el.b] }];
@@ -108,7 +109,7 @@ app.translateWithJoins = (doc, ids, delta) => {
     if (o) { if (!set.has(o.hostWallId)) moveOpening(doc, o, translation(delta), { wallAxis: OP.wallAxis }); continue; }
     const comp = doc.components.find(x => x.id === id);
     if (comp?.kind === "wallSweep") continue; // goes with its walls
-    if (comp?.kind === "sweep" && comp.plane) { comp.plane.o = G.add(comp.plane.o, delta); continue; }
+    if (comp?.plane) { comp.plane.o = G.add(comp.plane.o, delta); continue; }
     translateEl(el, delta);
   }
   for (const w of doc.walls) {
@@ -168,9 +169,23 @@ app.extraBoxes = () => [
   ...app.doc.roofs.filter(r => roofOnPlan(app.doc, r, app.levelId)).map(r => { try { return boxOf(roofGeometry(app.doc, r).outline); } catch { return null; } }).filter(Boolean),
   ...annotationBox(app, app.levelId),
   // components and reference planes, so Zoom to fit finds them too
-  ...app.doc.components.filter(c => c.levelId === app.levelId).map(c => { try { const o = app.outlineOf(c.id).flatMap(x => x.pts); return o.length ? boxOf(o) : null; } catch { return null; } }).filter(Boolean),
+  ...app.doc.components.filter(c => c.levelId === app.levelId && c.kind !== "wallSweep").map(c => { try { const o = app.outlineOf(c.id).flatMap(x => x.pts); return o.length ? boxOf(o) : null; } catch { return null; } }).filter(Boolean),
   ...app.doc.referencePlanes.map(r => boxOf([r.a, r.b])),
 ];
+/** Pick Lines in the 3D view while sketching a sweep or extrusion (on the level or in an elevation). */
+app.pickEdge3D = {
+  active: () => !!app.sketch && ["sweep", "extrusion"].includes(app.sketch.kind) && (app.tool?.mode === "pick"),
+  add: (a, b) => {
+    if (app.tool?.add3DEdge) { app.tool.add3DEdge(a, b); return; }
+    // a sketch on the level: the edge must be level; it is drawn at its plan position
+    if (Math.abs(a.z - b.z) > 1) { app.toast("On a level sketch, pick a level (horizontal) edge. For an upright one, sketch in an elevation.", true); return; }
+    const sk = app.sketch, lev = app.doc.levels.find(l => l.id === sk.levelId)?.elevation ?? 0, first = !app.doc.lines.some(l => l.kind === "sketch" && l.sketchId === sk.id);
+    if (first && sk.kind === "sweep") sk.height = Math.round(a.z - lev);
+    if (first && sk.kind === "extrusion") { const h = sk.end - sk.start; sk.start = Math.round(a.z - lev); sk.end = sk.start + h; }
+    app.tool.add([{ shape: "line", a: { x: a.x, y: a.y }, b: { x: b.x, y: b.y } }], "Pick edge");
+    if (first) { renderProps(); app.toast(sk.kind === "sweep" ? `Path height set from the edge: ${Math.round(a.z - lev)} mm above the level.` : `Extrusion Start set from the edge: ${Math.round(a.z - lev)} mm above the level.`); }
+  },
+};
 app.pick3D = id => { app.selection.clear(); if (id) app.selection.add(id); app.selectionChanged(); };
 const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc, ask: (m, ok) => app.ask(m, ok), askText: (l, v) => app.askText(l, v) };
 app.ui = ui;
