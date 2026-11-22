@@ -23,6 +23,9 @@ export function serve() {
   return new Promise(r => srv.listen(0, "127.0.0.1", () => r(srv)));
 }
 
+if (process.argv[1] && !process.argv[1].endsWith("e2e_phase1.mjs")) { /* imported for serve() only */ } else await run();
+
+async function run() {
 const fails = [];
 const check = (ok, msg) => { if (!ok) { fails.push(msg); console.log("FAIL", msg); } else console.log("ok  ", msg); };
 
@@ -179,3 +182,4 @@ check(!errors.length, `no page errors ${errors.length ? errors.join(" | ") : ""}
 await browser.close(); srv.close();
 console.log(fails.length ? `\nPHASE 1 BROWSER TEST FAILED (${fails.length})` : "\nPHASE 1 BROWSER TEST PASSED");
 process.exit(fails.length ? 1 : 0);
+}

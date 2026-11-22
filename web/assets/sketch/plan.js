@@ -86,7 +86,7 @@ export class PlanView {
 
   colorFor(id, base) {
     if (this.app.selection.has(id)) return COLORS.sel;
-    if (this.app.hoverId === id) return COLORS.hover;
+    if (this.app.hoverId === id || this.app.hoverSet?.has(id)) return COLORS.hover;
     return base;
   }
 

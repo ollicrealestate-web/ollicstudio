@@ -151,3 +151,8 @@ button { cursor: pointer; }
   .sk-browser { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.lvpick { position: relative; }
+.lvpick summary { cursor: pointer; padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-2); list-style: none; }
+.lvpick > div { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; display: grid; gap: 2px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 8px; min-width: 160px; }
+.sk-dialog select { background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 5px; padding: 4px 6px; width: 100%; }
+.muted { color: var(--muted); }

@@ -17,6 +17,16 @@ export const DRAW_MODES = {
 const mmText = v => String(Math.round(v));
 
 // ------------------------------------------------------------------ Select / Modify
+/** Copies of the editable collections, so a live drag preview can be undone exactly. */
+function snapshot(doc) { return { walls: JSON.stringify(doc.walls), lines: JSON.stringify(doc.lines), openings: JSON.stringify(doc.openings) }; }
+function restore(doc, snap) { doc.walls = JSON.parse(snap.walls); doc.lines = JSON.parse(snap.lines); doc.openings = JSON.parse(snap.openings); }
+/** Dragging a straight wall's end also drags the ends of walls joined there. */
+function gripEdit(app, doc, id, key, p) {
+  const w = doc.walls.find(x => x.id === id);
+  if (w && w.shape === "line" && (key === "a" || key === "b")) { app.stretchWallEnd(doc, id, key, p); return; }
+  const el = doc.lines.find(x => x.id === id) || w;
+  if (el) moveGrip(el, key, p);
+}
 export class SelectTool {
   constructor(app) { this.app = app; this.name = "select"; this.title = "Modify"; this.drag = null; }
   prompt() {
@@ -35,7 +45,7 @@ export class SelectTool {
       for (const g of grips(el)) {
         const s = app.plan.toScreen(g.point);
         if (Math.hypot(s.x - c.sx, s.y - c.sy) <= 8) {
-          this.drag = { kind: "grip", id, key: g.key, orig: JSON.parse(JSON.stringify(el)), other: el.shape === "line" ? (g.key === "a" ? el.b : el.a) : null };
+          this.drag = { kind: "grip", id, key: g.key, snap: snapshot(app.doc), other: el.shape === "line" ? (g.key === "a" ? { ...el.b } : { ...el.a }) : null };
           app.dragGrip = { id, key: g.key };
           app.excludeFromSnap = new Set([id]);
           return;
@@ -45,9 +55,10 @@ export class SelectTool {
     const hit = app.hoverCandidate();
     if (hit) {
       const ev = c.ev;
-      if (ev.shiftKey) app.selection.delete(hit);
-      else if (ev.ctrlKey || ev.metaKey) app.selection.add(hit);
-      else if (!app.selection.has(hit)) { app.selection.clear(); app.selection.add(hit); }
+      const ids = hit.startsWith("chain:") ? app.chainOf(hit.slice(6)) : [hit];
+      if (ev.shiftKey) ids.forEach(id => app.selection.delete(id));
+      else if (ev.ctrlKey || ev.metaKey) ids.forEach(id => app.selection.add(id));
+      else if (!ids.every(id => app.selection.has(id))) { app.selection.clear(); ids.forEach(id => app.selection.add(id)); }
       app.selectionChanged();
       this.drag = { kind: "maybeMove", start: c.raw, sx: c.sx, sy: c.sy, base: c.pt };
       return;
@@ -63,19 +74,19 @@ export class SelectTool {
     if (d.kind === "maybeMove" && Math.hypot(c.sx - d.sx, c.sy - d.sy) > 5) {
       const ids = [...app.selection].filter(id => !app.lookup(id)?.pinned);
       if (!ids.length) { app.toast("Pinned elements cannot move. Unpin them first."); this.drag = null; return; }
-      d.kind = "move"; d.ids = ids; d.orig = ids.map(id => JSON.parse(JSON.stringify(app.lookup(id))));
+      d.kind = "move"; d.ids = ids; d.snap = snapshot(app.doc);
       app.excludeFromSnap = new Set(ids);
     }
     if (d.kind === "move") {
       const delta = G.sub(c.pt, d.base);
-      d.ids.forEach((id, i) => { const el = app.lookup(id); Object.assign(el, JSON.parse(JSON.stringify(d.orig[i]))); translate(el, delta); });
+      restore(app.doc, d.snap);
+      app.translateWithJoins(app.doc, d.ids, delta);
       d.delta = delta;
       app.redraw(true);
     }
     if (d.kind === "grip") {
-      const el = app.lookup(d.id);
-      Object.assign(el, JSON.parse(JSON.stringify(d.orig)));
-      moveGrip(el, d.key, c.pt);
+      restore(app.doc, d.snap);
+      gripEdit(app, app.doc, d.id, d.key, c.pt);
       d.to = c.pt;
       app.redraw(true);
     }
@@ -96,16 +107,15 @@ export class SelectTool {
       return;
     }
     if (d.kind === "move" && d.delta) {
-      d.ids.forEach((id, i) => Object.assign(app.lookup(id), JSON.parse(JSON.stringify(d.orig[i]))));
+      restore(app.doc, d.snap);
       const delta = d.delta;
-      if (G.len(delta) > 1e-6) app.commit("Move", () => d.ids.forEach(id => translate(app.lookup(id), delta)));
+      if (G.len(delta) > 1e-6) app.commit("Move", doc => { app.translateWithJoins(doc, d.ids, delta); app.validate?.(doc, d.ids); });
       else app.redraw(true);
     }
     if (d.kind === "grip" && d.to) {
-      const el = app.lookup(d.id);
-      Object.assign(el, JSON.parse(JSON.stringify(d.orig)));
+      restore(app.doc, d.snap);
       const { key, to } = d;
-      app.commit("Drag end", () => moveGrip(app.lookup(d.id), key, to));
+      app.commit("Drag end", doc => { gripEdit(app, doc, d.id, key, to); app.validate?.(doc, [d.id]); });
     }
     app.redraw(true);
   }
@@ -115,8 +125,7 @@ export class SelectTool {
   escape() { if (this.drag) { this.cancelDrag(); return true; } if (this.app.selection.size) { this.app.selection.clear(); this.app.selectionChanged(); return true; } return false; }
   cancelDrag() {
     const app = this.app, d = this.drag;
-    if (d?.kind === "move") d.ids.forEach((id, i) => Object.assign(app.lookup(id), JSON.parse(JSON.stringify(d.orig[i]))));
-    if (d?.kind === "grip") Object.assign(app.lookup(d.id), JSON.parse(JSON.stringify(d.orig)));
+    if (d?.snap) restore(app.doc, d.snap);
     this.drag = null; app.rubber = null; app.dragGrip = null; app.excludeFromSnap = null; app.redraw(true);
   }
   get wantsSnap() { return this.drag?.kind === "move" || this.drag?.kind === "grip"; }

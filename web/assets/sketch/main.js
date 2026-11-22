@@ -3,10 +3,13 @@ import { newProject, normalize, findById, levelLabel } from "./model.js";
 import { History } from "./history.js";
 import * as G from "./geom.js";
 import { findSnap, OVERRIDES, SNAP_KINDS } from "./snaps.js";
-import { planCurves, linesInPlan, inRect, distanceTo, LINE_STYLES, lineLength, setLineLength, bbox, unionBox } from "./elements.js";
+import { planCurves, linesInPlan, inRect, distanceTo, LINE_STYLES, lineLength, setLineLength, bbox, unionBox, translate as translateEl } from "./elements.js";
 import { PlanView } from "./plan.js";
 import { View3D } from "./view3d.js";
 import { SelectTool, LineTool } from "./tools.js";
+import { WallTool, drawWalls, drawUnderlay, drawWallDims, buildWalls3D, wallProps, wireWallProps, wallTypeDialog, levelsDialog, copyToLevelsDialog } from "./wallsui.js";
+import { wallFootprints, outlineEdges, locationPolyline, checkWall } from "./walls.js";
+import * as LV from "./levels.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { icon } from "./icons.js";
 
@@ -31,7 +34,71 @@ if (Array.isArray(app.prefs.snaps)) app.snapsEnabled = new Set(app.prefs.snaps);
 app.savePrefs = () => writePrefs(app.prefs);
 app.lookup = id => findById(app.doc, id)?.el || null;
 app.levelName = () => app.doc.levels.find(l => l.id === app.levelId)?.name || "Level";
-app.redraw = (with3d = false) => { app.plan.invalidate(); if (with3d) app.view3d.invalidate(); };
+app.geomVer = 0;
+app.redraw = (with3d = false) => { if (with3d) app.geomVer++; app.plan.invalidate(); if (with3d) app.view3d.invalidate(); };
+const fpCache = new Map();
+/** Wall footprints of a level, recomputed only when the model changed. */
+app.footprints = levelId => {
+  const key = `${app.geomVer}|${levelId}`;
+  if (!fpCache.has(key)) { if (fpCache.size > 40) fpCache.clear(); fpCache.set(key, wallFootprints(app.doc, levelId)); }
+  return fpCache.get(key);
+};
+app.isWall = id => app.doc.walls.some(w => w.id === id);
+app.wallsOnLevel = () => app.doc.walls.filter(w => w.baseLevelId === app.levelId);
+/** Curves the snaps can use on this plan: lines, wall location lines and the visible wall faces. */
+app.snapCurves = () => {
+  const fp = app.footprints(app.levelId);
+  const out = planCurves(app.doc, app.levelId);
+  for (const w of app.wallsOnLevel()) {
+    if (w.shape === "arc") out.push({ type: "arc", c: w.c, r: w.r, start: w.start, sweep: w.sweep, id: w.id });
+    else out.push({ type: "seg", a: w.a, b: w.b, id: w.id });
+  }
+  // faces of walls being dragged are left out, so a moving wall does not snap to itself
+  const skip = app.excludeFromSnap || new Set();
+  const faces = [...fp.entries()].filter(([id]) => !skip.has(id)).flatMap(([, f]) => f.pieces);
+  for (const [a, b] of outlineEdges(faces)) out.push({ type: "seg", a, b, id: "face" });
+  return out;
+};
+const JOIN = 2;
+/** Moves elements; walls joined to moved walls stretch so the joins hold (as in Revit). */
+app.translateWithJoins = (doc, ids, delta) => {
+  const set = new Set(ids);
+  const moved = doc.walls.filter(w => set.has(w.id) && w.shape === "line");
+  const ends = moved.flatMap(w => [w.a, w.b]).map(p => ({ ...p }));
+  for (const id of ids) { const el = findById(doc, id)?.el; if (el) translateEl(el, delta); }
+  for (const w of doc.walls) {
+    if (set.has(w.id) || w.shape !== "line") continue;
+    for (const k of ["a", "b"]) if (ends.some(p => G.dist(p, w[k]) <= JOIN)) w[k] = G.add(w[k], delta);
+  }
+};
+/** Moves one end of a wall; other walls joined at that end follow. */
+app.stretchWallEnd = (doc, id, key, p) => {
+  const w = doc.walls.find(x => x.id === id);
+  const old = { ...w[key] };
+  for (const o of doc.walls) if (o.id !== id && o.shape === "line" && o.baseLevelId === w.baseLevelId) for (const k of ["a", "b"]) if (G.dist(o[k], old) <= JOIN) o[k] = { x: p.x, y: p.y };
+  w[key] = { x: p.x, y: p.y };
+};
+/** Walls connected end to end with this one (the chain Tab selects). */
+app.chainOf = id => {
+  const start = app.doc.walls.find(w => w.id === id);
+  if (!start) return [];
+  const same = app.doc.walls.filter(w => w.baseLevelId === start.baseLevelId);
+  const endsOf = w => { const p = locationPolyline(w); return [p[0], p.at(-1)]; };
+  const seen = new Set([id]), queue = [start];
+  while (queue.length) {
+    const w = queue.pop();
+    for (const e of endsOf(w)) for (const o of same) if (!seen.has(o.id) && endsOf(o).some(q => G.dist(q, e) <= JOIN)) { seen.add(o.id); queue.push(o); }
+  }
+  return [...seen];
+};
+app.setLevel = id => setLevel(id);
+app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
+app.drawModel = view => drawWalls(view, app);
+app.drawUnderlay = view => drawUnderlay(view, app);
+app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
+app.extraBoxes = () => [...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) }));
+app.pick3D = id => { app.selection.clear(); if (id) app.selection.add(id); app.selectionChanged(); };
+const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc };
 app.toast = (msg, bad = false) => {
   const t = $("#toast"); t.textContent = msg; t.classList.toggle("bad", !!bad); t.classList.add("show");
   clearTimeout(app._toastT); app._toastT = setTimeout(() => t.classList.remove("show"), bad ? 4200 : 2600);
@@ -46,17 +113,46 @@ app.toolChanged = () => { renderOptions(); renderProps(); setPrompt(); app.redra
 app.renameSilently = name => { app.doc.name = name; $("#projName").value = name; };
 app.visibleLevels3D = () => null;
 
-app.elementsInRect = (r, crossing) => linesInPlan(app.doc, app.levelId).filter(l => inRect(l, r, crossing)).map(l => l.id);
+app.elementsInRect = (r, crossing) => {
+  const ids = linesInPlan(app.doc, app.levelId).filter(l => inRect(l, r, crossing)).map(l => l.id);
+  const fp = app.footprints(app.levelId);
+  const inside = p => p.x >= r.x0 && p.x <= r.x1 && p.y >= r.y0 && p.y <= r.y1;
+  const corners = [G.P(r.x0, r.y0), G.P(r.x1, r.y0), G.P(r.x1, r.y1), G.P(r.x0, r.y1)];
+  for (const w of app.wallsOnLevel()) {
+    const pieces = fp.get(w.id)?.pieces || [];
+    const pts = pieces.flat();
+    if (!pts.length) continue;
+    const fully = pts.every(inside);
+    const touched = fully || (crossing && (pts.some(inside) || corners.some(c => pieces.some(pc => G.pointInPolygon(c, pc))) ||
+      pieces.some(pc => pc.some((a, i) => corners.some((c, k) => G.segIntersect(a, pc[(i + 1) % pc.length], c, corners[(k + 1) % 4]))))));
+    if (touched) ids.push(w.id);
+  }
+  return ids;
+};
 
 app.updateHover = c => {
   const tol = app.plan.px(7);
-  const list = linesInPlan(app.doc, app.levelId)
-    .map(l => ({ id: l.id, d: distanceTo(l, c.raw) }))
-    .filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
+  const fp = app.footprints(app.levelId);
+  const cands = linesInPlan(app.doc, app.levelId).map(l => ({ id: l.id, d: distanceTo(l, c.raw) }));
+  for (const w of app.wallsOnLevel()) {
+    const pieces = fp.get(w.id)?.pieces || [];
+    const inside = pieces.some(p => G.pointInPolygon(c.raw, p));
+    const loc = locationPolyline(w);
+    let d = inside ? 0 : Infinity;
+    for (const p of pieces) for (let i = 0; i < p.length; i++) d = Math.min(d, G.projectOnSegment(c.raw, p[i], p[(i + 1) % p.length]).dist);
+    for (let i = 0; i < loc.length - 1; i++) d = Math.min(d, G.projectOnSegment(c.raw, loc[i], loc[i + 1]).dist);
+    cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
+  }
+  const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
+  // Tab can also pick the whole chain of joined walls under the cursor
+  const firstWall = list.find(id => app.isWall(id));
+  if (firstWall && app.chainOf(firstWall).length > 1) list.push(`chain:${firstWall}`);
   const same = list.length === app.hoverList.length && list.every((id, i) => id === app.hoverList[i]);
-  if (!same) { app.hoverList = list; app.hoverIdx = 0; }
+  // a Tab choice holds while the pointer stays still; moving it starts again from the nearest element
+  const movedAway = app.tabAt && Math.hypot(c.sx - app.tabAt.x, c.sy - app.tabAt.y) > 4;
+  if (!same || movedAway) { app.hoverList = list; app.hoverIdx = 0; app.tabAt = null; }
   const next = app.hoverList[app.hoverIdx] || null;
-  if (next !== app.hoverId) { app.hoverId = next; app.redraw(); }
+  if (next !== app.hoverId) { app.hoverId = next; app.hoverSet = next?.startsWith("chain:") ? new Set(app.chainOf(next.slice(6))) : null; app.redraw(); }
 };
 
 app.loadDoc = doc => {
@@ -79,6 +175,7 @@ app.view3d = new View3D($("#view3d"), app);
 app.drawSelectionDims = view => {
   if (app.tool.name !== "select" || app.tool.drag || app.selection.size !== 1) return;
   const el = app.lookup([...app.selection][0]);
+  if (el && app.isWall(el.id)) { drawWallDims(view, app, el, inlineEdit); return; }
   if (!el || el.kind === undefined) return;
   if (el.shape === "line" && G.dist(el.a, el.b) > 1) {
     view.tempDim(el.a, el.b, String(Math.round(lineLength(el))), {
@@ -109,6 +206,7 @@ const TOOLS = {
   select: () => new SelectTool(app),
   modelLine: () => new LineTool(app, "model"),
   detailLine: () => new LineTool(app, "detail"),
+  wall: () => new WallTool(app),
 };
 app.setTool = name => {
   if (!TOOLS[name]) return;
@@ -126,7 +224,7 @@ const SOON = phase => ({ soon: `Arrives in phase ${phase}` });
 const RIBBON = [
   { tab: "Architecture", groups: [
     { label: "Build", items: [
-      { id: "wall", label: "Wall", icon: "wall", key: "WA", ...SOON(2) },
+      { id: "wall", label: "Wall", icon: "wall", key: "WA", tool: "wall" },
       { id: "door", label: "Door", icon: "door", key: "DR", ...SOON(4) },
       { id: "window", label: "Window", icon: "window", key: "WN", ...SOON(4) },
       { id: "component", label: "Component", icon: "component", ...SOON(6) },
@@ -155,6 +253,7 @@ const RIBBON = [
       { id: "pin", label: "Pin", icon: "pin", key: "PN", ...SOON(3) },
       { id: "delete", label: "Delete", icon: "del", key: "DE", run: () => deleteSelection() },
     ] },
+    { label: "Levels", items: [{ id: "copyLevels", label: "Copy to Levels", icon: "levels", run: () => copyToLevelsDialog(app, ui) }] },
     { label: "Undo", items: [
       { id: "undo", label: "Undo", icon: "undo", hint: "Ctrl+Z", run: () => undo() },
       { id: "redo", label: "Redo", icon: "redo", hint: "Ctrl+Y", run: () => redo() },
@@ -177,8 +276,8 @@ const RIBBON = [
   ] },
   { tab: "Manage", groups: [
     { label: "Project", items: [
-      { id: "levels", label: "Levels", icon: "levels", key: "LL", ...SOON(2) },
-      { id: "wallTypes", label: "Wall Types", icon: "types", ...SOON(2) },
+      { id: "levels", label: "Levels", icon: "levels", key: "LL", run: () => levelsDialog(app, ui) },
+      { id: "wallTypes", label: "Wall Types", icon: "types", run: () => wallTypeDialog(app, (app.tool.name === "wall" && app.tool.typeId) || app.doc.wallTypes[0].id, ui) },
       { id: "units", label: "Units", icon: "units", key: "UN", run: () => unitsDialog() },
     ] },
     { label: "Settings", items: [
@@ -244,6 +343,17 @@ function renderOptions() {
 function renderProps() {
   const box = $("#props");
   const t = app.tool;
+  if (t && t.name === "wall") {
+    box.innerHTML = `<div class="ptype"><div class="row"><span>Basic Wall</span><button class="btn" type="button" id="pEditType">Edit Type</button></div>
+      <select id="pType" aria-label="Wall type">${app.doc.wallTypes.map(w => `<option value="${esc(w.id)}"${w.id === t.typeId ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select></div>
+      <div class="pgroup">Constraints</div>
+      <div class="prow"><span>Base Constraint</span><input readonly value="${esc(app.levelName())}"></div>
+      <div class="prow"><span>Thickness</span><input readonly value="${t.type().thickness}"></div>
+      <div class="pnote">Draw clockwise to keep the exterior side outside. Type a length and press Enter; Space flips the side while drawing.</div>`;
+    $("#pType").onchange = e => { t.typeId = e.target.value; t.savePrefs(); renderProps(); app.redraw(); };
+    $("#pEditType").onclick = () => wallTypeDialog(app, t.typeId, ui);
+    return;
+  }
   if (t && t.name !== "select") {
     box.innerHTML = `<div class="ptype"><div class="row"><span>Lines</span><span>${esc(t.title)}</span></div>
       <select id="pStyle" aria-label="Line style">${Object.entries(LINE_STYLES).map(([k, v]) => `<option value="${k}"${k === t.style ? " selected" : ""}>${esc(v.label)}</option>`).join("")}</select></div>
@@ -265,7 +375,8 @@ function renderProps() {
     return;
   }
   const els = ids.map(app.lookup);
-  const allLines = els.every(e => e.shape);
+  if (els.every(e => app.isWall(e.id))) { box.innerHTML = wallProps(app, ids, esc); wireWallProps(app, ids, renderProps, typeId => wallTypeDialog(app, typeId, ui)); return; }
+  const allLines = els.every(e => e.shape && e.kind);
   if (!allLines) { box.innerHTML = `<div class="pnote">${ids.length} elements selected.</div>`; return; }
   const style = els.every(e => e.style === els[0].style) ? els[0].style : "";
   const one = els.length === 1 ? els[0] : null;
@@ -301,7 +412,7 @@ function renderBrowser() {
 }
 
 function setLevel(id) {
-  app.levelId = id; app.selection.clear();
+  app.levelId = id; app.selection.clear(); app.view3d.invalidate();
   $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`;
   renderBrowser(); app.toolChanged();
 }
@@ -310,15 +421,22 @@ function renderViewBars() {
   const scale = app.prefs.scale || "100";
   $("#planBar").innerHTML = `<label>Scale <select id="vScale">${["50", "100", "200"].map(s => `<option value="${s}"${s === scale ? " selected" : ""}>1 : ${s}</option>`).join("")}</select></label>
     <button type="button" id="vFit" title="Zoom to fit (ZF)">Zoom to fit</button>
+    <label><input type="checkbox" id="vUnder"${app.prefs.underlay ? " checked" : ""}> Underlay: level below</label>
     <span>Snaps: ${app.snapsEnabled.size ? "on" : "off"}</span>`;
   $("#vScale").onchange = e => { app.prefs.scale = e.target.value; app.savePrefs(); };
   $("#vFit").onclick = () => app.plan.fit(app.plan.contentBox());
+  $("#vUnder").onchange = e => { app.prefs.underlay = e.target.checked; app.savePrefs(); app.redraw(); };
   const vs = app.prefs.visual || "shaded";
   $("#bar3d").innerHTML = `<label>Visual style <select id="vStyle">${[["wire", "Wireframe"], ["hidden", "Hidden Line"], ["shaded", "Shaded"], ["consistent", "Consistent Colours"], ["realistic", "Realistic"]].map(([k, v]) => `<option value="${k}"${k === vs ? " selected" : ""}>${v}</option>`).join("")}</select></label>
     <button type="button" id="v3Fit">Zoom to fit</button>
+    <details class="lvpick"><summary>Levels</summary><div>${LV.sorted(app.doc).map(l => `<label><input type="checkbox" data-l3="${l.id}"${(app.prefs.hidden3D || []).includes(l.id) ? "" : " checked"}> ${esc(l.name)}</label>`).join("")}</div></details>
     <button type="button" data-corner="sw">SW</button><button type="button" data-corner="se">SE</button><button type="button" data-corner="ne">NE</button><button type="button" data-corner="nw">NW</button><button type="button" data-corner="top">Top</button>`;
   $("#vStyle").onchange = e => { app.prefs.visual = e.target.value; app.savePrefs(); app.view3d.style = e.target.value; app.view3d.invalidate(); };
   $("#v3Fit").onclick = () => app.view3d.fit();
+  $("#bar3d").querySelectorAll("[data-l3]").forEach(c => c.onchange = () => {
+    app.prefs.hidden3D = [...$("#bar3d").querySelectorAll("[data-l3]")].filter(x => !x.checked).map(x => x.dataset.l3);
+    app.savePrefs(); app.redraw(true);
+  });
   $("#bar3d").querySelectorAll("[data-corner]").forEach(b => b.onclick = () => app.view3d.lookFrom(b.dataset.corner));
 }
 
@@ -346,7 +464,11 @@ function deleteSelection() {
   if (!ids.length) { app.toast("Select something to delete."); return; }
   const pinned = ids.filter(id => app.lookup(id).pinned);
   if (pinned.length) { app.toast("Pinned elements cannot be deleted. Unpin them first.", true); return; }
-  app.commit("Delete", doc => { doc.lines = doc.lines.filter(l => !ids.includes(l.id)); });
+  app.commit("Delete", doc => {
+    doc.lines = doc.lines.filter(l => !ids.includes(l.id));
+    doc.walls = doc.walls.filter(w => !ids.includes(w.id));
+    doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
+  });
   app.selection.clear(); app.selectionChanged();
 }
 function undo() { const l = app.history.undo(); if (l) app.toast(`Undone: ${l}`); else app.toast("Nothing to undo."); }
@@ -355,9 +477,11 @@ function redo() { const l = app.history.redo(); if (l) app.toast(`Redone: ${l}`)
 app.history.onChange(info => {
   // drop selections of elements that no longer exist
   for (const id of [...app.selection]) if (!app.lookup(id)) app.selection.delete(id);
+  app.geomVer++;
   if (info.kind === "reset") return;
   app.redraw(true);
   renderProps(); renderRibbon(); setPrompt();
+  if (info.ops?.some(o => o.k === "levels")) { if (!app.doc.levels.some(l => l.id === app.levelId)) app.levelId = LV.sorted(app.doc)[0].id; renderBrowser(); renderViewBars(); $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`; }
   if (info.ops?.some(o => o.op === "doc")) $("#projName").value = app.doc.name;
   app.store.changed();
 });
@@ -375,7 +499,7 @@ function pickContext(ev) {
   const wants = tool.wantsSnap && (tool.wantsSnapNow ?? true);
   const from = tool.constrainFrom?.() || null;
   if (wants) {
-    let curves = planCurves(app.doc, app.levelId);
+    let curves = app.snapCurves();
     if (app.excludeFromSnap) curves = curves.filter(c => !app.excludeFromSnap.has(c.id));
     snap = findSnap(raw, curves, { radius: app.plan.px(10), from, enabled: app.snapsEnabled, override: app.snapOverride, grid: app.snapsEnabled.has("grid") ? gridStep() : 0 });
     if (snap) pt = snap.point;
@@ -441,6 +565,7 @@ canvas.addEventListener("pointermove", ev => {
     return;
   }
   const c = pickContext(ev);
+  app.lastPointer = { x: c.sx, y: c.sy };
   $("#statusXY").textContent = `X ${Math.round(c.pt.x)}  Y ${Math.round(c.pt.y)}`;
   app.tool.move(c);
   if (!app.tool.wantsSnap) app.snap = null;
@@ -481,6 +606,7 @@ document.addEventListener("keydown", ev => {
   if (ctrl && (k.toLowerCase() === "y" || (k.toLowerCase() === "z" && ev.shiftKey))) { ev.preventDefault(); redo(); return; }
   if (ctrl && k.toLowerCase() === "s") { ev.preventDefault(); app.store.save(); return; }
   if (ctrl) return;
+  if (app.tool.key?.(ev)) { ev.preventDefault(); return; }
   if (k === " ") { spaceDown = true; ev.preventDefault(); return; }
   if (k === "Escape") {
     hideMenu();
@@ -492,7 +618,7 @@ document.addEventListener("keydown", ev => {
   }
   if (k === "Tab") {
     ev.preventDefault();
-    if (app.hoverList.length > 1) { app.hoverIdx = (app.hoverIdx + 1) % app.hoverList.length; app.hoverId = app.hoverList[app.hoverIdx]; app.redraw(); app.toast(`${app.hoverIdx + 1} of ${app.hoverList.length} under the cursor`); }
+    if (app.hoverList.length > 1) { app.tabAt = app.lastPointer; app.hoverIdx = (app.hoverIdx + 1) % app.hoverList.length; app.hoverId = app.hoverList[app.hoverIdx]; app.redraw(); app.toast(`${app.hoverIdx + 1} of ${app.hoverList.length} under the cursor`); }
     return;
   }
   const canType = app.tool.hasFrom?.();
@@ -505,6 +631,7 @@ document.addEventListener("keydown", ev => {
   }
   if (k === "Delete" || k === "Backspace") { if (app.tool.name === "select") { ev.preventDefault(); deleteSelection(); } return; }
   if (/^[a-zA-Z]$/.test(k)) {
+    ev.preventDefault(); // a shortcut that opens a dialog must not also type its letter into it
     keyBuf += k.toUpperCase();
     clearTimeout(keyTimer); keyTimer = setTimeout(() => { keyBuf = ""; }, 1500);
     if (OVERRIDES[keyBuf]) { app.snapOverride = OVERRIDES[keyBuf]; keyBuf = ""; setPrompt(); app.toast(app.snapOverride === "off" ? "Snaps off for the next pick." : `Next pick snaps to: ${app.snapOverride}.`); return; }

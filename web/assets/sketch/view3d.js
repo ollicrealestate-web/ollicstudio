@@ -27,7 +27,23 @@ export class View3D {
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a30, 1.1));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.position.set(20, 30, 10);
+    sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
+    this.sun = sun;
     this.scene.add(sun);
+    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x8c8a84, roughness: 1 }));
+    this.ground.rotation.x = -Math.PI / 2; this.ground.position.y = -0.001; this.ground.receiveShadow = true; this.ground.visible = false;
+    this.scene.add(this.ground);
+    // click (without dragging) to select in 3D
+    const ray = new THREE.Raycaster(); let downAt = null;
+    this.renderer.domElement.addEventListener("pointerdown", e => { downAt = { x: e.clientX, y: e.clientY, b: e.button }; });
+    this.renderer.domElement.addEventListener("pointerup", e => {
+      if (!downAt || downAt.b !== 0 || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
+      const r = this.renderer.domElement.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+      const hit = ray.intersectObjects(this.root.children, true).find(h => h.object.isMesh && h.object.userData.id);
+      this.app.pick3D?.(hit ? hit.object.userData.id : null);
+    });
     this.grid = new THREE.GridHelper(60, 60, 0x2e2e36, 0x1b1b20);
     this.grid.position.set(5, 0, -5);
     this.scene.add(this.grid);
@@ -47,6 +63,12 @@ export class View3D {
   }
 
   invalidate() { this.dirty = true; }
+
+  setShadows(on) {
+    this.renderer.shadowMap.enabled = on;
+    this.sun.castShadow = on;
+    this.ground.visible = on;
+  }
 
   resize() {
     const r = this.host.getBoundingClientRect();
@@ -105,6 +127,7 @@ export class View3D {
     this.controls.target.copy(centre);
     this.camera.position.copy(centre.clone().add(dir.multiplyScalar(dist)));
     this.camera.near = Math.max(0.01, dist / 200); this.camera.far = dist * 50; this.camera.updateProjectionMatrix();
+    this.controls.update(); this.camera.updateMatrixWorld();
     this.needsRender = true;
   }
 
