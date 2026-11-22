@@ -47,8 +47,19 @@ export function transformIds(doc, ids, M, { copy = false } = {}) {
   for (const id of ids) {
     const el = doc.walls.find(w => w.id === id) || doc.lines.find(l => l.id === id);
     if (!el) continue;
-    if (copy) { const c = copyOf(el); transform(c, M); doc[collOf(el)].push(c); out.push(c.id); }
-    else { if (el.pinned) throw new Error("A pinned element cannot move. Unpin it first (UP)."); transform(el, M); out.push(id); }
+    if (copy) {
+      const c = copyOf(el); transform(c, M); doc[collOf(el)].push(c); out.push(c.id);
+      // doors and windows go with a copied wall
+      if (isWallEl(el)) for (const o of (doc.openings || []).filter(q => q.hostWallId === el.id)) {
+        const oc = JSON.parse(JSON.stringify(o)); oc.id = newId(o.kind === "door" ? "dr" : "wn"); oc.hostWallId = c.id;
+        if (det(M) < 0) oc.flipFacing = !oc.flipFacing;
+        doc.openings.push(oc);
+      }
+    } else {
+      if (el.pinned) throw new Error("A pinned element cannot move. Unpin it first (UP).");
+      transform(el, M); out.push(id);
+      if (det(M) < 0 && isWallEl(el)) for (const o of (doc.openings || []).filter(q => q.hostWallId === el.id)) o.flipFacing = !o.flipFacing;
+    }
   }
   return out;
 }
@@ -173,6 +184,7 @@ export function split(doc, el, p, gap = 0) {
     second.a = G.add(el.a, G.mul(u, at + gap / 2));
     el.b = G.add(el.a, G.mul(u, at - gap / 2));
     doc[collOf(el)].push(second);
+    if (isWallEl(el)) rehost(doc, el, second, at - gap / 2, at + gap / 2);
     return second;
   }
   if (G.isCircle(el)) throw new Error("A full circle cannot be split at one point.");
@@ -197,7 +209,20 @@ export function deleteBetween(doc, el, p, q) {
   if (t2 >= 0.9999) { el.b = A; return null; }
   const second = copyOf(el); second.a = B; second.b = b; el.b = A;
   doc[collOf(el)].push(second);
+  if (isWallEl(el)) rehost(doc, el, second, t1 * G.dist(a, b), t2 * G.dist(a, b));
   return second;
+}
+
+/** After a wall is cut into [0, cutA] and [cutB, end], moves its doors and windows to the right piece. */
+function rehost(doc, first, second, cutA, cutB) {
+  for (const o of [...(doc.openings || [])].filter(q => q.hostWallId === first.id)) {
+    const t = (o.kind === "door" ? doc.doorTypes : doc.windowTypes).find(x => x.id === o.typeId);
+    const half = (t?.width || 0) / 2, s0 = o.positionAlongWall - half, s1 = o.positionAlongWall + half;
+    if (s1 <= cutA + 0.5) continue;
+    if (s0 >= cutB - 0.5) { o.hostWallId = second.id; o.positionAlongWall -= cutB; continue; }
+    if (cutA === cutB || s0 < cutA - 0.5) throw new Error("That would cut through a door or window. Pick a point clear of it.");
+    doc.openings.splice(doc.openings.indexOf(o), 1); // inside the removed piece
+  }
 }
 
 // ---------------------------------------------------------------- chamfer and fillet

@@ -5,6 +5,7 @@ import { makeWall, wallFootprints, outlineEdges, wallType, wallHeights, checkWal
 import * as LV from "./levels.js";
 import { levelLabel, newId } from "./model.js";
 import { COLORS } from "./plan.js";
+import { wallPlanPieces, wallSolids } from "./openings.js";
 
 const CUT_PLANE = 1200; // walls are shown cut 1200 mm above the level, as in a plan view
 
@@ -162,7 +163,9 @@ export function drawWalls(view, app) {
     if (w.baseLevelId !== app.levelId) continue;
     const f = fp.get(w.id);
     if (!f) continue;
-    (f.z1 >= cutZ && f.z0 <= cutZ ? cut : below).push({ w, f });
+    const isCut = f.z1 >= cutZ && f.z0 <= cutZ;
+    // doors and windows that pass through the cut plane leave gaps in the cut wall
+    (isCut ? cut : below).push({ w, f: isCut ? { ...f, pieces: wallPlanPieces(doc, w, f, cutZ) } : f });
   }
   // walls below the cut plane (e.g. low walls): thin lines, no fill
   for (const { w, f } of below) for (const p of f.pieces) view.polygon(p, null, view.colorFor(w.id, "#9a9aa6"), 1);
@@ -269,24 +272,34 @@ export function buildWalls3D(v3, THREE, app) {
     const f = fpAll.get(w.id); if (!f) continue;
     const sel = app.selection.has(w.id);
     const colour = sel ? 0x3b82f6 : new THREE.Color(f.type.color || STYLE_COLORS[f.type.function] || 0xdddddd).getHex();
+    const edgeColor = style === "hidden" ? 0x111111 : style === "wire" ? (sel ? 0x3b82f6 : 0xe8e8ec) : 0x1b1b20;
+    const extrude = (poly, z0, z1) => {
+      const shape = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000)));
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: (z1 - z0) / 1000, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2); geo.translate(0, z0 / 1000, 0);
+      return geo;
+    };
+    // faces: the wall cut round its doors and windows
+    if (style !== "wire") for (const solid of wallSolids(doc, w, f)) {
+      const geo = extrude(solid.poly, solid.z0, solid.z1);
+      const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: sel ? 0x9cc0ff : 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
+        : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
+        : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData.id = w.id;
+      mesh.castShadow = mesh.receiveShadow = style === "realistic";
+      group.add(mesh);
+    }
+    // lines: the outline of the whole wall (no seams where it was cut); openings add their own outlines
     for (const piece of f.pieces) {
-      const shape = new THREE.Shape(piece.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000)));
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: (f.z1 - f.z0) / 1000, bevelEnabled: false });
-      geo.rotateX(-Math.PI / 2); geo.translate(0, f.z0 / 1000, 0);
-      if (style !== "wire") {
-        const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: sel ? 0x9cc0ff : 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
-          : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
-          : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.userData.id = w.id;
-        mesh.castShadow = mesh.receiveShadow = style === "realistic";
-        group.add(mesh);
-      }
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: style === "hidden" ? 0x111111 : style === "wire" ? (sel ? 0x3b82f6 : 0xe8e8ec) : 0x1b1b20 }));
+      const geo = extrude(piece, f.z0, f.z1);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: edgeColor }));
       edges.userData.id = w.id;
       group.add(edges);
+      geo.dispose();
     }
   }
+  app.buildOpenings3D?.(group, THREE, visible);
   v3.root.add(group);
   v3.setShadows?.(style === "realistic");
 }
@@ -471,7 +484,9 @@ export function copyToLevelsDialog(app, ui) {
                 const step = idx(w.topLevelId) - idx(w.baseLevelId), t = S[idx(lid) + step];
                 if (t) c.topLevelId = t.id; else { const { z0, z1 } = wallHeights(dd, w); c.topLevelId = null; c.unconnectedHeight = z1 - z0; }
               }
-              checkWall(dd, c); dd.walls.push(c); continue;
+              checkWall(dd, c); dd.walls.push(c);
+              for (const o of dd.openings.filter(q => q.hostWallId === w.id)) dd.openings.push({ ...JSON.parse(JSON.stringify(o)), id: newId(o.kind === "door" ? "dr" : "wn"), hostWallId: c.id });
+              continue;
             }
             const l = dd.lines.find(x => x.id === id);
             if (l) { const c = JSON.parse(JSON.stringify(l)); c.id = newId("ml"); c.levelId = lid; dd.lines.push(c); }

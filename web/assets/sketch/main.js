@@ -12,6 +12,8 @@ import { wallFootprints, outlineEdges, locationPolyline, checkWall } from "./wal
 import * as LV from "./levels.js";
 import { MoveTool, RotateTool, MirrorTool, ScaleTool, ArrayTool, OffsetTool, TrimTool, SplitTool, AlignTool, CornerTool } from "./modifytools.js";
 import { enforceLocks } from "./modify.js";
+import { OpeningTool, drawOpenings, drawOpeningDims, openingsAt, buildOpenings3D, openingProps, wireOpeningProps, scheduleDialog, tagOpenings } from "./openingsui.js";
+import * as OP from "./openings.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { icon } from "./icons.js";
 
@@ -67,7 +69,12 @@ app.translateWithJoins = (doc, ids, delta) => {
   const set = new Set(ids);
   const moved = doc.walls.filter(w => set.has(w.id) && w.shape === "line");
   const ends = moved.flatMap(w => [w.a, w.b]).map(p => ({ ...p }));
-  for (const id of ids) { const el = findById(doc, id)?.el; if (el) translateEl(el, delta); }
+  for (const id of ids) {
+    const el = findById(doc, id)?.el; if (!el) continue;
+    const o = doc.openings.find(x => x.id === id);
+    if (o) { const w = doc.walls.find(x => x.id === o.hostWallId); if (w && !set.has(w.id)) o.positionAlongWall += G.dot(delta, G.norm(G.sub(w.b, w.a))); continue; }
+    translateEl(el, delta);
+  }
   for (const w of doc.walls) {
     if (set.has(w.id) || w.shape !== "line") continue;
     for (const k of ["a", "b"]) if (ends.some(p => G.dist(p, w[k]) <= JOIN)) w[k] = G.add(w[k], delta);
@@ -98,7 +105,8 @@ app.chainOf = id => {
 };
 app.setLevel = id => setLevel(id);
 app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
-app.drawModel = view => drawWalls(view, app);
+app.drawModel = view => { drawWalls(view, app); drawOpenings(view, app); };
+app.buildOpenings3D = (group, THREE, visible) => buildOpenings3D(group, THREE, app, visible);
 app.drawUnderlay = view => drawUnderlay(view, app);
 app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
 app.extraBoxes = () => [...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) }));
@@ -111,10 +119,16 @@ app.toast = (msg, bad = false) => {
 app.commit = (label, fn) => {
   try {
     return app.history.transact(label, doc => {
+      const ends = new Map(doc.walls.filter(w => w.shape === "line").map(w => [w.id, { a: { ...w.a }, b: { ...w.b } }]));
       const r = fn(doc);
+      // doors and windows stay put when their wall is stretched or trimmed at its start, and must still fit
+      OP.keepOpeningsInPlace(doc, ends);
+      doc.openings = doc.openings.filter(o => doc.walls.some(w => w.id === o.hostWallId));
+      doc.tags = doc.tags.filter(t => doc.openings.some(o => o.id === t.hostId));
       // locked alignments hold whatever moved; then every wall must still be valid
       if (doc.constraints?.length) enforceLocks(doc, w => wallFootprints(doc, w.baseLevelId).get(w.id), (dd, id, d) => app.translateWithJoins(dd, [id], d));
       for (const w of doc.walls) checkWall(doc, w);
+      for (const o of doc.openings) OP.checkOpening(doc, o);
       return r;
     });
   }
@@ -140,6 +154,11 @@ app.elementsInRect = (r, crossing) => {
       pieces.some(pc => pc.some((a, i) => corners.some((c, k) => G.segIntersect(a, pc[(i + 1) % pc.length], c, corners[(k + 1) % 4]))))));
     if (touched) ids.push(w.id);
   }
+  for (const o of app.doc.openings) {
+    const f = OP.openingFrame(app.doc, o);
+    if (!f || f.w.baseLevelId !== app.levelId) continue;
+    if (crossing ? f.corners.some(inside) : f.corners.every(inside)) ids.push(o.id);
+  }
   return ids;
 };
 
@@ -156,6 +175,7 @@ app.updateHover = c => {
     for (let i = 0; i < loc.length - 1; i++) d = Math.min(d, G.projectOnSegment(c.raw, loc[i], loc[i + 1]).dist);
     cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
   }
+  cands.push(...openingsAt(app, c.raw));
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
   const first = list[0];
@@ -189,6 +209,7 @@ app.drawSelectionDims = view => {
   if (app.tool.name !== "select" || app.tool.drag || app.selection.size !== 1) return;
   const el = app.lookup([...app.selection][0]);
   if (el && app.isWall(el.id)) { drawWallDims(view, app, el, inlineEdit); return; }
+  if (el && app.doc.openings.some(o => o.id === el.id)) { drawOpeningDims(view, app, el, inlineEdit); return; }
   if (!el || el.kind === undefined) return;
   if (el.shape === "line" && G.dist(el.a, el.b) > 1) {
     view.tempDim(el.a, el.b, String(Math.round(lineLength(el))), {
@@ -220,6 +241,8 @@ const TOOLS = {
   modelLine: () => new LineTool(app, "model"),
   detailLine: () => new LineTool(app, "detail"),
   wall: () => new WallTool(app),
+  door: () => new OpeningTool(app, "door"),
+  window: () => new OpeningTool(app, "window"),
   move: () => new MoveTool(app, false),
   copy: () => new MoveTool(app, true),
   rotate: () => new RotateTool(app),
@@ -257,8 +280,8 @@ const RIBBON = [
   { tab: "Architecture", groups: [
     { label: "Build", items: [
       { id: "wall", label: "Wall", icon: "wall", key: "WA", tool: "wall" },
-      { id: "door", label: "Door", icon: "door", key: "DR", ...SOON(4) },
-      { id: "window", label: "Window", icon: "window", key: "WN", ...SOON(4) },
+      { id: "door", label: "Door", icon: "door", key: "DR", tool: "door" },
+      { id: "window", label: "Window", icon: "window", key: "WN", tool: "window" },
       { id: "component", label: "Component", icon: "component", ...SOON(6) },
       { id: "floor", label: "Floor", icon: "floor", key: "SB", ...SOON(5) },
       { id: "roof", label: "Roof", icon: "roof", ...SOON(7) },
@@ -295,7 +318,7 @@ const RIBBON = [
   { tab: "Annotate", groups: [
     { label: "Detail", items: [{ id: "detailLine", label: "Detail Line", icon: "detail", key: "DL", tool: "detailLine" }] },
     { label: "Dimension", items: [{ id: "dimAligned", label: "Aligned", icon: "dim", key: "DI", ...SOON(8) }] },
-    { label: "Tag", items: [{ id: "tag", label: "Tag", icon: "tag", key: "TG", ...SOON(4) }, { id: "text", label: "Text", icon: "text", key: "TX", ...SOON(8) }] },
+    { label: "Tag", items: [{ id: "tag", label: "Tag", icon: "tag", key: "TG", run: () => tagOpenings(app) }, { id: "text", label: "Text", icon: "text", key: "TX", ...SOON(8) }] },
   ] },
   { tab: "View", groups: [
     { label: "Create", items: [{ id: "view3d", label: "3D View", icon: "threed", run: () => setLayout("tile") }] },
@@ -304,6 +327,7 @@ const RIBBON = [
       { id: "planOnly", label: "Plan", icon: "plan", run: () => setLayout("plan-only") },
       { id: "threeOnly", label: "3D", icon: "threed", run: () => setLayout("three-only") },
     ] },
+    { label: "Schedules", items: [{ id: "schedule", label: "Door/Window Schedule", icon: "types", run: () => scheduleDialog(app, ui) }] },
     { label: "Navigate", items: [{ id: "zoomFit", label: "Zoom to Fit", icon: "fit", key: "ZF", run: () => zoomFit() }] },
     { label: "Graphics", items: [{ id: "sectionBox", label: "Section Box", icon: "section", key: "BX", ...SOON(8) }] },
   ] },
@@ -389,6 +413,18 @@ function renderProps() {
     $("#pEditType").onclick = () => wallTypeDialog(app, t.typeId, ui);
     return;
   }
+  if (t && (t.name === "door" || t.name === "window")) {
+    const ty = t.type();
+    box.innerHTML = `<div class="ptype"><div class="row"><span>${t.title}</span></div>
+      <select id="pType" aria-label="Type">${t.types().map(x => `<option value="${esc(x.id)}"${x.id === t.typeId ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
+      <div class="pgroup">Dimensions</div>
+      <div class="prow"><span>Width</span><input readonly value="${ty.width}"></div>
+      <div class="prow"><span>Height</span><input readonly value="${ty.height}"></div>
+      ${t.kind === "window" ? `<div class="prow"><span>Sill Height</span><input readonly value="${t.sillValue()}"></div>` : ""}
+      <div class="pnote">Move over a wall: the blue numbers show the distance to the next walls. Space flips the side it opens to.</div>`;
+    $("#pType").onchange = e => { t.typeId = e.target.value; t.sill = null; t.savePrefs(); app.toolChanged(); };
+    return;
+  }
   if (t && t.name !== "select") {
     box.innerHTML = `<div class="ptype"><div class="row"><span>Lines</span><span>${esc(t.title)}</span></div>
       <select id="pStyle" aria-label="Line style">${Object.entries(LINE_STYLES).map(([k, v]) => `<option value="${k}"${k === t.style ? " selected" : ""}>${esc(v.label)}</option>`).join("")}</select></div>
@@ -410,6 +446,7 @@ function renderProps() {
     return;
   }
   const els = ids.map(app.lookup);
+  if (els.every(e => app.doc.openings.some(o => o.id === e.id))) { box.innerHTML = openingProps(app, ids, esc); wireOpeningProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.isWall(e.id))) { box.innerHTML = wallProps(app, ids, esc); wireWallProps(app, ids, renderProps, typeId => wallTypeDialog(app, typeId, ui)); return; }
   const allLines = els.every(e => e.shape && e.kind);
   if (!allLines) { box.innerHTML = `<div class="pnote">${ids.length} elements selected.</div>`; return; }
@@ -503,6 +540,7 @@ function deleteSelection() {
     doc.lines = doc.lines.filter(l => !ids.includes(l.id));
     doc.walls = doc.walls.filter(w => !ids.includes(w.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
+    doc.tags = doc.tags.filter(t => !ids.includes(t.id) && doc.openings.some(o => o.id === t.hostId));
     doc.constraints = (doc.constraints || []).filter(k => !ids.includes(k.ref) && !ids.includes(k.el));
   });
   app.selection.clear(); app.selectionChanged();
@@ -573,7 +611,7 @@ canvas.addEventListener("pointerdown", ev => {
   if (ev.button === 1 || (ev.button === 0 && spaceDown)) {
     if (ev.button === 1 && performance.now() - lastMiddle < 350) { zoomFit(); lastMiddle = 0; return; }
     if (ev.button === 1) lastMiddle = performance.now();
-    pan = { x: ev.clientX, y: ev.clientY, moved: false }; canvas.classList.add("pan"); ev.preventDefault(); return;
+    pan = { x: ev.clientX, y: ev.clientY, moved: false }; if (spaceDown) app.spacePanned = true; canvas.classList.add("pan"); ev.preventDefault(); return;
   }
   if (ev.button === 2) { pan = { x: ev.clientX, y: ev.clientY, right: true, moved: false }; return; }
   const r = canvas.getBoundingClientRect();
@@ -683,7 +721,13 @@ document.addEventListener("keydown", ev => {
     if (!prefix) keyBuf = k.toUpperCase();
   }
 });
-document.addEventListener("keyup", ev => { if (ev.key === " ") spaceDown = false; });
+document.addEventListener("keyup", ev => {
+  if (ev.key !== " ") return;
+  spaceDown = false;
+  if (app.spacePanned) { app.spacePanned = false; return; }
+  const ops = [...app.selection].filter(id => app.doc.openings.some(o => o.id === id));
+  if (app.tool.name === "select" && ops.length) app.commit("Flip facing", doc => ops.forEach(id => { const o = doc.openings.find(x => x.id === id); o.flipFacing = !o.flipFacing; }));
+});
 
 // --------------------------------------------------------------------------- right-click menu
 function openContextMenu(x, y) {

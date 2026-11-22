@@ -10,10 +10,11 @@ const deg = r => Math.round((r * 180) / Math.PI * 100) / 100;
 
 /** The element under the cursor (wall or line) and the point on it nearest the cursor. */
 function picked(app, c) {
-  const id = app.hoverCandidate();
-  if (!id || id.startsWith("chain:")) return null;
+  // the hovered element if it is a wall or line; otherwise the first wall or line under the cursor (e.g. behind a door)
+  let id = app.hoverCandidate();
+  if (!id || id.startsWith("chain:") || !M.isCurve(app.lookup(id))) id = app.hoverList.find(h => !h.startsWith("chain:") && M.isCurve(app.lookup(h)));
+  if (!id) return null;
   const el = app.lookup(id);
-  if (!M.isCurve(el)) return null;
   const pts = locationPolyline(el);
   let best = null;
   for (let i = 0; i < pts.length - 1; i++) { const pr = G.projectOnSegment(c.raw, pts[i], pts[i + 1]); if (!best || pr.dist < best.dist) best = pr; }
