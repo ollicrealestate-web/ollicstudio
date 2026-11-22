@@ -25,8 +25,9 @@ jobs:
           python-version: "3.12"
       - name: Exported files open in independent readers (ezdxf, Khronos glTF validator)
         run: |
-          pip install -q ezdxf
+          pip install -q ezdxf ifcopenshell
           python tests/sketch/check_exports.py out/sketch
+          python tests/sketch/check_ifc.py out/sketch
           npm i --no-save --no-package-lock gltf-validator@2.0.0-dev.3.10
           node tests/sketch/check_glb.mjs out/sketch
       - uses: actions/upload-artifact@v4
@@ -38,6 +39,7 @@ jobs:
             out/sketch/*.pdf
             out/sketch/*.dxf
             out/sketch/*.glb
+            out/sketch/*.ifc
 
   backend:
     name: API and studio browser tests

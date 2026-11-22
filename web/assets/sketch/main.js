@@ -27,6 +27,7 @@ import { ElevationView, ELEVATIONS, modelBoxMm, applySectionBox } from "./views.
 import { planSheet, pdfFromCanvas, planDxf, modelGlb, download, safeName, choosePaper, planBox } from "./exports.js";
 import * as THREE from "three";
 import { ElevSketchTool, drawElevSketch } from "./elevsketch.js";
+import { modelIfc } from "./ifc.js";
 import { icon } from "./icons.js";
 
 const $ = s => document.querySelector(s);
@@ -1137,7 +1138,7 @@ function exportDialog() {
     <div class="opt"><div><b>DXF (CAD drawing)</b><small>The chosen level's plan as lines, arcs and text in millimetres; opens in AutoCAD, BricsCAD, LibreCAD and others.</small></div><div><button class="btn" type="button" id="xDxf">DXF</button></div></div>
     <div class="opt"><div><b>3D model (GLB)</b><small>Everything shown in the 3D view (levels you have hidden are left out), with colours. Opens in Blender, Windows 3D Viewer and online viewers.</small></div><div><button class="btn" type="button" id="xGlb">GLB</button></div></div>
     <div class="opt"><div><b>Project file</b><small>The whole sketch, to open again with Import.</small></div><div><button class="btn" type="button" id="xJson">JSON</button></div></div>
-    <div class="opt"><div><b>IFC for the studio</b><small>Not available yet: a proper IFC needs walls, slabs, roofs and openings written as building objects, which comes in a later update. Use GLB or DXF for now.</small></div><div><button class="btn" type="button" disabled>IFC</button></div></div>
+    <div class="opt"><div><b>IFC (building model)</b><small>IFC4, millimetres: walls, floors, roofs, doors, windows and other parts as building objects on their levels, shaped as in 3D, with colours. Opens in Revit (File > Open > IFC), ArchiCAD, BIM viewers and the studio.</small></div><div><button class="btn primary" type="button" id="xIfc">IFC</button></div></div>
     <div id="xErr"></div></div><div class="actions"><button class="btn" type="button" id="xClose">Close</button></div>`, d => {
     const name = safeName(app.doc.name), lvId = () => d.querySelector("#xLevel").value, sc = () => +d.querySelector("#xScale").value;
     const lvName = () => safeName(app.doc.levels.find(l => l.id === lvId())?.name);
@@ -1149,6 +1150,7 @@ function exportDialog() {
     d.querySelector("#xPdf").onclick = async () => { try { const sh = planSheet(app, lvId(), sc()); download(await pdfFromCanvas(sh.canvas, sh.paper.w, sh.paper.h), `${name} - ${lvName()} 1-${sc()}.pdf`); ok(`PDF exported: ${sh.paper.name} at 1:${sc()}. Print at 100% (actual size) to keep the scale.`); } catch (e) { err(e); } };
     d.querySelector("#xDxf").onclick = () => { try { const r = planDxf(app, lvId()); download(new Blob([r.text], { type: "application/dxf" }), `${name} - ${lvName()}.dxf`); ok(`DXF exported: ${r.counts.lines} lines, ${r.counts.arcs} arcs, ${r.counts.texts} texts, in millimetres.`); } catch (e) { err(e); } };
     d.querySelector("#xGlb").onclick = () => { try { const v3 = app.view3d; if (v3.dirty) { v3.dirty = false; v3.rebuild(); } const r = modelGlb(v3.root, THREE); download(r.blob, `${name}.glb`); ok(`3D model exported: ${r.objects} objects.`); } catch (e) { err(e); } };
+    d.querySelector("#xIfc").onclick = () => { try { const r = modelIfc(app, THREE, { name: app.doc.name || "Sketch", typeMark: o => OP.typeMark(app.doc, o) }); download(new Blob([r.text], { type: "application/x-step" }), `${name}.ifc`); const c = r.counts; ok(`IFC exported: ${c.IFCWALL || 0} walls, ${c.IFCSLAB || 0} floors, ${c.IFCROOF || 0} roofs, ${c.IFCDOOR || 0} doors, ${c.IFCWINDOW || 0} windows, ${c.IFCBUILDINGELEMENTPROXY || 0} other parts.`); } catch (e) { err(e); } };
     d.querySelector("#xJson").onclick = () => { download(new Blob([JSON.stringify(app.doc, null, 1)], { type: "application/json" }), `${name}.ollic-sketch.json`); ok("Project file exported."); };
   });
 }

@@ -200,7 +200,19 @@ const jsonLen = glb.buf.readUInt32LE(12), gj = JSON.parse(glb.buf.slice(20, 20 +
 check(glb.buf.readUInt32LE(0) === 0x46546c67 && glb.buf.readUInt32LE(8) === glb.buf.length && gj.asset.version === "2.0" && gj.nodes.length > 20, `GLB: valid glTF 2.0 binary with ${gj.nodes.length} objects`);
 const yMax = Math.max(...gj.accessors.filter(a => a.max).map(a => a.max[1]));
 check(near(yMax, 7.175, 0.01), `GLB heights are in metres: top of the parapet coping at ${yMax.toFixed(3)} m`);
-check(await page.locator("#xDxf").isVisible() && (await page.locator(".sk-export").innerText()).includes("IFC"), "IFC is listed as not available yet, with GLB and DXF to use meanwhile");
+const ifc = await grab("#xIfc");
+const it = ifc.buf.toString("utf8"), recs = new Map();
+for (const m of it.matchAll(/^#(\d+)=([A-Z0-9]+)\((.*)\);$/gm)) recs.set(m[1], { type: m[2], args: m[3] });
+const refs = [...it.matchAll(/#(\d+)/g)].map(m => m[1]);
+const byType = t => [...recs.values()].filter(r => r.type === t);
+check(it.startsWith("ISO-10303-21;") && it.includes("FILE_SCHEMA(('IFC4'));") && it.trimEnd().endsWith("END-ISO-10303-21;") && refs.every(r => recs.has(r)), `IFC: a complete IFC4 file, every reference defined (${recs.size} records)`);
+check(byType("IFCBUILDINGSTOREY").length === 2 && byType("IFCSIUNIT").some(r => r.args.includes(".MILLI.,.METRE.")), "two storeys (Level 1, Level 2), in millimetres");
+const nW = byType("IFCWALL").length, nS = byType("IFCSLAB").length, nR = byType("IFCROOF").length, nD = byType("IFCDOOR").length, nWn = byType("IFCWINDOW").length, nP = byType("IFCBUILDINGELEMENTPROXY").length;
+check(nW === 16 && nS === 1 && nR === 1 && nD === 2 && nWn === 4 && nP >= 1, `building objects: ${nW} walls, ${nS} floor, ${nR} roof, ${nD} doors, ${nWn} windows, ${nP} other (the coping)`);
+check(byType("IFCDOOR").every(r => r.args.includes(",2100.,900.,.DOOR.")) && byType("IFCWINDOW").some(r => r.args.includes(",1200.,1500.,.WINDOW.")), "doors 900 x 2100, and the window changed to 1500 x 1200, carry their sizes");
+const contained = byType("IFCRELCONTAINEDINSPATIALSTRUCTURE").reduce((n, r) => n + (r.args.match(/#\d+/g).length - 1), 0);
+check(contained === nW + nS + nR + nD + nWn + nP, "every object sits on its storey");
+check(await page.locator("#xDxf").isVisible(), "DXF still offered");
 await page.locator("#xClose").click();
 
 // ---- save, reload, identical
