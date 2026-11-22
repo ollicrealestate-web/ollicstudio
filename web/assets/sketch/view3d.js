@@ -55,6 +55,7 @@ export class View3D {
     this.dirty = true;
     this.controls.addEventListener("change", () => { this.needsRender = true; });
     const loop = () => {
+      if (this.paused) { requestAnimationFrame(loop); return; } // Live 3D off: nothing is rebuilt or drawn while you draw
       if (this.dirty) { this.dirty = false; this.rebuild(); this.needsRender = true; }
       if (this.controls.update() || this.needsRender) { this.needsRender = false; this.renderer.render(this.scene, this.camera); }
       requestAnimationFrame(loop);
