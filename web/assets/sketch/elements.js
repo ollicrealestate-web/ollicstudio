@@ -12,7 +12,7 @@ export const LINE_STYLES = {
   sketch: { label: "Sketch lines", px: 2, dash: null, hidden: true },
 };
 
-export const CATEGORY = { lines: "Lines", walls: "Walls", openings: "Doors and windows", floors: "Floors", roofs: "Roofs", components: "Components", dimensions: "Dimensions" };
+export const CATEGORY = { lines: "Lines", walls: "Walls", openings: "Doors and windows", floors: "Floors", roofs: "Roofs", components: "Components", dimensions: "Dimensions", texts: "Text" };
 
 /** A plan view is identified by its level: "plan:<levelId>". */
 export const planViewId = levelId => `plan:${levelId}`;
@@ -109,7 +109,8 @@ export function translate(el, d) {
   else if (el.shape === "arc") el.c = G.add(el.c, d);
   else if (Array.isArray(el.boundary)) { el.boundary.forEach(c => translate(c, d)); (el.slopeArrows || []).forEach(a => { a.tail = G.add(a.tail, d); a.head = G.add(a.head, d); }); } // floors, extrusions, roofs
   else if (Array.isArray(el.path)) el.path.forEach(c => translate(c, d));          // sweeps
-  else if (el.a && el.b) { el.a = G.add(el.a, d); el.b = G.add(el.b, d); }         // reference planes
+  else if (el.a && el.b) { el.a = G.add(el.a, d); el.b = G.add(el.b, d); }         // reference planes, dimensions, extrusion roofs
+  else if (el.p) el.p = G.add(el.p, d);                                            // text
 }
 
 /** Sets a straight line's length by moving its end (b), keeping direction. */

@@ -269,6 +269,12 @@ export function drawRoofs(view, app) {
     let g; try { g = R.roofGeometry(doc, r); } catch { continue; }
     const sel = app.selection.has(r.id), hov = app.hoverId === r.id;
     const col = sel ? COLORS.sel : hov ? COLORS.hover : "#a39e94";
+    if (r.baseLevelId !== app.levelId) { // seen from the level below: the roof edge overhead, dashed
+      view.stroke(col, sel || hov ? 2 : 1, [10, 6]); view.ctx.beginPath();
+      g.outline.forEach((p, i) => { const s = view.toScreen(p); i ? view.ctx.lineTo(s.x, s.y) : view.ctx.moveTo(s.x, s.y); });
+      view.ctx.closePath(); view.ctx.stroke(); view.ctx.setLineDash([]);
+      continue;
+    }
     view.polygon(g.outline, sel ? "rgba(59,130,246,.08)" : "rgba(160,150,130,.05)", col, sel || hov ? 2 : 1.2);
     for (const l of g.lines) view.segment(l.a, l.b, col, 1, l.kind === "valley" ? [6, 4] : null);
     if (r.method === "footprint") {

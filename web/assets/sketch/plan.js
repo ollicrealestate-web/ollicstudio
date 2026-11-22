@@ -65,9 +65,9 @@ export class PlanView {
   draw() {
     const { ctx, dpr } = this;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = COLORS.bg; ctx.fillRect(0, 0, this.w, this.h);
+    ctx.fillStyle = this.print ? "#000" : COLORS.bg; ctx.fillRect(0, 0, this.w, this.h); // print: black, inverted to white paper
     this.hits = [];
-    this.drawGrid();
+    if (!this.print) this.drawGrid(); // sheets and DXF: no grid
     const app = this.app;
     // in sketch mode the model is shown grey behind the magenta boundary
     const sketching = !!app.sketch;

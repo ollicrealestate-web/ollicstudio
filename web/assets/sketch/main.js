@@ -22,6 +22,10 @@ import { chainPath as sweepChain } from "./components.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { startRoofSketch, finishRoofSketch, RoofBoundaryTool, SlopeArrowTool, RoofExtrusionTool, drawRoofs, roofsAt, buildRoofs3D, cutWallsByRoof, slopedPrismGeometry, roofSketchProps, wireRoofSketchProps, roofLineProps, wireRoofLineProps, roofProps, wireRoofProps, editRoof, roofOnPlan, drawRoofSketchMarks } from "./roofsui.js";
 import { roofGeometry } from "./roofs.js";
+import { DimensionTool, TextTool, drawAnnotations, annotationsAt, annotationBox, annotationProps, wireAnnotationProps } from "./annotate.js";
+import { ElevationView, ELEVATIONS, modelBoxMm, applySectionBox } from "./views.js";
+import { planSheet, pdfFromCanvas, planDxf, modelGlb, download, safeName, choosePaper, planBox } from "./exports.js";
+import * as THREE from "three";
 import { icon } from "./icons.js";
 
 const $ = s => document.querySelector(s);
@@ -46,7 +50,7 @@ app.savePrefs = () => writePrefs(app.prefs);
 app.lookup = id => findById(app.doc, id)?.el || null;
 app.levelName = () => app.doc.levels.find(l => l.id === app.levelId)?.name || "Level";
 app.geomVer = 0;
-app.redraw = (with3d = false) => { if (with3d) app.geomVer++; app.plan.invalidate(); if (with3d) app.view3d.invalidate(); };
+app.redraw = (with3d = false) => { if (with3d) app.geomVer++; app.plan.invalidate(); if (with3d) { app.view3d.invalidate(); app.elev?.invalidate(); } };
 const fpCache = new Map();
 /** Wall footprints of a level, recomputed only when the model changed. */
 app.footprints = levelId => {
@@ -114,7 +118,7 @@ app.chainOf = id => {
 };
 app.setLevel = id => setLevel(id);
 app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
-app.drawModel = view => { drawFloors(view, app); drawRoofs(view, app); drawWalls(view, app); drawOpenings(view, app); drawComponents(view, app); drawRefPlanes(view, app); };
+app.drawModel = view => { drawFloors(view, app); drawRoofs(view, app); drawWalls(view, app); drawAnnotations(view, app); drawOpenings(view, app); drawComponents(view, app); drawRefPlanes(view, app); };
 app.cutWallSolids = (w, solids) => cutWallsByRoof(app.doc, w, cutWallSolids(app.doc, w, solids));
 app.drawSketchMarks = view => drawRoofSketchMarks(view, app);
 app.cutWallByRoof = (w, solids) => cutWallsByRoof(app.doc, w, solids);
@@ -129,7 +133,13 @@ app.sketchChanged = () => { renderRibbon(); renderOptions(); renderProps(); setP
 app.buildOpenings3D = (group, THREE, visible) => buildOpenings3D(group, THREE, app, visible);
 app.drawUnderlay = view => drawUnderlay(view, app);
 app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
-app.extraBoxes = () => [...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) }));
+const boxOf = p => ({ x0: Math.min(...p.map(q => q.x)), y0: Math.min(...p.map(q => q.y)), x1: Math.max(...p.map(q => q.x)), y1: Math.max(...p.map(q => q.y)) });
+app.extraBoxes = () => [
+  ...[...app.footprints(app.levelId).values()].flatMap(f => f.pieces).map(boxOf),
+  ...app.doc.floors.filter(f => f.levelId === app.levelId).flatMap(f => floorLoops(f)).filter(l => l.length).map(boxOf),
+  ...app.doc.roofs.filter(r => roofOnPlan(app.doc, r, app.levelId)).map(r => { try { return boxOf(roofGeometry(app.doc, r).outline); } catch { return null; } }).filter(Boolean),
+  ...annotationBox(app, app.levelId),
+];
 app.pick3D = id => { app.selection.clear(); if (id) app.selection.add(id); app.selectionChanged(); };
 const ui = { openDialog: (h, w) => openDialog(h, w), closeDialog: () => closeDialog(), esc, ask: (m, ok) => app.ask(m, ok), askText: (l, v) => app.askText(l, v) };
 app.ui = ui;
@@ -206,6 +216,8 @@ app.elementsInRect = (r, crossing) => {
     const pts = floorLoops(fl).flat();
     if (pts.length && (crossing ? pts.some(inside) : pts.every(inside))) ids.push(fl.id);
   }
+  for (const d of app.doc.dimensions) if (d.levelId === app.levelId && d.a && (crossing ? [d.a, d.b].some(inside) : [d.a, d.b].every(inside))) ids.push(d.id);
+  for (const t of app.doc.texts) if (t.levelId === app.levelId && inside(t.p)) ids.push(t.id);
   for (const o of app.doc.openings) {
     const f = OP.openingFrame(app.doc, o);
     if (!f || f.w.baseLevelId !== app.levelId) continue;
@@ -228,7 +240,7 @@ app.updateHover = c => {
     cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
   }
   cands.push(...openingsAt(app, c.raw));
-  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...roofsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol));
+  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...roofsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol), ...annotationsAt(app, c.raw, tol));
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
   const first = list[0];
@@ -256,6 +268,34 @@ app.loadDoc = doc => {
 // --------------------------------------------------------------------------- views
 app.plan = new PlanView($("#planCanvas"), app);
 app.view3d = new View3D($("#view3d"), app);
+app.elev = new ElevationView($("#elevView"), app);
+
+// --------------------------------------------------------------------------- elevations and section box
+function openElevation(side) {
+  if (app.sketch) { app.toast("Finish or cancel the sketch first."); return; }
+  if (app.prefs.layout === "three-only") setLayout("tile");
+  app.elevSide = side; app.setTool("select");
+  $("#planCanvas").style.visibility = "hidden";
+  app.elev.show(side);
+  setTitle();
+  renderBrowser(); setPrompt();
+}
+function setTitle() { $("#planTitle").textContent = app.elevSide ? `Elevation: ${ELEVATIONS[app.elevSide].name}` : `Floor Plan: ${app.levelName()}`; }
+function closeElevation() {
+  if (!app.elevSide) return;
+  app.elevSide = null; app.elev.hide(); $("#planCanvas").style.visibility = "";
+  setTitle();
+}
+app.openElevation = openElevation; app.closeElevation = closeElevation;
+function toggleSectionBox(on = !app.prefs.sectionBox) {
+  if (app.prefs.layout === "plan-only") setLayout("tile");
+  app.prefs.sectionBox = on ? (app.prefs.sectionBoxMm || modelBoxMm(app.view3d)) : false;
+  if (on) app.prefs.sectionBoxMm = app.prefs.sectionBox;
+  app.savePrefs(); applySectionBox(app.view3d, app.prefs.sectionBox || null); renderViewBars();
+  app.toast(on ? "Section Box on: drag the sliders under the 3D view to cut the model." : "Section Box off.");
+}
+app.toggleSectionBox = toggleSectionBox;
+if (app.prefs.sectionBox) applySectionBox(app.view3d, app.prefs.sectionBox);
 
 /** Blue length dimension on one selected straight line; click the number to type a new length. */
 app.drawSelectionDims = view => {
@@ -293,6 +333,8 @@ const TOOLS = {
   select: () => new SelectTool(app),
   modelLine: () => new LineTool(app, "model"),
   detailLine: () => new LineTool(app, "detail"),
+  dimension: () => new DimensionTool(app),
+  text: () => new TextTool(app),
   wall: () => new WallTool(app),
   door: () => new OpeningTool(app, "door"),
   boundary: () => (app.sketch?.kind === "roof" ? new RoofBoundaryTool(app) : new BoundaryTool(app)),
@@ -381,8 +423,8 @@ const RIBBON = [
   ] },
   { tab: "Annotate", groups: [
     { label: "Detail", items: [{ id: "detailLine", label: "Detail Line", icon: "detail", key: "DL", tool: "detailLine" }] },
-    { label: "Dimension", items: [{ id: "dimAligned", label: "Aligned", icon: "dim", key: "DI", ...SOON(8) }] },
-    { label: "Tag", items: [{ id: "tag", label: "Tag", icon: "tag", key: "TG", run: () => tagOpenings(app) }, { id: "text", label: "Text", icon: "text", key: "TX", ...SOON(8) }] },
+    { label: "Dimension", items: [{ id: "dimAligned", label: "Aligned", icon: "dim", key: "DI", tool: "dimension" }] },
+    { label: "Tag", items: [{ id: "tag", label: "Tag", icon: "tag", key: "TG", run: () => tagOpenings(app) }, { id: "text", label: "Text", icon: "text", key: "TX", tool: "text" }] },
   ] },
   { tab: "View", groups: [
     { label: "Create", items: [{ id: "view3d", label: "3D View", icon: "threed", run: () => setLayout("tile") }] },
@@ -393,7 +435,8 @@ const RIBBON = [
     ] },
     { label: "Schedules", items: [{ id: "schedule", label: "Door/Window Schedule", icon: "types", run: () => scheduleDialog(app, ui) }] },
     { label: "Navigate", items: [{ id: "zoomFit", label: "Zoom to Fit", icon: "fit", key: "ZF", run: () => zoomFit() }] },
-    { label: "Graphics", items: [{ id: "sectionBox", label: "Section Box", icon: "section", key: "BX", ...SOON(8) }] },
+    { label: "Elevations", items: ["north", "south", "east", "west"].map(k => ({ id: `elev-${k}`, label: ELEVATIONS[k].name, icon: "section", run: () => openElevation(k) })) },
+    { label: "Graphics", items: [{ id: "sectionBox", label: "Section Box", icon: "section", key: "BX", run: () => toggleSectionBox() }] },
   ] },
   { tab: "Manage", groups: [
     { label: "Project", items: [
@@ -435,6 +478,8 @@ function runItem(it) {
   if (app.sketch && !SKETCH_OK.has(it.id)) { app.toast("Finish or cancel the sketch first (Finish Edit Mode / Cancel Edit Mode)."); return; }
   if (it.roofOnly && app.sketch?.kind !== "roof") { app.toast("A slope arrow is for roof footprints."); return; }
   if (it.soon) { app.toast(`${it.label}: ${it.soon.toLowerCase()}.`); return; }
+  // drawing tools work on a plan: leave the elevation first
+  if (app.elevSide && !/^(elev-|sectionBox|tile|planOnly|threeOnly|view3d|schedule|levels|units|snapsDlg|shortcuts|undo|redo|wallTypes|zoomFit)/.test(it.id)) closeElevation();
   if (it.tool) app.setTool(it.tool);
   else it.run?.();
 }
@@ -544,6 +589,7 @@ function renderProps() {
   const els = ids.map(app.lookup);
   if (els.every(e => app.doc.components.some(c => c.id === e.id) || app.doc.referencePlanes.some(r => r.id === e.id))) { box.innerHTML = componentProps(app, ids, esc); wireComponentProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.floors.some(f => f.id === e.id))) { box.innerHTML = floorProps(app, ids, esc); wireFloorProps(app, ids, renderProps, ui); return; }
+  if (els.every(e => app.doc.dimensions.some(d => d.id === e.id) || app.doc.texts.some(t => t.id === e.id)) && (els.every(e => e.text != null) || els.every(e => e.text == null))) { box.innerHTML = annotationProps(app, ids, esc); wireAnnotationProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.roofs.some(r => r.id === e.id))) { box.innerHTML = roofProps(app, ids, esc); wireRoofProps(app, ids, renderProps, ui); return; }
   if (app.sketch?.kind === "roof" && els.every(e => e.kind === "sketch")) { box.innerHTML = roofLineProps(app, ids, esc); wireRoofLineProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.openings.some(o => o.id === e.id))) { box.innerHTML = openingProps(app, ids, esc); wireOpeningProps(app, ids, renderProps, ui); return; }
@@ -574,19 +620,21 @@ function renderBrowser() {
   const node = (label, attrs = "", cls = "") => `<li><button type="button" class="node ${cls}" ${attrs}>${esc(label)}</button>`;
   $("#browser").innerHTML = `<ul class="tree">
     ${node("Views (all)", "disabled", "head")}<ul>
-      ${node("Floor Plans", "disabled", "head")}<ul>${lv.map(l => node(`${l.name}  ${levelLabel(l.elevation)}`, `data-level="${l.id}" role="treeitem"`, l.id === app.levelId ? "on" : "")).join("")}</ul>
+      ${node("Floor Plans", "disabled", "head")}<ul>${lv.map(l => node(`${l.name}  ${levelLabel(l.elevation)}`, `data-level="${l.id}" role="treeitem"`, l.id === app.levelId && !app.elevSide ? "on" : "")).join("")}</ul>
       ${node("3D Views", "disabled", "head")}<ul>${node("{3D}", `data-view="3d" role="treeitem"`)}</ul>
-      ${node("Elevations (Building Elevation)", "disabled", "head")}<ul>${["East", "North", "South", "West"].map(n => node(n, `disabled title="Arrives in phase 8"`)).join("")}</ul>
+      ${node("Elevations (Building Elevation)", "disabled", "head")}<ul>${["east", "north", "south", "west"].map(k => node(ELEVATIONS[k].name, `data-elev="${k}" role="treeitem"`, app.elevSide === k ? "on" : "")).join("")}</ul>
       ${node("Sheets", "disabled", "head")}
     </ul></ul>`;
-  $("#browser").querySelectorAll("[data-level]").forEach(b => b.onclick = () => { setLevel(b.dataset.level); });
+  $("#browser").querySelectorAll("[data-level]").forEach(b => b.onclick = () => { closeElevation(); setLevel(b.dataset.level); });
+  $("#browser").querySelectorAll("[data-elev]").forEach(b => b.onclick = () => openElevation(b.dataset.elev));
   $("#browser").querySelector("[data-view='3d']").onclick = () => { setLayout(app.prefs.layout === "plan-only" ? "tile" : app.prefs.layout || "tile"); app.view3d.fit(); };
 }
 
 function setLevel(id) {
   if (app.sketch && id !== app.sketch.levelId) { app.toast("Finish or cancel the sketch before changing level."); renderBrowser(); return; }
+  closeElevation();
   app.levelId = id; app.selection.clear(); app.view3d.invalidate();
-  $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`;
+  setTitle();
   renderBrowser(); app.toolChanged();
 }
 
@@ -597,7 +645,7 @@ function renderViewBars() {
     <label><input type="checkbox" id="vUnder"${app.prefs.underlay ? " checked" : ""}> Underlay: level below</label>
     <span>Snaps: ${app.snapsEnabled.size ? "on" : "off"}</span>`;
   $("#vScale").onchange = e => { app.prefs.scale = e.target.value; app.savePrefs(); };
-  $("#vFit").onclick = () => app.plan.fit(app.plan.contentBox());
+  $("#vFit").onclick = () => (app.elevSide ? app.elev.fit() : app.plan.fit(app.plan.contentBox()));
   $("#vUnder").onchange = e => { app.prefs.underlay = e.target.checked; app.savePrefs(); app.redraw(); };
   const vs = app.prefs.visual || "shaded";
   $("#bar3d").innerHTML = `<label>Visual style <select id="vStyle">${[["wire", "Wireframe"], ["hidden", "Hidden Line"], ["shaded", "Shaded"], ["consistent", "Consistent Colours"], ["realistic", "Realistic"]].map(([k, v]) => `<option value="${k}"${k === vs ? " selected" : ""}>${v}</option>`).join("")}</select></label>
@@ -611,6 +659,35 @@ function renderViewBars() {
     app.savePrefs(); app.redraw(true);
   });
   $("#bar3d").querySelectorAll("[data-corner]").forEach(b => b.onclick = () => app.view3d.lookFrom(b.dataset.corner));
+  // section box: one slider per face, within the model's extent plus a margin
+  const sb = app.prefs.sectionBox;
+  if (sb) {
+    const full = modelBoxMm(app.view3d), lim = k => ({ min: Math.min(full[k[0] + "0"], sb[k[0] + "0"]) - 2000, max: Math.max(full[k[0] + "1"], sb[k[0] + "1"]) + 2000 });
+    const faces = [["x0", "West"], ["x1", "East"], ["y0", "South"], ["y1", "North"], ["z0", "Bottom"], ["z1", "Top"]];
+    const div = document.createElement("details"); div.className = "lvpick sk-sbox"; div.open = !!app.sbOpen;
+    div.ontoggle = () => { app.sbOpen = div.open; };
+    div.innerHTML = `<summary>Section Box</summary><div>${faces.map(([k, n]) => { const L = lim(k); return `<label>${n} <input type="range" data-sb="${k}" min="${L.min}" max="${L.max}" step="50" value="${sb[k]}"></label>`; }).join("")}<button type="button" id="sbReset">Reset</button><button type="button" id="sbOff">Off</button></div>`;
+    $("#bar3d").appendChild(div);
+    div.querySelectorAll("[data-sb]").forEach(r => r.oninput = () => {
+      const k = r.dataset.sb, v = +r.value, other = k.endsWith("0") ? k[0] + "1" : k[0] + "0", box = { ...app.prefs.sectionBox };
+      box[k] = k.endsWith("0") ? Math.min(v, box[other] - 100) : Math.max(v, box[other] + 100);
+      app.prefs.sectionBox = app.prefs.sectionBoxMm = box; applySectionBox(app.view3d, box);
+    });
+    div.querySelectorAll("[data-sb]").forEach(r => r.onchange = () => app.savePrefs());
+    $("#sbReset").onclick = () => { app.prefs.sectionBox = app.prefs.sectionBoxMm = modelBoxMm(app.view3d); app.savePrefs(); applySectionBox(app.view3d, app.prefs.sectionBox); renderViewBars(); };
+    $("#sbOff").onclick = () => toggleSectionBox(false);
+  }
+  // the bar scrolls sideways on small screens, which would clip these drop-downs: show them fixed above their button
+  $("#bar3d").querySelectorAll("details.lvpick").forEach(dt => {
+    const place = () => {
+      const panel = dt.querySelector(":scope > div"); if (!dt.open || !panel) return;
+      const r = dt.querySelector("summary").getBoundingClientRect();
+      Object.assign(panel.style, { position: "fixed", bottom: `${window.innerHeight - r.top + 6}px`, top: "auto", left: "auto", right: "auto", zIndex: 40 });
+      const w = panel.offsetWidth;
+      panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+    };
+    dt.addEventListener("toggle", place); place();
+  });
 }
 
 function setLayout(layout) {
@@ -619,7 +696,7 @@ function setLayout(layout) {
 }
 
 function zoomFit() {
-  if (app.prefs.layout !== "three-only") app.plan.fit(app.plan.contentBox());
+  if (app.prefs.layout !== "three-only") { if (app.elevSide) app.elev.fit(); else app.plan.fit(app.plan.contentBox()); }
   if (app.prefs.layout !== "plan-only") app.view3d.fit();
 }
 
@@ -642,6 +719,8 @@ function deleteSelection() {
     doc.walls = doc.walls.filter(w => !ids.includes(w.id));
     doc.floors = doc.floors.filter(f => !ids.includes(f.id));
     doc.roofs = doc.roofs.filter(r => !ids.includes(r.id));
+    doc.dimensions = doc.dimensions.filter(d => !ids.includes(d.id));
+    doc.texts = doc.texts.filter(t => !ids.includes(t.id));
     doc.components = doc.components.filter(c => !ids.includes(c.id));
     doc.referencePlanes = doc.referencePlanes.filter(r => !ids.includes(r.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
@@ -664,9 +743,9 @@ app.history.onChange(info => {
   for (const id of [...app.selection]) if (!app.lookup(id)) app.selection.delete(id);
   app.geomVer++;
   if (info.kind === "reset") return;
-  app.redraw(true);
+  app.redraw(true); app.elev?.invalidate();
   renderProps(); renderRibbon(); setPrompt();
-  if (info.ops?.some(o => o.k === "levels")) { if (!app.doc.levels.some(l => l.id === app.levelId)) app.levelId = LV.sorted(app.doc)[0].id; renderBrowser(); renderViewBars(); $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`; }
+  if (info.ops?.some(o => o.k === "levels")) { if (!app.doc.levels.some(l => l.id === app.levelId)) app.levelId = LV.sorted(app.doc)[0].id; renderBrowser(); renderViewBars(); setTitle(); }
   if (info.ops?.some(o => o.op === "doc")) $("#projName").value = app.doc.name;
   app.store.changed();
 });
@@ -955,12 +1034,32 @@ $("#fileNew").onclick = async () => {
 $("#fileOpen").onclick = openDialogList;
 $("#fileSave").onclick = () => app.store.save();
 $("#fileCopy").onclick = () => app.store.save({ asCopy: true });
-$("#fileExport").onclick = () => {
-  const blob = new Blob([JSON.stringify(app.doc, null, 1)], { type: "application/json" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = `${app.doc.name.replace(/[^\w\- ]+/g, "").trim() || "sketch"}.ollic-sketch.json`; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-};
+$("#fileExport").onclick = () => exportDialog();
+function exportDialog() {
+  const lvs = LV.sorted(app.doc), scale = app.prefs.exportScale || "100";
+  openDialog(`<h3>Export</h3><div class="sk-export">
+    <div class="opt"><div><b>Plan sheet</b><small>The floor plan at true scale on the smallest sheet it fits (A4 to A0), with title and scale bar.</small>
+      <label>Level <select id="xLevel">${lvs.map(l => `<option value="${esc(l.id)}"${l.id === app.levelId ? " selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
+      <label>Scale <select id="xScale">${["50", "100", "200"].map(s => `<option value="${s}"${s === scale ? " selected" : ""}>1 : ${s}</option>`).join("")}</select></label></div>
+      <div><button class="btn" type="button" id="xPng">PNG</button> <button class="btn primary" type="button" id="xPdf">PDF</button></div></div>
+    <div class="opt"><div><b>DXF (CAD drawing)</b><small>The chosen level's plan as lines, arcs and text in millimetres; opens in AutoCAD, BricsCAD, LibreCAD and others.</small></div><div><button class="btn" type="button" id="xDxf">DXF</button></div></div>
+    <div class="opt"><div><b>3D model (GLB)</b><small>Everything shown in the 3D view (levels you have hidden are left out), with colours. Opens in Blender, Windows 3D Viewer and online viewers.</small></div><div><button class="btn" type="button" id="xGlb">GLB</button></div></div>
+    <div class="opt"><div><b>Project file</b><small>The whole sketch, to open again with Import.</small></div><div><button class="btn" type="button" id="xJson">JSON</button></div></div>
+    <div class="opt"><div><b>IFC for the studio</b><small>Not available yet: a proper IFC needs walls, slabs, roofs and openings written as building objects, which comes in a later update. Use GLB or DXF for now.</small></div><div><button class="btn" type="button" disabled>IFC</button></div></div>
+    <div id="xErr"></div></div><div class="actions"><button class="btn" type="button" id="xClose">Close</button></div>`, d => {
+    const name = safeName(app.doc.name), lvId = () => d.querySelector("#xLevel").value, sc = () => +d.querySelector("#xScale").value;
+    const lvName = () => safeName(app.doc.levels.find(l => l.id === lvId())?.name);
+    const err = e => { d.querySelector("#xErr").innerHTML = `<div class="err">${esc(e.message || String(e))}</div>`; };
+    const ok = msg => { d.querySelector("#xErr").innerHTML = ""; app.toast(msg); };
+    d.querySelector("#xClose").onclick = closeDialog;
+    d.querySelector("#xScale").onchange = e => { app.prefs.exportScale = e.target.value; app.savePrefs(); };
+    d.querySelector("#xPng").onclick = async () => { try { const sh = planSheet(app, lvId(), sc()); const blob = await new Promise(r => sh.canvas.toBlob(r, "image/png")); download(blob, `${name} - ${lvName()} 1-${sc()}.png`); ok(`Plan exported: ${sh.paper.name} at 1:${sc()}.`); } catch (e) { err(e); } };
+    d.querySelector("#xPdf").onclick = async () => { try { const sh = planSheet(app, lvId(), sc()); download(await pdfFromCanvas(sh.canvas, sh.paper.w, sh.paper.h), `${name} - ${lvName()} 1-${sc()}.pdf`); ok(`PDF exported: ${sh.paper.name} at 1:${sc()}. Print at 100% (actual size) to keep the scale.`); } catch (e) { err(e); } };
+    d.querySelector("#xDxf").onclick = () => { try { const r = planDxf(app, lvId()); download(new Blob([r.text], { type: "application/dxf" }), `${name} - ${lvName()}.dxf`); ok(`DXF exported: ${r.counts.lines} lines, ${r.counts.arcs} arcs, ${r.counts.texts} texts, in millimetres.`); } catch (e) { err(e); } };
+    d.querySelector("#xGlb").onclick = () => { try { const v3 = app.view3d; if (v3.dirty) { v3.dirty = false; v3.rebuild(); } const r = modelGlb(v3.root, THREE); download(r.blob, `${name}.glb`); ok(`3D model exported: ${r.objects} objects.`); } catch (e) { err(e); } };
+    d.querySelector("#xJson").onclick = () => { download(new Blob([JSON.stringify(app.doc, null, 1)], { type: "application/json" }), `${name}.ollic-sketch.json`); ok("Project file exported."); };
+  });
+}
 $("#fileImport").onclick = () => $("#importInput").click();
 $("#importInput").onchange = async e => {
   const f = e.target.files[0]; e.target.value = "";
@@ -970,7 +1069,7 @@ $("#importInput").onchange = async e => {
 };
 
 // --------------------------------------------------------------------------- start
-function renderAll() { renderRibbon(); renderOptions(); renderProps(); renderBrowser(); renderViewBars(); setPrompt(); $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`; }
+function renderAll() { renderRibbon(); renderOptions(); renderProps(); renderBrowser(); renderViewBars(); setPrompt(); setTitle(); }
 
 app.store = new Store(app);
 app.setTool("select");

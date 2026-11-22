@@ -159,3 +159,17 @@ button { cursor: pointer; }
 .muted { color: var(--muted); }
 .sk-dialog-wrap.ask { z-index: 45; }
 .sk-dialog input[type="text"].wide { width: 100%; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 8px; }
+
+/* elevations: drawn in the plan pane over the plan canvas */
+.sk-elev { position: absolute; inset: 0; background: #f3f2ee; }
+.sk-elev[hidden] { display: none; }
+.sk-elev canvas { position: absolute; left: 0; top: 0; }
+.sk-elev .sk-elev-over { cursor: grab; outline: none; }
+/* section box sliders in the 3D bar */
+.sk-sbox > div label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11.5px; }
+.sk-sbox input[type=range] { width: 120px; }
+.sk-sbox > div button { margin: 6px 6px 0 0; }
+/* export dialog */
+.sk-export .opt { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line, #2a2a30); }
+.sk-export .opt small { display: block; opacity: .7; }
+.sk-sbox > div { left: auto; right: 0; min-width: 230px; }

@@ -20,11 +20,24 @@ jobs:
           npm i --no-save --no-package-lock playwright@1.48.2
           npx playwright install --with-deps chromium > /dev/null
           for f in tests/sketch/e2e_*.mjs; do node "$f" out/sketch || exit 1; done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Exported files open in independent readers (ezdxf, Khronos glTF validator)
+        run: |
+          pip install -q ezdxf
+          python tests/sketch/check_exports.py out/sketch
+          npm i --no-save --no-package-lock gltf-validator@2.0.0-dev.3.10
+          node tests/sketch/check_glb.mjs out/sketch
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: sketch-screenshots
-          path: out/sketch/*.png
+          path: |
+            out/sketch/*.png
+            out/sketch/*.pdf
+            out/sketch/*.dxf
+            out/sketch/*.glb
 
   backend:
     name: API and studio browser tests
