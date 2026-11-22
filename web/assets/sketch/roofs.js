@@ -30,127 +30,131 @@ export function slopeLabel(rad, style = "deg") {
  */
 export function skeleton(polyIn, slopesIn) {
   let poly = polyIn.map(p => ({ x: p.x, y: p.y })), slopes = [...slopesIn];
-  if (G.polygonArea(poly) < 0) { // make it counter-clockwise; edge i becomes edge n-2-i
-    const n = poly.length;
-    poly = [...poly].reverse();
-    slopes = Array.from({ length: n }, (_, i) => slopesIn[(n - 2 - i + n) % n]);
-  }
+  const flipped = G.polygonArea(poly) < 0;
   const n = poly.length;
+  if (flipped) { poly = [...poly].reverse(); slopes = Array.from({ length: n }, (_, i) => slopesIn[(n - 2 - i + n) % n]); } // counter-clockwise; edge i becomes n-2-i
+  const scale = Math.max(1, ...poly.map(p => Math.max(Math.abs(p.x), Math.abs(p.y))));
+  const TOL = 1e-6 * scale + 1e-4; // mm: points closer than this are the same point
   const E = poly.map((p, i) => {
     const q = poly[(i + 1) % n], d = G.norm(G.sub(q, p));
-    const s = slopes[i] == null ? 0 : 1 / Math.tan(slopes[i]);
-    return { i: polyIn.length === n && G.polygonArea(polyIn) < 0 ? (n - 2 - i + n) % n : i, P: p, n: G.perp(d), d, s };
+    const s = slopes[i] == null ? 0 : 1 / Math.tan(slopes[i]); // a gable (no slope) does not move
+    return { i: flipped ? (n - 2 - i + n) % n : i, P: p, n: G.perp(d), d, s, gable: slopes[i] == null };
   });
+  // where the two edges' offset lines meet, per unit of height
   const velocity = (a, b) => {
     const A = E[a], B = E[b], det = A.n.x * B.n.y - A.n.y * B.n.x;
-    if (Math.abs(det) < 1e-9) return G.mul(A.n, (A.s + B.s) / 2); // straight-through: move with the edge
+    if (Math.abs(det) < 1e-9) return G.mul(A.n, A.s); // in line: move with the edge
     return { x: (A.s * B.n.y - B.s * A.n.y) / det, y: (B.s * A.n.x - A.s * B.n.x) / det };
   };
-  const mk = (p, a, b, t) => ({ p: { ...p }, a, b, v: velocity(a, b), t0: t, start: { ...p, z: t } });
-  let loops = [poly.map((p, k) => mk(p, (k - 1 + n) % n, k, 0))];
   const faces = [], arcs = [];
   let t = 0;
-  const pushQuad = (edge, pts) => {
-    if (!(E[edge].s > 0)) return;
-    const q = pts.filter((p, k) => G.dist(p, pts[(k + 1) % pts.length]) > 1e-6 || Math.abs(p.z - pts[(k + 1) % pts.length].z) > 1e-6);
-    if (q.length >= 3) faces.push({ edge: E[edge].i, pts: q });
-  };
-  const finishVertex = v => { arcs.push({ a: v.start, b: { ...v.p, z: t }, from: v.reflex ? "valley" : "hip" }); };
-  const ridge = (a, b) => { if (G.dist(a, b) > 1e-3) arcs.push({ a: { ...a, z: t }, b: { ...b, z: t }, from: "ridge" }); };
+  const mk = (p, a, b) => ({ p: { ...p }, a, b, v: velocity(a, b), start: { ...p, z: t } });
   const isReflex = (L, k) => G.cross(E[L[k].a].d, E[L[k].b].d) < -1e-9;
-  loops[0].forEach((v, k) => { v.reflex = isReflex(loops[0], k); });
+  const finish = v => { if (G.dist(v.start, v.p) > TOL || Math.abs(v.start.z - t) > TOL) arcs.push({ a: v.start, b: { ...v.p, z: t }, from: v.reflex ? "valley" : "hip" }); };
+  const ridge = (a, b) => { if (G.dist(a, b) > TOL) arcs.push({ a: { ...a, z: t }, b: { ...b, z: t }, from: "ridge" }); };
+  const pushQuad = (edge, pts) => {
+    if (E[edge].gable || !(E[edge].s > 0)) return;
+    const q = pts.filter((p, k) => G.dist(p, pts[(k + 1) % pts.length]) > TOL || Math.abs(p.z - pts[(k + 1) % pts.length].z) > TOL);
+    if (q.length >= 3 && Math.abs(G.polygonArea(q)) > 1e-6) faces.push({ edge: E[edge].i, pts: q });
+  };
+  const refresh = L => L.forEach((v, k) => { v.v = velocity(v.a, v.b); v.reflex = isReflex(L, k); });
+  let loops = [poly.map((p, k) => mk(p, (k - 1 + n) % n, k))];
+  refresh(loops[0]);
 
-  for (let guard = 0; guard < 400 && loops.length; guard++) {
-    // ---- next event ----
-    let best = Infinity, split = null;
-    for (const L of loops) {
-      for (let k = 0; k < L.length; k++) {
+  /** Tidies a loop at the current height; returns the loops it becomes (none when it has closed up). */
+  const clean = L0 => {
+    let work = [L0], done = [];
+    for (let guard = 0; guard < 500 && work.length; guard++) {
+      const L = work.pop();
+      let changed = false;
+      // 1. vertices that met: merge (an edge has shrunk away)
+      for (let k = 0; k < L.length && L.length > 1; k++) {
         const A = L[k], B = L[(k + 1) % L.length];
-        const s = G.sub(B.p, A.p), dv = G.sub(B.v, A.v), dd = G.dot(dv, dv);
-        if (dd > EPS) { const tau = -G.dot(s, dv) / dd; if (tau > EPS && G.len(G.add(s, G.mul(dv, tau))) < 1e-3 * Math.max(1, G.len(s)) + 1e-6) best = Math.min(best, tau); }
+        if (G.dist(A.p, B.p) <= TOL) { finish(A); finish(B); const nv = mk(A.p, A.a, B.b); L.splice(k, 1, nv); L.splice((k + 1) % L.length, 1); changed = true; break; }
       }
-      for (let k = 0; k < L.length; k++) {
-        if (!isReflex(L, k)) continue;
-        const V = L[k];
-        for (let j = 0; j < L.length; j++) {
-          const X = L[j], Y = L[(j + 1) % L.length];
+      // 2. the loop doubles back on itself (a wing has closed to a line): drop the spike, keep the ridge
+      if (!changed && L.length > 2) for (let k = 0; k < L.length; k++) {
+        const P = L[(k - 1 + L.length) % L.length], S = L[k], N = L[(k + 1) % L.length];
+        const dP = G.dist(P.p, S.p), dN = G.dist(S.p, N.p);
+        if (dP <= TOL || dN <= TOL) continue;
+        const din = G.mul(G.sub(S.p, P.p), 1 / dP), dout = G.mul(G.sub(N.p, S.p), 1 / dN);
+        if (Math.abs(G.cross(din, dout)) > 1e-7 || G.dot(din, dout) > 0) continue;
+        finish(S);
+        if (dN <= dP) { ridge(S.p, N.p); finish(N); const nv = mk(N.p, P.b, N.b); L.splice(k, 1); L[k % L.length] = nv; }
+        else { ridge(P.p, S.p); finish(P); const nv = mk(P.p, P.a, S.b); L.splice(k, 1); L[(k - 1 + L.length) % L.length] = nv; }
+        changed = true; break;
+      }
+      // 3. a vertex touching another part of its own loop: split the loop in two there
+      if (!changed && L.length > 3) {
+        outer: for (let k = 0; k < L.length; k++) {
+          const V = L[k];
+          for (let j = 0; j < L.length; j++) {
+            const X = L[j], Y = L[(j + 1) % L.length];
+            if (X === V || Y === V) continue;
+            const pr = G.projectOnSegment(V.p, X.p, Y.p);
+            if (pr.dist > TOL) continue;
+            // split: V..X closes with the part of edge X->Y after the touch, and V..Y with the part before
+            finish(V);
+            const v1 = mk(V.p, V.a, X.b), v2 = mk(V.p, X.b, V.b);
+            const N = L.length, loop1 = [v1], loop2 = [v2];
+            for (let m = (j + 1) % N; m !== k; m = (m + 1) % N) loop1.push(L[m]);
+            for (let m = (k + 1) % N; m !== (j + 1) % N; m = (m + 1) % N) loop2.push(L[m]);
+            work.push(loop1, loop2); changed = true; break outer;
+          }
+        }
+        if (changed) continue;
+      }
+      if (changed) { work.push(L); continue; }
+      const area = L.length > 2 ? G.polygonArea(L.map(v => v.p)) : 0;
+      if (L.length < 3 || area <= TOL * scale) {
+        L.forEach(finish);
+        const m = L.length > 2 ? L.length : L.length - 1;
+        for (let q = 0; q < m; q++) ridge(L[q].p, L[(q + 1) % L.length].p);
+        continue;
+      }
+      refresh(L); done.push(L);
+    }
+    return done;
+  };
+
+  for (let guard = 0; guard < 2000 && loops.length; guard++) {
+    // ---- the next height at which something happens
+    let best = Infinity;
+    for (const L of loops) {
+      const N = L.length;
+      for (let k = 0; k < N; k++) {
+        // an edge shrinking to nothing: its two ends slide along the same moving line
+        const A = L[k], B = L[(k + 1) % N], d = E[A.b].d;
+        const len = G.dot(G.sub(B.p, A.p), d), rate = G.dot(G.sub(B.v, A.v), d);
+        if (rate < -1e-12) { const tau = -len / rate; if (tau > 0) best = Math.min(best, tau); }
+      }
+      for (let k = 0; k < N; k++) {
+        const V = L[k]; if (!V.reflex) continue;
+        for (let j = 0; j < N; j++) {
+          const X = L[j], Y = L[(j + 1) % N];
           if (X === V || Y === V) continue;
-          const e = E[X.b], rate = G.dot(V.v, e.n) - e.s;
-          if (rate > -EPS) continue;
-          const tau = (e.s * t - G.dot(G.sub(V.p, e.P), e.n)) / rate;
-          if (!(tau > EPS) || tau >= best - 1e-7 * (1 + best)) continue; // ties go to the edge event
+          const e = E[X.b], dist = G.dot(G.sub(V.p, e.P), e.n) - e.s * t, rate = G.dot(V.v, e.n) - e.s;
+          if (rate > -1e-12 || dist < -TOL) continue;
+          const tau = -dist / rate;
+          if (!(tau > 0) || tau >= best) continue;
           const hit = G.add(V.p, G.mul(V.v, tau)), x = G.add(X.p, G.mul(X.v, tau)), y = G.add(Y.p, G.mul(Y.v, tau));
-          const seg = G.sub(y, x), u = G.dot(G.sub(hit, x), seg) / Math.max(EPS, G.dot(seg, seg));
-          if (u > 1e-6 && u < 1 - 1e-6) { best = tau; split = { L, k, j }; }
+          if (G.projectOnSegment(hit, x, y).dist <= TOL * 10) best = tau;
         }
       }
     }
-    if (!isFinite(best)) break;
-    // ---- move every vertex to the event, emitting the faces swept on the way ----
+    if (!isFinite(best)) break; // nothing more happens
+    // ---- move everything up to it, laying the roof faces swept on the way
     const t1 = t + best;
     for (const L of loops) {
       const old = L.map(v => ({ ...v.p }));
       L.forEach(v => { v.p = G.add(v.p, G.mul(v.v, best)); });
-      for (let k = 0; k < L.length; k++) {
-        const A = L[k], B = L[(k + 1) % L.length];
-        pushQuad(A.b, [{ ...old[k], z: t }, { ...old[(k + 1) % L.length], z: t }, { ...B.p, z: t1 }, { ...A.p, z: t1 }]);
-      }
+      for (let k = 0; k < L.length; k++) { const A = L[k], B = L[(k + 1) % L.length]; pushQuad(A.b, [{ ...old[k], z: t }, { ...old[(k + 1) % L.length], z: t }, { ...B.p, z: t1 }, { ...A.p, z: t1 }]); }
     }
     t = t1;
-    // ---- split event: the reflex vertex divides the loop in two ----
-    let next = [];
-    if (split && split.L.length) {
-      const { L, k, j } = split, V = L[k], X = L[j];
-      const N = L.length;
-      finishVertex(V);
-      const v1 = mk(V.p, V.a, X.b, t), v2 = mk(V.p, X.b, V.b, t);
-      const loop1 = [v1], loop2 = [v2];
-      for (let m = (j + 1) % N; m !== k; m = (m + 1) % N) loop1.push(L[m]);
-      for (let m = (k + 1) % N; m !== (j + 1) % N; m = (m + 1) % N) loop2.push(L[m]);
-      loops = loops.filter(x => x !== L).concat([loop1, loop2]);
-      for (const LL of [loop1, loop2]) LL.forEach((v, m) => { if (v === v1 || v === v2) v.reflex = isReflex(LL, m); });
-    }
-    // ---- edge events: merge vertices that met ----
-    for (const L of loops) {
-      let merged = true;
-      while (merged && L.length > 2) {
-        merged = false;
-        for (let k = 0; k < L.length; k++) {
-          const A = L[k], B = L[(k + 1) % L.length];
-          if (G.dist(A.p, B.p) < 1e-3) {
-            finishVertex(A); finishVertex(B);
-            const nv = mk(A.p, A.a, B.b, t);
-            L.splice(k, 1, nv); L.splice((k + 1) % (L.length), 1);
-            merged = true; break;
-          }
-        }
-      }
-      // spikes: a vertex where the loop doubles back on itself (a wing has closed to a ridge line)
-      let spiked = true;
-      while (spiked && L.length > 2) {
-        spiked = false;
-        for (let k = 0; k < L.length; k++) {
-          const P = L[(k - 1 + L.length) % L.length], S = L[k], N = L[(k + 1) % L.length];
-          const dP = G.dist(P.p, S.p), dN = G.dist(S.p, N.p);
-          if (dP < 1e-3 || dN < 1e-3) continue;
-          const din = G.mul(G.sub(S.p, P.p), 1 / dP), dout = G.mul(G.sub(N.p, S.p), 1 / dN);
-          if (Math.abs(G.cross(din, dout)) > 1e-6 || G.dot(din, dout) > -0.999) continue;
-          finishVertex(S);
-          if (dN <= dP) { ridge(S.p, N.p); finishVertex(N); const nv = mk(N.p, P.b, N.b, t); L.splice(k, 1); L[k % L.length] = nv; }
-          else { ridge(P.p, S.p); finishVertex(P); const nv = mk(P.p, P.a, S.b, t); L.splice(k, 1); L[(k - 1 + L.length) % L.length] = nv; }
-          spiked = true; break;
-        }
-      }
-      L.forEach((v, m) => { v.v = velocity(v.a, v.b); if (L.length > 2) v.reflex = isReflex(L, m); });
-    }
-    for (const L of loops) {
-      const area = L.length > 2 ? Math.abs(G.polygonArea(L.map(v => v.p))) : 0;
-      if (L.length < 3 || area < 1) { L.forEach(finishVertex); for (let m = 0; m + 1 < L.length + (L.length > 2 ? 1 : 0); m++) ridge(L[m].p, L[(m + 1) % L.length].p); continue; }
-      next.push(L);
-    }
-    loops = next;
+    loops = loops.flatMap(clean);
   }
-  for (const L of loops) L.forEach(finishVertex); // gable-only remains
+  // what is left has edges that never move (all gables): the top of the roof
+  for (const L of loops) { L.forEach(finish); for (let q = 0; q < L.length; q++) ridge(L[q].p, L[(q + 1) % L.length].p); }
   const maxZ = arcs.reduce((m, a) => Math.max(m, a.a.z, a.b.z), 0);
   const seen = new Set(), key = p => `${Math.round(p.x)},${Math.round(p.y)},${Math.round(p.z)}`;
   const kept = arcs.filter(a => {
@@ -159,7 +163,7 @@ export function skeleton(polyIn, slopesIn) {
     if (seen.has(k1) || seen.has(k2)) return false;
     seen.add(k1); return true;
   });
-  return { faces: faces.filter(f => Math.abs(G.polygonArea(f.pts)) > 1), arcs: kept, maxZ };
+  return { faces, arcs: kept, maxZ };
 }
 
 /** Height of the roof surface (above the eaves) at plan point p, or null if outside. */
