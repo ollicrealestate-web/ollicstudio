@@ -300,6 +300,7 @@ export function buildWalls3D(v3, THREE, app) {
     }
   }
   app.buildOpenings3D?.(group, THREE, visible);
+  app.buildFloors3D?.(group, THREE, visible);
   v3.root.add(group);
   v3.setShadows?.(style === "realistic");
 }

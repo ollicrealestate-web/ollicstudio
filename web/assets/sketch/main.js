@@ -14,6 +14,8 @@ import { MoveTool, RotateTool, MirrorTool, ScaleTool, ArrayTool, OffsetTool, Tri
 import { enforceLocks } from "./modify.js";
 import { OpeningTool, drawOpenings, drawOpeningDims, openingsAt, buildOpenings3D, openingProps, wireOpeningProps, scheduleDialog, tagOpenings } from "./openingsui.js";
 import * as OP from "./openings.js";
+import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
+import { floorLoops, floorParts } from "./floors.js";
 import { Store, readLocal, readPrefs, writePrefs } from "./store.js";
 import { icon } from "./icons.js";
 
@@ -57,6 +59,7 @@ app.snapCurves = () => {
     if (w.shape === "arc") out.push({ type: "arc", c: w.c, r: w.r, start: w.start, sweep: w.sweep, id: w.id });
     else out.push({ type: "seg", a: w.a, b: w.b, id: w.id });
   }
+  for (const f of app.doc.floors) if (f.levelId === app.levelId && f.id !== app.sketch?.editFloorId) for (const l of floorLoops(f)) l.forEach((p, i) => out.push({ type: "seg", a: p, b: l[(i + 1) % l.length], id: f.id }));
   // faces of walls being dragged are left out, so a moving wall does not snap to itself
   const skip = app.excludeFromSnap || new Set();
   const faces = [...fp.entries()].filter(([id]) => !skip.has(id)).flatMap(([, f]) => f.pieces);
@@ -105,7 +108,10 @@ app.chainOf = id => {
 };
 app.setLevel = id => setLevel(id);
 app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
-app.drawModel = view => { drawWalls(view, app); drawOpenings(view, app); };
+app.drawModel = view => { drawFloors(view, app); drawWalls(view, app); drawOpenings(view, app); };
+app.buildFloors3D = (group, THREE, visible) => buildFloors3D(group, THREE, app, visible);
+app.sketch = null;
+app.sketchChanged = () => { renderRibbon(); renderOptions(); renderProps(); setPrompt(); app.redraw(true); };
 app.buildOpenings3D = (group, THREE, visible) => buildOpenings3D(group, THREE, app, visible);
 app.drawUnderlay = view => drawUnderlay(view, app);
 app.build3D = (v3, THREE) => buildWalls3D(v3, THREE, app);
@@ -125,6 +131,7 @@ app.commit = (label, fn) => {
       OP.keepOpeningsInPlace(doc, ends);
       doc.openings = doc.openings.filter(o => doc.walls.some(w => w.id === o.hostWallId));
       doc.tags = doc.tags.filter(t => doc.openings.some(o => o.id === t.hostId));
+      for (const w of doc.walls) if (w.attachTopTo && !doc.floors.some(f => f.id === w.attachTopTo)) delete w.attachTopTo;
       // locked alignments hold whatever moved; then every wall must still be valid
       if (doc.constraints?.length) enforceLocks(doc, w => wallFootprints(doc, w.baseLevelId).get(w.id), (dd, id, d) => app.translateWithJoins(dd, [id], d));
       for (const w of doc.walls) checkWall(doc, w);
@@ -154,6 +161,11 @@ app.elementsInRect = (r, crossing) => {
       pieces.some(pc => pc.some((a, i) => corners.some((c, k) => G.segIntersect(a, pc[(i + 1) % pc.length], c, corners[(k + 1) % 4]))))));
     if (touched) ids.push(w.id);
   }
+  for (const fl of app.doc.floors) {
+    if (fl.levelId !== app.levelId || app.sketch) continue;
+    const pts = floorLoops(fl).flat();
+    if (pts.length && (crossing ? pts.some(inside) : pts.every(inside))) ids.push(fl.id);
+  }
   for (const o of app.doc.openings) {
     const f = OP.openingFrame(app.doc, o);
     if (!f || f.w.baseLevelId !== app.levelId) continue;
@@ -176,6 +188,7 @@ app.updateHover = c => {
     cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
   }
   cands.push(...openingsAt(app, c.raw));
+  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol));
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
   const first = list[0];
@@ -242,6 +255,7 @@ const TOOLS = {
   detailLine: () => new LineTool(app, "detail"),
   wall: () => new WallTool(app),
   door: () => new OpeningTool(app, "door"),
+  boundary: () => new BoundaryTool(app),
   window: () => new OpeningTool(app, "window"),
   move: () => new MoveTool(app, false),
   copy: () => new MoveTool(app, true),
@@ -283,7 +297,7 @@ const RIBBON = [
       { id: "door", label: "Door", icon: "door", key: "DR", tool: "door" },
       { id: "window", label: "Window", icon: "window", key: "WN", tool: "window" },
       { id: "component", label: "Component", icon: "component", ...SOON(6) },
-      { id: "floor", label: "Floor", icon: "floor", key: "SB", ...SOON(5) },
+      { id: "floor", label: "Floor", icon: "floor", key: "SB", run: () => startFloorSketch(app) },
       { id: "roof", label: "Roof", icon: "roof", ...SOON(7) },
     ] },
     { label: "Model", items: [{ id: "modelLine", label: "Model Line", icon: "line", key: "LI", tool: "modelLine" }] },
@@ -310,6 +324,7 @@ const RIBBON = [
       { id: "delete", label: "Delete", icon: "del", key: "DE", run: () => deleteSelection() },
     ] },
     { label: "Levels", items: [{ id: "copyLevels", label: "Copy to Levels", icon: "levels", run: () => copyToLevelsDialog(app, ui) }] },
+    { label: "Modify Wall", items: [{ id: "attachTop", label: "Attach Top/Base", icon: "roof", run: () => attachTopDialog(app, ui) }] },
     { label: "Undo", items: [
       { id: "undo", label: "Undo", icon: "undo", hint: "Ctrl+Z", run: () => undo() },
       { id: "redo", label: "Redo", icon: "redo", hint: "Ctrl+Y", run: () => redo() },
@@ -343,21 +358,44 @@ const RIBBON = [
     ] },
   ] },
 ];
-const ALL_ITEMS = RIBBON.flatMap(t => t.groups.flatMap(g => g.items));
+const SKETCH_TAB = { tab: "Modify | Create Floor Boundary", groups: [
+  { label: "Mode", items: [
+    { id: "finishSketch", label: "Finish Edit Mode", icon: "fit", run: () => finishSketch(app, ui) },
+    { id: "cancelSketch", label: "Cancel Edit Mode", icon: "del", run: () => cancelSketch(app) },
+  ] },
+  { label: "Draw", items: [{ id: "boundaryLine", label: "Boundary Line", icon: "line", key: "BL", tool: "boundary" }] },
+  { label: "Modify", items: [
+    { id: "select", label: "Modify", icon: "modify", key: "MD", tool: "select" },
+    { id: "trim", label: "Trim/Extend", icon: "trim", key: "TR", tool: "trim" },
+    { id: "offset", label: "Offset", icon: "offset", key: "OF", tool: "offset" },
+    { id: "split", label: "Split", icon: "split", key: "SL", tool: "split" },
+    { id: "move", label: "Move", icon: "move", key: "MV", tool: "move" },
+    { id: "copy", label: "Copy", icon: "copy", key: "CO", tool: "copy" },
+    { id: "delete", label: "Delete", icon: "del", key: "DE", run: () => deleteSelection() },
+  ] },
+  { label: "Undo", items: [{ id: "undo", label: "Undo", icon: "undo", run: () => undo() }, { id: "redo", label: "Redo", icon: "redo", run: () => redo() }] },
+] };
+const SKETCH_OK = new Set(SKETCH_TAB.groups.flatMap(g => g.items.map(i => i.id)).concat(["zoomFit", "tile", "planOnly", "threeOnly", "view3d", "units", "snapsDlg", "shortcuts", "align", "mirrorPick", "mirrorDraw", "rotate", "chamfer", "fillet", "array", "scale"]));
+const ALL_ITEMS = [...RIBBON, SKETCH_TAB].flatMap(t => t.groups.flatMap(g => g.items));
 const SHORTCUTS = Object.fromEntries(ALL_ITEMS.filter(i => i.key).map(i => [i.key, i]));
 SHORTCUTS.ZE = SHORTCUTS.ZA = SHORTCUTS.ZF;
+SHORTCUTS.BL = ALL_ITEMS.find(i => i.id === "boundaryLine");
 let ribbonTab = app.prefs.ribbonTab || "Architecture";
 
 function runItem(it) {
+  if (app.sketch && !SKETCH_OK.has(it.id)) { app.toast("Finish or cancel the floor sketch first (Finish Edit Mode / Cancel Edit Mode)."); return; }
   if (it.soon) { app.toast(`${it.label}: ${it.soon.toLowerCase()}.`); return; }
   if (it.tool) app.setTool(it.tool);
   else it.run?.();
 }
 
 function renderRibbon() {
-  $("#ribbonTabs").innerHTML = RIBBON.map(t => `<button role="tab" type="button" aria-selected="${t.tab === ribbonTab}" data-tab="${t.tab}">${t.tab}</button>`).join("");
+  const TABS = app.sketch ? [SKETCH_TAB, ...RIBBON.filter(t => t.tab === "View")] : RIBBON;
+  if (app.sketch && !TABS.some(t => t.tab === ribbonTab)) ribbonTab = SKETCH_TAB.tab;
+  if (!app.sketch && ribbonTab === SKETCH_TAB.tab) ribbonTab = "Architecture";
+  $("#ribbonTabs").innerHTML = TABS.map(t => `<button role="tab" type="button" aria-selected="${t.tab === ribbonTab}" data-tab="${t.tab}">${t.tab}</button>`).join("");
   $("#ribbonTabs").querySelectorAll("button").forEach(b => b.onclick = () => { ribbonTab = b.dataset.tab; app.prefs.ribbonTab = ribbonTab; app.savePrefs(); renderRibbon(); });
-  const tab = RIBBON.find(t => t.tab === ribbonTab) || RIBBON[0];
+  const tab = TABS.find(t => t.tab === ribbonTab) || TABS[0];
   $("#ribbonPanel").innerHTML = tab.groups.map(g => `<div class="sk-group"><div class="items">${g.items.map(it => {
     const tip = `${it.label}${it.key ? ` (${it.key})` : it.hint ? ` (${it.hint})` : ""}${it.soon ? ` · ${it.soon}` : ""}`;
     const pressed = it.tool && app.tool?.name === it.tool;
@@ -402,6 +440,7 @@ function renderOptions() {
 function renderProps() {
   const box = $("#props");
   const t = app.tool;
+  if (app.sketch && (t?.name === "boundary" || ![...app.selection].some(id => app.lookup(id)))) { box.innerHTML = sketchProps(app, esc); wireSketchProps(app); return; }
   if (t && t.name === "wall") {
     box.innerHTML = `<div class="ptype"><div class="row"><span>Basic Wall</span><button class="btn" type="button" id="pEditType">Edit Type</button></div>
       <select id="pType" aria-label="Wall type">${app.doc.wallTypes.map(w => `<option value="${esc(w.id)}"${w.id === t.typeId ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select></div>
@@ -446,6 +485,7 @@ function renderProps() {
     return;
   }
   const els = ids.map(app.lookup);
+  if (els.every(e => app.doc.floors.some(f => f.id === e.id))) { box.innerHTML = floorProps(app, ids, esc); wireFloorProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.doc.openings.some(o => o.id === e.id))) { box.innerHTML = openingProps(app, ids, esc); wireOpeningProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.isWall(e.id))) { box.innerHTML = wallProps(app, ids, esc); wireWallProps(app, ids, renderProps, typeId => wallTypeDialog(app, typeId, ui)); return; }
   const allLines = els.every(e => e.shape && e.kind);
@@ -484,6 +524,7 @@ function renderBrowser() {
 }
 
 function setLevel(id) {
+  if (app.sketch && id !== app.sketch.levelId) { app.toast("Finish or cancel the floor sketch before changing level."); renderBrowser(); return; }
   app.levelId = id; app.selection.clear(); app.view3d.invalidate();
   $("#planTitle").textContent = `Floor Plan: ${app.levelName()}`;
   renderBrowser(); app.toolChanged();
@@ -539,6 +580,7 @@ function deleteSelection() {
   app.commit("Delete", doc => {
     doc.lines = doc.lines.filter(l => !ids.includes(l.id));
     doc.walls = doc.walls.filter(w => !ids.includes(w.id));
+    doc.floors = doc.floors.filter(f => !ids.includes(f.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
     doc.tags = doc.tags.filter(t => !ids.includes(t.id) && doc.openings.some(o => o.id === t.hostId));
     doc.constraints = (doc.constraints || []).filter(k => !ids.includes(k.ref) && !ids.includes(k.el));
@@ -595,6 +637,10 @@ function pickContext(ev) {
 function gridStep() { const steps = [100, 500, 1000, 5000]; return steps.find(s => s * app.plan.s >= 30) || 5000; }
 
 canvas.addEventListener("contextmenu", e => e.preventDefault());
+canvas.addEventListener("dblclick", () => {
+  const h = app.hoverId;
+  if (app.tool.name === "select" && h && app.doc.floors.some(f => f.id === h)) startFloorSketch(app, h);
+});
 canvas.addEventListener("pointerdown", ev => {
   canvas.focus();
   canvas.setPointerCapture(ev.pointerId);
@@ -693,7 +739,7 @@ document.addEventListener("keydown", ev => {
     hideMenu();
     if (app.typed) { app.typed = ""; setPrompt(); return; }
     if (app.snapOverride) { app.snapOverride = null; setPrompt(); return; }
-    if (!app.tool.escape()) { if (app.tool.name !== "select") app.setTool("select"); }
+    if (!app.tool.escape()) { if (app.tool.name !== "select") app.setTool("select"); else if (app.sketch) app.toast("Choose Finish Edit Mode or Cancel Edit Mode to leave the sketch."); }
     app.toolChanged();
     return;
   }

@@ -72,6 +72,12 @@ export function levelElevation(doc, id) { return doc.levels.find(l => l.id === i
 
 export function wallHeights(doc, w) {
   const z0 = levelElevation(doc, w.baseLevelId) + (w.baseOffset || 0);
+  // Attach Top: the wall stops at the underside of a floor (or later a roof)
+  const fl = w.attachTopTo && (doc.floors || []).find(f => f.id === w.attachTopTo);
+  if (fl) {
+    const t = doc.floorTypes.find(x => x.id === fl.typeId) || doc.floorTypes[0];
+    return { z0, z1: levelElevation(doc, fl.levelId) + (fl.heightOffset || 0) - t.thickness };
+  }
   // Top Offset applies when the top is constrained to a level, as in Revit
   const z1 = w.topLevelId && doc.levels.some(l => l.id === w.topLevelId)
     ? levelElevation(doc, w.topLevelId) + (w.topOffset || 0)

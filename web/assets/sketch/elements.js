@@ -9,6 +9,7 @@ export const LINE_STYLES = {
   wide: { label: "Wide lines", px: 3.5, dash: null },
   hidden: { label: "Hidden lines", px: 1, dash: [6, 4] },
   centre: { label: "Centre lines", px: 1, dash: [14, 4, 2, 4] },
+  sketch: { label: "Sketch lines", px: 2, dash: null, hidden: true },
 };
 
 export const CATEGORY = { lines: "Lines", walls: "Walls", openings: "Doors and windows", floors: "Floors", roofs: "Roofs", components: "Components", dimensions: "Dimensions" };
@@ -17,18 +18,18 @@ export const CATEGORY = { lines: "Lines", walls: "Walls", openings: "Doors and w
 export const planViewId = levelId => `plan:${levelId}`;
 
 export function makeLine(kind, levelId, style, a, b) {
-  return { id: newId(kind === "detail" ? "dl" : "ml"), kind, levelId, viewId: kind === "detail" ? planViewId(levelId) : null, style, shape: "line", a: { ...a }, b: { ...b } };
+  return { id: newId(kind === "detail" ? "dl" : kind === "sketch" ? "sl" : "ml"), kind, levelId, viewId: kind !== "model" ? planViewId(levelId) : null, style, shape: "line", a: { ...a }, b: { ...b } };
 }
 
 export function makeArc(kind, levelId, style, arc) {
-  return { id: newId(kind === "detail" ? "dl" : "ml"), kind, levelId, viewId: kind === "detail" ? planViewId(levelId) : null, style, shape: "arc",
+  return { id: newId(kind === "detail" ? "dl" : kind === "sketch" ? "sl" : "ml"), kind, levelId, viewId: kind !== "model" ? planViewId(levelId) : null, style, shape: "arc",
     c: { ...arc.c }, r: arc.r, start: arc.start, sweep: arc.sweep };
 }
 
 /** Lines visible in a plan view: model lines on its level, detail lines drawn in it. */
 export function linesInPlan(doc, levelId) {
   const vid = planViewId(levelId);
-  return doc.lines.filter(l => (l.kind === "model" && l.levelId === levelId) || (l.kind === "detail" && l.viewId === vid));
+  return doc.lines.filter(l => (l.kind === "model" && l.levelId === levelId) || ((l.kind === "detail" || l.kind === "sketch") && l.viewId === vid));
 }
 
 export function lineCurve(l) {
@@ -106,6 +107,7 @@ export function moveGrip(el, key, p) {
 export function translate(el, d) {
   if (el.shape === "line") { el.a = G.add(el.a, d); el.b = G.add(el.b, d); }
   else if (el.shape === "arc") el.c = G.add(el.c, d);
+  else if (Array.isArray(el.boundary)) el.boundary.forEach(c => translate(c, d)); // floors
 }
 
 /** Sets a straight line's length by moving its end (b), keeping direction. */

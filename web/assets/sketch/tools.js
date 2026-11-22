@@ -18,8 +18,9 @@ const mmText = v => String(Math.round(v));
 
 // ------------------------------------------------------------------ Select / Modify
 /** Copies of the editable collections, so a live drag preview can be undone exactly. */
-function snapshot(doc) { return { walls: JSON.stringify(doc.walls), lines: JSON.stringify(doc.lines), openings: JSON.stringify(doc.openings) }; }
-function restore(doc, snap) { doc.walls = JSON.parse(snap.walls); doc.lines = JSON.parse(snap.lines); doc.openings = JSON.parse(snap.openings); }
+const DRAGGED = ["walls", "lines", "openings", "floors"];
+function snapshot(doc) { return Object.fromEntries(DRAGGED.map(k => [k, JSON.stringify(doc[k])])); }
+function restore(doc, snap) { for (const k of DRAGGED) doc[k] = JSON.parse(snap[k]); }
 /** Dragging a straight wall's end also drags the ends of walls joined there. */
 function gripEdit(app, doc, id, key, p) {
   const w = doc.walls.find(x => x.id === id);
@@ -156,8 +157,8 @@ export class LineTool {
   options() {
     const o = [
       { type: "seg", label: "Draw", items: Object.entries(DRAW_MODES).map(([k, v]) => ({ key: k, title: v.label, icon: v.icon, on: this.mode === k })), onPick: k => { this.mode = k; this.pts = []; this.savePrefs(); this.app.toolChanged(); } },
-      { type: "text", text: DRAW_MODES[this.mode].label, cls: "modename" },
-      { type: "select", label: "Line style", value: this.style, items: Object.entries(LINE_STYLES).map(([k, v]) => ({ value: k, label: v.label })), onChange: v => { this.style = v; this.savePrefs(); } },
+      { type: "text", text: DRAW_MODES[this.mode]?.label || "", cls: "modename" },
+      { type: "select", label: "Line style", value: this.style, items: Object.entries(LINE_STYLES).filter(([, v]) => !v.hidden).map(([k, v]) => ({ value: k, label: v.label })), onChange: v => { this.style = v; this.savePrefs(); } },
     ];
     if (this.mode === "line") o.push({ type: "check", label: "Chain", value: this.chain, onChange: v => { this.chain = v; this.savePrefs(); } });
     if (this.mode === "line" || this.mode === "pick") o.push({ type: "number", label: "Offset", value: this.offset, step: 50, onChange: v => { this.offset = v || 0; this.savePrefs(); this.app.redraw(); } });

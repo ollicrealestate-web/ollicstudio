@@ -5,7 +5,7 @@ import { LINE_STYLES, linesInPlan, grips, bbox, unionBox } from "./elements.js";
 export const COLORS = {
   bg: "#0c0c0e", gridMinor: "#1a1a20", gridMajor: "#2a2a32", axis: "#3a3a46",
   line: "#e8e8ec", detail: "#c9c9d2", underlay: "#4a4a54",
-  sel: "#3b82f6", hover: "#7fb0ff", snap: "#fbbf24", preview: "#ff4a4f", dim: "#5ea0ff",
+  sel: "#3b82f6", hover: "#7fb0ff", snap: "#fbbf24", preview: "#ff4a4f", dim: "#5ea0ff", sketch: "#ff4fd8",
 };
 
 export class PlanView {
@@ -69,9 +69,15 @@ export class PlanView {
     this.hits = [];
     this.drawGrid();
     const app = this.app;
+    // in sketch mode the model is shown grey behind the magenta boundary
+    const sketching = !!app.sketch;
+    if (sketching) this.ctx.globalAlpha = 0.32;
     app.drawUnderlay?.(this);
-    for (const l of linesInPlan(app.doc, app.levelId)) this.drawLine(l, this.colorFor(l.id, l.kind === "detail" ? COLORS.detail : COLORS.line));
     app.drawModel?.(this);
+    const lines = linesInPlan(app.doc, app.levelId);
+    for (const l of lines) if (l.kind !== "sketch") this.drawLine(l, this.colorFor(l.id, l.kind === "detail" ? COLORS.detail : COLORS.line));
+    this.ctx.globalAlpha = 1;
+    for (const l of lines) if (l.kind === "sketch") this.drawLine(l, app.sketch?.bad?.has(l.id) ? "#ff3b3b" : this.colorFor(l.id, COLORS.sketch));
     // selection grips
     for (const id of app.selection) {
       const el = app.lookup(id);
