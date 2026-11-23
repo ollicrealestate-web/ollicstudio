@@ -28,32 +28,41 @@ export function slopeLabel(rad, style = "deg") {
  * poly: simple polygon (any orientation), slopes[i]: slope of edge i (poly[i] -> poly[i+1]) in radians, or null for no slope.
  * Returns { faces: [{ edge, pts: [{x,y,z}] }], arcs: [{ a:{x,y,z}, b:{x,y,z}, from }], maxZ }  (z measured up from the eaves).
  */
-export function skeleton(polyIn, slopesIn) {
+/**
+ * `startsIn[i]` (optional, 0 or below): the height at which edge i's slope begins. An edge with an overhang begins
+ * lower (its eave hangs below the plate), so it waits, upright, until the roof reaches that height elsewhere.
+ */
+export function skeleton(polyIn, slopesIn, startsIn) {
   let poly = polyIn.map(p => ({ x: p.x, y: p.y })), slopes = [...slopesIn];
   const flipped = G.polygonArea(poly) < 0;
   const n = poly.length;
-  if (flipped) { poly = [...poly].reverse(); slopes = Array.from({ length: n }, (_, i) => slopesIn[(n - 2 - i + n) % n]); } // counter-clockwise; edge i becomes n-2-i
+  let starts = startsIn ? [...startsIn] : poly.map(() => 0);
+  if (flipped) { poly = [...poly].reverse(); slopes = Array.from({ length: n }, (_, i) => slopesIn[(n - 2 - i + n) % n]); starts = Array.from({ length: n }, (_, i) => (startsIn ? startsIn[(n - 2 - i + n) % n] : 0)); } // counter-clockwise; edge i becomes n-2-i
   const scale = Math.max(1, ...poly.map(p => Math.max(Math.abs(p.x), Math.abs(p.y))));
   const TOL = 1e-6 * scale + 1e-4; // mm: points closer than this are the same point
   const E = poly.map((p, i) => {
     const q = poly[(i + 1) % n], d = G.norm(G.sub(q, p));
     const s = slopes[i] == null ? 0 : 1 / Math.tan(slopes[i]); // a gable (no slope) does not move
-    return { i: flipped ? (n - 2 - i + n) % n : i, P: p, n: G.perp(d), d, s, gable: slopes[i] == null };
+    return { i: flipped ? (n - 2 - i + n) % n : i, P: p, n: G.perp(d), d, s, h: slopes[i] == null ? Infinity : Math.min(0, starts[i] || 0), sp: 0, gable: slopes[i] == null };
   });
   // where the two edges' offset lines meet, per unit of height
   const velocity = (a, b) => {
     const A = E[a], B = E[b], det = A.n.x * B.n.y - A.n.y * B.n.x;
-    if (Math.abs(det) < 1e-9) return G.mul(A.n, A.s); // in line: move with the edge
-    return { x: (A.s * B.n.y - B.s * A.n.y) / det, y: (B.s * A.n.x - A.s * B.n.x) / det };
+    if (Math.abs(det) < 1e-9) return G.mul(A.n, A.sp); // in line: move with the edge
+    return { x: (A.sp * B.n.y - B.sp * A.n.y) / det, y: (B.sp * A.n.x - A.sp * B.n.x) / det };
   };
   const faces = [], arcs = [];
-  let t = 0;
+  // the roof starts at its lowest eave; each edge moves in once the roof reaches its own eave height
+  let t = Math.min(0, ...E.filter(e => !e.gable).map(e => e.h));
+  const activate = () => { let changed = false; for (const e of E) { const sp = !e.gable && t >= e.h - 1e-9 ? e.s : 0; if (sp !== e.sp) { e.sp = sp; changed = true; } } return changed; };
+  const offset = e => (e.sp > 0 ? e.s * (t - e.h) : 0); // how far the edge's line has moved in
+  activate();
   const mk = (p, a, b) => ({ p: { ...p }, a, b, v: velocity(a, b), start: { ...p, z: t } });
   const isReflex = (L, k) => G.cross(E[L[k].a].d, E[L[k].b].d) < -1e-9;
   const finish = v => { if (G.dist(v.start, v.p) > TOL || Math.abs(v.start.z - t) > TOL) arcs.push({ a: v.start, b: { ...v.p, z: t }, from: v.reflex ? "valley" : "hip" }); };
   const ridge = (a, b) => { if (G.dist(a, b) > TOL) arcs.push({ a: { ...a, z: t }, b: { ...b, z: t }, from: "ridge" }); };
   const pushQuad = (edge, pts) => {
-    if (E[edge].gable || !(E[edge].s > 0)) return;
+    if (E[edge].gable || !(E[edge].sp > 0)) return;
     const q = pts.filter((p, k) => G.dist(p, pts[(k + 1) % pts.length]) > TOL || Math.abs(p.z - pts[(k + 1) % pts.length].z) > TOL);
     if (q.length >= 3 && Math.abs(G.polygonArea(q)) > 1e-6) faces.push({ edge: E[edge].i, pts: q });
   };
@@ -133,7 +142,7 @@ export function skeleton(polyIn, slopesIn) {
         for (let j = 0; j < N; j++) {
           const X = L[j], Y = L[(j + 1) % N];
           if (X === V || Y === V) continue;
-          const e = E[X.b], dist = G.dot(G.sub(V.p, e.P), e.n) - e.s * t, rate = G.dot(V.v, e.n) - e.s;
+          const e = E[X.b], dist = G.dot(G.sub(V.p, e.P), e.n) - offset(e), rate = G.dot(V.v, e.n) - e.sp;
           if (rate > -1e-12 || dist < -TOL) continue;
           const tau = -dist / rate;
           if (!(tau > 0) || tau >= best) continue;
@@ -142,6 +151,7 @@ export function skeleton(polyIn, slopesIn) {
         }
       }
     }
+    for (const e of E) if (!e.gable && e.h > t + 1e-9) best = Math.min(best, e.h - t); // an edge starts moving in
     if (!isFinite(best)) break; // nothing more happens
     // ---- move everything up to it, laying the roof faces swept on the way
     const t1 = t + best;
@@ -151,6 +161,7 @@ export function skeleton(polyIn, slopesIn) {
       for (let k = 0; k < L.length; k++) { const A = L[k], B = L[(k + 1) % L.length]; pushQuad(A.b, [{ ...old[k], z: t }, { ...old[(k + 1) % L.length], z: t }, { ...B.p, z: t1 }, { ...A.p, z: t1 }]); }
     }
     t = t1;
+    activate();
     loops = loops.flatMap(clean);
   }
   // what is left has edges that never move (all gables): the top of the roof
@@ -255,11 +266,10 @@ function footprintGeometry(doc, r) {
   } else if (slopes.every(s => s == null)) {
     faces = [{ pts: poly.map(p => ({ ...p, z: base })), slope: 0 }];
   } else {
-    const sk = skeleton(poly, slopes);
-    // the slope is measured from the plate line (the wall face), so the overhang hangs below the base
-    faces = sk.faces.map(f => { const drop = (overhangs[f.edge] || 0) * Math.tan(slopes[f.edge]); return { pts: f.pts.map(p => ({ ...p, z: p.z + base - drop })), slope: slopes[f.edge], edge: f.edge }; });
-    const drop0 = Math.max(0, ...poly.map((_, i) => (slopes[i] ? (overhangs[i] || 0) * Math.tan(slopes[i]) : 0)));
-    lines = sk.arcs.map(a => ({ a: { ...a.a, z: a.a.z + base - drop0 }, b: { ...a.b, z: a.b.z + base - drop0 }, kind: a.from }));
+    // the slope is measured from the plate line (the wall face): an edge's eave hangs below the base by its overhang
+    const sk = skeleton(poly, slopes, poly.map((_, i) => (slopes[i] ? -(overhangs[i] || 0) * Math.tan(slopes[i]) : 0)));
+    faces = sk.faces.map(f => ({ pts: f.pts.map(p => ({ ...p, z: p.z + base })), slope: slopes[f.edge], edge: f.edge }));
+    lines = sk.arcs.map(a => ({ a: { ...a.a, z: a.a.z + base }, b: { ...a.b, z: a.b.z + base }, kind: a.from }));
   }
   faces.forEach(f => { f.plane = planeOf(f.pts); f.thick = T / Math.cos(f.slope || 0); });
   // two cuts at the eaves: a plumb fascia of the given depth, then a level soffit
