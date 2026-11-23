@@ -187,3 +187,16 @@ test("the T-shaped plan that left a gap: one roof, no hole", () => {
   near(sk.faces.reduce((s, f) => s + area(f), 0), Math.abs(G.polygonArea(T)), 1e-3);
   assert.equal(sk.arcs.filter(a => a.from === "valley").length, 2);
 });
+
+test("roof with different overhangs per edge has no step or gap where faces meet", async () => {
+  const { newProject } = await import("../../web/assets/sketch/model.js");
+  const doc = newProject();
+  const L = [[0, 0], [10000, 0], [10000, 4000], [6000, 4000], [6000, 9000], [0, 9000]].map(([x, y]) => G.P(x, y));
+  for (const ov of [() => 600, i => (i === 2 ? 0 : 600), i => i * 150]) {
+    const r = R.makeRoof(doc, { baseLevelId: "lv-1", baseOffset: 3000, boundary: L.map((p, i) => ({ shape: "line", a: p, b: L[(i + 1) % L.length], slope: deg(30), overhang: ov(i) })) });
+    const g = R.roofGeometry(doc, r); let worst = 0;
+    const vs = g.faces.flatMap((f, i) => f.pts.map(p => ({ p, i })));
+    for (const a of vs) for (const b of vs) if (a.i !== b.i && G.dist(a.p, b.p) < 0.5) worst = Math.max(worst, Math.abs(a.p.z - b.p.z));
+    near(worst, 0, 0.5, "height step between faces");
+  }
+});

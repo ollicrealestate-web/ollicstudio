@@ -69,3 +69,4 @@ Branch `sketch`. Page `web/sketch.html`, code `web/assets/sketch/*.js`, saving `
 1. **Owner:** run migrations `20261024000011_ai_walkthroughs.sql` (done 24 Oct) and `20261024000012_project_look.sql` in Supabase; add `RUNWAY_API_KEY` in Render (walkthroughs); `APS_CLIENT_ID` and `APS_CLIENT_SECRET` for Revit; `ANTHROPIC_API_KEY` for Claude's shot plans, prompts and checks. Supabase's free plan takes uploads up to 50 MB.
 2. Next for consistency: material map and hero for walkthrough shots and construction stages; Claude counts floors and openings against the model; per-frame video checks; then construction sequences and MEP views from the model (guides per building stage, then the same AI pipeline).
 3. Payments (Paystack) so paid options can be sold.
+| Roof: mixed overhangs | Done | Each roof edge starts its slope at its own eave height, so edges with different overhangs meet with no step or gap. |
