@@ -21,6 +21,8 @@ class Group(BaseModel):
     hex: str = Field(default="#cccccc", pattern=r"^#[0-9a-fA-F]{6}$")
     map: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
     types: list[str] = Field(default_factory=list, max_length=6)
+    name: str | None = Field(default=None, max_length=80)        # the library material it shows in the 3D preview
+    finish: str | None = Field(default=None, max_length=300)
 
 
 class GroupsIn(BaseModel):
@@ -113,15 +115,15 @@ def _read_job(state, user: CurrentUser, project_id: str, view: dict, mats_file: 
             pass
         look = current_look(repo.get_project(user, project_id) or {})     # the architect may have edited meanwhile
         look = apply_suggestions(look, out.get("answer") or {})
-        notes = str((out.get("answer") or {}).get("notes") or "Claude has read the materials.")[:300]
+        notes = str((out.get("answer") or {}).get("notes") or "Ollic AI has read the materials.")[:300]
     except (PromptWriterFailed, KeyError, TypeError, ValueError) as exc:
         log.warning("reading materials failed: %s", exc)
         look = current_look(repo.get_project(user, project_id) or {})
-        notes = "Claude could not read the materials this time. Press “Ask Claude to read the materials again”, or name them yourself."
+        notes = "Ollic AI could not read the materials this time. Press “Ask Ollic AI to read the materials again”, or name them yourself."
     except Exception:
         log.exception("reading materials crashed")
         look = current_look(repo.get_project(user, project_id) or {})
-        notes = "Claude could not read the materials this time. Name them yourself, or try again."
+        notes = "Ollic AI could not read the materials this time. Name them yourself, or try again."
     look.reading, look.read_notes = None, notes
     try:
         repo.update_project(user, project_id, {"look": look.model_dump(mode="json")})
@@ -139,7 +141,7 @@ def suggest_look(project_id: uuid.UUID, body: SuggestIn, request: Request, user:
     project = _owned_project(request, user, project_id)
     writer = getattr(request.app.state, "prompt_writer", None)
     if writer is None or not hasattr(writer, "ask_json"):
-        raise HTTPException(503, {"code": "not_configured", "reason": "Reading materials needs Claude, which is not connected yet. Name them yourself for now."})
+        raise HTTPException(503, {"code": "not_configured", "reason": "Reading materials needs Ollic AI, which is not connected yet. Name them yourself for now."})
     repo = _repo(request)
     files = []
     for fid in (body.view_file_id, body.material_file_id):
@@ -185,7 +187,7 @@ def scene_from_image(project_id: uuid.UUID, body: SceneFromIn, request: Request,
     project = _owned_project(request, user, project_id)
     writer = getattr(request.app.state, "prompt_writer", None)
     if writer is None or not hasattr(writer, "ask_json"):
-        raise HTTPException(503, {"code": "not_configured", "reason": "Copying a scene needs Claude, which is not connected yet. Pick a preset scene for now."})
+        raise HTTPException(503, {"code": "not_configured", "reason": "Copying a scene needs Ollic AI, which is not connected yet. Pick a preset scene for now."})
     repo = _repo(request)
     f = repo.get_source_file(user, str(body.file_id))
     if not f or f.get("owner_id") != user.id or f.get("project_id") != str(project_id) or f.get("detected_type") not in ("png", "jpeg"):
@@ -194,11 +196,11 @@ def scene_from_image(project_id: uuid.UUID, body: SceneFromIn, request: Request,
     try:
         out = writer.ask_json(SCENE_SYSTEM, [{"type": "text", "text": "The reference picture:"}, _image_block(img)], max_tokens=1500, timeout=90)
     except (PromptWriterFailed, KeyError, TypeError) as exc:
-        raise HTTPException(502, {"code": "read_failed", "reason": "Claude could not read that picture this time. Try again in a moment."}) from exc
+        raise HTTPException(502, {"code": "read_failed", "reason": "Ollic AI could not read that picture this time. Try again in a moment."}) from exc
     a = out.get("answer") or {}
     recipe = " ".join(str(a.get("recipe") or "").split())[:1500]
     if len(recipe) < 30:
-        raise HTTPException(502, {"code": "read_failed", "reason": "Claude could not describe that scene. Try another picture."})
+        raise HTTPException(502, {"code": "read_failed", "reason": "Ollic AI could not describe that scene. Try another picture."})
     try:
         repo.create_usage_event(user, {"project_id": str(project_id), "provider": "anthropic", "model": out.get("model") or getattr(writer, "model", "claude"),
                                        "operation": "vision_read", "cost_usd": str(out["cost_usd"]) if out.get("cost_usd") is not None else None,

@@ -13,7 +13,7 @@ IMAGE_ENGINES = {
     "vs": {"name": "Ollic VS", "blurb": "Precise edits that keep the building exactly as it is; quick style, material and lighting changes.",
            "price": "about $0.04 an image", "model": "fal-ai/flux-pro/kontext"},
     # renders only from the architect's model: the model's exact depth drives the picture
-    "exact": {"name": "Ollic Exact", "blurb": "Drawn on your model's exact depth, so the building's shape and the camera come from the model; Claude checks it and the details are corrected. For renders from your model.",
+    "exact": {"name": "Ollic Exact", "blurb": "Drawn on your model's exact depth, so the building's shape and the camera come from the model; Ollic AI checks it and the details are corrected. For renders from your model.",
               "price": "about $0.04 an image", "model": "fal-ai/flux-control-lora-depth", "model_only": True},
 }
 VIDEO_ENGINES = {
@@ -26,9 +26,9 @@ VIDEO_ENGINES = {
 }
 # AI walkthroughs from the architect's model: an exact guide video becomes a photoreal shot
 FILM_ENGINES = {
-    "exact": {"name": "Ollic Path Exact", "blurb": "Filmed on your model's own depth along the camera move; the first and last frames are approved renders in your project look, and Claude checks the shot. 4 to 10 s a shot.",
+    "exact": {"name": "Ollic Path Exact", "blurb": "Filmed on your model's own depth along the camera move; the first and last frames are approved renders in your project look, and Ollic AI checks the shot. 4 to 10 s a shot.",
               "price": "about $0.10 a second, plus two renders"},
-    "seedance": {"name": "Ollic Cinema", "blurb": "Cinematic, photoreal film: your model's camera move is the authority for the camera and the building, your approved renders set the look, and Claude checks the shot. 4 to 10 s a shot.",
+    "seedance": {"name": "Ollic Cinema", "blurb": "Cinematic, photoreal film: your model's camera move is the authority for the camera and the building, your approved renders set the look, and Ollic AI checks the shot. 4 to 10 s a shot.",
                  "price": "about $0.30 a second, plus two renders"},
     "path": {"name": "Ollic Path", "blurb": "Follows your camera move and your building closely; best for walkthroughs and fly-arounds, up to 10 s a shot.",
              "price": "about $0.28 a second"},

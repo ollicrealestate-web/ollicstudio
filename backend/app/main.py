@@ -23,7 +23,7 @@ from .aps import AutodeskModels
 from .runway import RunwayVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
-from .routes import animation, cinematic, films, look, materials, models, projects, renders, sketches, videos
+from .routes import animation, cameras, cinematic, films, look, materials, models, projects, renders, sketches, videos
 from .routes import sketch_ai as sketch_ai_routes
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
@@ -118,6 +118,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.include_router(renders.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
     app.include_router(materials.router, prefix="/api")
+    app.include_router(cameras.router, prefix="/api")
     app.include_router(films.router, prefix="/api")
     app.include_router(look.router, prefix="/api")
     app.include_router(videos.router, prefix="/api")

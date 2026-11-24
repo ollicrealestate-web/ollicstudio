@@ -21,8 +21,27 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
 import { matchMaterial } from "./materials/match.js";
 import { materialById } from "./materials/library.js";
-import { materialLook, addMetricUVs, setupLooks, loadSources, findMaterial } from "./materials/look.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources, findMaterial, averageColour } from "./materials/look.js";
 import { PLACES, PRESETS, sunAngles, momentAt, afternoonAt, sunVector, sunLight } from "./materials/light.js";
+import { solve, forOutput, anglesOf, presetSettings, SHAPES, PRESETS as CAMERAS, describe as describeCamera } from "./camera.js";
+
+/**
+ * A camera whose picture can slide (an architect's shift lens): the camera stays level, so vertical lines stay
+ * straight, and the picture moves up, down or sideways. shift: [across, up] as fractions of the picture.
+ * Everything that draws (the view, every guide, Photo mode, the films, picking) reads the same projection.
+ */
+class ShiftCamera extends THREE.PerspectiveCamera {
+  constructor(...a) { super(...a); this.shift = [0, 0]; }
+  updateProjectionMatrix() {
+    super.updateProjectionMatrix();
+    if (this.shift && (this.shift[0] || this.shift[1])) {
+      const e = this.projectionMatrix.elements;
+      e[8] -= 2 * this.shift[0]; e[9] -= 2 * this.shift[1];
+      this.projectionMatrixInverse.copy(this.projectionMatrix).invert();
+    }
+  }
+  copy(src, recursive) { super.copy(src, recursive); this.shift = [...(src.shift || [0, 0])]; return this; }
+}
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
 const SOLID_FOR_WALKING = new Set(["IfcWall", "IfcWallStandardCase", "IfcColumn", "IfcCurtainWall", "IfcRailing", "IfcWindow", "IfcPlate", "IfcMember", "IfcBuildingElementProxy", "IfcStair", "IfcStairFlight", "IfcFurnishingElement", "IfcFurniture"]);
@@ -43,7 +62,7 @@ export function createViewer(host, { onSelect } = {}) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#c9d3dc");
-  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+  const camera = new ShiftCamera(45, 1, 0.1, 1000);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
@@ -231,8 +250,8 @@ export function createViewer(host, { onSelect } = {}) {
     const w = host.clientWidth || 1, h = host.clientHeight || 1;
     renderer.setSize(w, h, false);
     composer.setSize(w, h); ao.setSize(w * renderer.getPixelRatio(), h * renderer.getPixelRatio());
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+    applyOutput(w / h);
+    drawFrame();
     redraw();
   }
   new ResizeObserver(resize).observe(host);
@@ -264,6 +283,7 @@ export function createViewer(host, { onSelect } = {}) {
       const lib = cls === "space" ? null : materialById(mat.id);
       o.userData.lookOpts = { tint: mat.tint, opacity: opacity < 0.99 ? opacity : null };
       o.userData.part = single ? 0 : (o.parent?.children || [o]).filter(c => c.isMesh).indexOf(o);
+      o.userData.parts = single ? 1 : (o.parent?.children || [o]).filter(c => c.isMesh).length;
       let look = lib && materialLook(mat.id, { ...o.userData.lookOpts, quality });
       if (look) addMetricUVs(o.geometry);
       else { look = lookFor(cls, srcColor, opacity); if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres); }
@@ -292,7 +312,9 @@ export function createViewer(host, { onSelect } = {}) {
     groundY = first.length ? Math.min(...first.map(e => e.geometry.boundingBox.min.y)) : new THREE.Box3().setFromObject(model).min.y;
     ground.position.y = groundY - 0.02;
     frameBox = buildingBox(elements);
+    pic = null; camSet = null; camera.shift = [0, 0];
     frameAll();
+    detectFront(); placeArrow(); drawFrame();
     buildSite();
     if (!classicOn) { ground.material = realGround(); applyLight({ envNow: true }); }
     apply();
@@ -455,6 +477,7 @@ export function createViewer(host, { onSelect } = {}) {
     ptr.last = null;
     if (moved) return;
     const hit = hitAt(e);
+    if (frontPick && hit) { const f = frontPick; frontPick = null; f(hit); return; }
     select(hit ? hit.object : null, hit);
   });
   renderer.domElement.addEventListener("dblclick", e => {
@@ -489,6 +512,7 @@ export function createViewer(host, { onSelect } = {}) {
   }
 
   function enterWalk() {
+    if (!interiorSetting) { pic = null; camSet = null; camera.shift = [0, 0]; drawFrame(); }
     mode = "walk"; controls.enabled = false; fly = null; applyHemi();
     camera.fov = 70; camera.near = 0.05; camera.far = 3000; camera.updateProjectionMatrix();
     renderer.clippingPlanes = [];
@@ -673,6 +697,156 @@ export function createViewer(host, { onSelect } = {}) {
   function setLook(o, m) {
     if (o._look) { o._look = m; o.material = glowing(m); } else o.material = m;
   }
+
+  // ---------------------------------------------------------------- camera angles (see camera.js)
+  // frame: the set picture (its shape, its angle of view up and down, its shift), or null for the free 3D view.
+  // camSet: the settings it came from (a ready-made angle, or the architect's own numbers).
+  let pic = null, camSet = null, front = [0, 1], frontFrom = "guessed", entrance = null, frontPick = null, interiorSetting = false, onFront = null;
+  let frameGuides = { thirds: false, centre: false, horizon: false, safe: false }, lastPhotoCamera = null;
+  /** The camera drawn into a picture of the given shape (the canvas, or a guide): the set picture fits inside it. */
+  function applyOutput(outAspect) {
+    camera.aspect = outAspect;
+    // a set picture may be level (eye level: the camera looks straight across) or look up (a low hero angle)
+    controls.maxPolarAngle = pic ? Math.PI * 0.8 : Math.PI * 0.495;
+    if (pic) {
+      const h = 2 * Math.atan(Math.tan(pic.v * Math.PI / 360) * pic.aspect) * 180 / Math.PI;
+      const o = forOutput({ aspect: pic.aspect, v: pic.v, h, shift: pic.shift }, outAspect);
+      camera.fov = o.v; camera.shift = [...o.shift];
+    } else camera.shift = [0, 0];
+    camera.updateProjectionMatrix();
+  }
+  const buildingHeight = () => (frameBox.isEmpty() ? 10 : Math.max(3, frameBox.max.y - groundY));
+  const shapeOf = s => SHAPES[s?.aspect] || (Number.isFinite(+s?.aspect) && +s?.aspect > 0 ? +s.aspect : 1.5);   // a named shape, or a picture's own
+  /** Sets the camera from settings (a ready-made angle and any changes): the view moves there at once. */
+  function setCamera(settings) {
+    if (frameBox.isEmpty()) return null;
+    const base = settings.preset && !settings.custom ? presetSettings(settings.preset, buildingHeight()) : {};
+    const st = { aspect: "3:2", ...base, ...settings };
+    if (st.interior) return interiorCamera(st);
+    if (mode === "walk") leaveWalk();
+    fly = null;
+    const c = solve(st, { box: { min: frameBox.min.toArray(), max: frameBox.max.toArray() }, ground: groundY, front, aspect: shapeOf(st), entrance });
+    camSet = st; lastSolve = { st, c };
+    pic = { aspect: shapeOf(st), v: c.v, shift: c.shift };
+    camera.up.set(0, 1, 0);
+    if (c.plan) camera.up.set(...(c.up || [0, 0, -1]));
+    camera.position.fromArray(c.position); controls.target.fromArray(c.target);
+    camera.near = Math.max(0.05, Math.min(0.5, c.distance / 300)); camera.far = Math.max(5000, c.distance * 40);
+    applyOutput(host.clientWidth / Math.max(1, host.clientHeight));
+    camera.lookAt(controls.target); controls.update();
+    drawFrame(); redraw();
+    return cameraInfo(c);
+  }
+  let lastSolve = null;   // the last set camera's worked-out position (its distance is read back by the panel)
+  function cameraInfo(c = camSet && lastSolve?.st === camSet ? lastSolve.c : null) {
+    const a = pic ? anglesOf(camSet?.lens || 35, pic.aspect) : null;
+    return { settings: camSet ? { ...camSet } : null, aspect: pic?.aspect || null, angles: a, shift: pic ? [...pic.shift] : [0, 0], front: [...front], frontFrom,
+      buildingHeight: +buildingHeight().toFixed(2), height: +(camera.position.y - groundY).toFixed(3), distance: c ? +c.distance.toFixed(2) : null,
+      words: camSet ? describeCamera(camSet, buildingHeight()) : null };
+  }
+  /** Inside: one-point (square to the walls) or two-point (45 degrees), level, at the set height, with the set lens. */
+  function interiorCamera(st) {
+    interiorSetting = true;
+    try { if (mode !== "walk") { const r = enterWalk(); if (r && r.error) return { error: r.error }; } }
+    finally { interiorSetting = false; }
+    const f = Math.atan2(-front[0], -front[1]);           // the yaw that looks toward the back (across the house)
+    const snap = Math.round((yaw - f) / (Math.PI / 2)) * (Math.PI / 2) + f;
+    yaw = snap + (st.interior === "two" ? Math.PI / 4 : 0); pitch = 0;
+    camera.position.y = feet + (st.height ?? 1.2);
+    camSet = st;
+    const a = anglesOf(st.lens || 18, shapeOf(st));
+    pic = { aspect: shapeOf(st), v: a.v, shift: [0, 0] };
+    applyOutput(host.clientWidth / Math.max(1, host.clientHeight)); aim(); drawFrame();
+    return cameraInfo();
+  }
+  /** Back to the free 3D view (no set picture). */
+  function freeCamera() { pic = null; camSet = null; camera.up.set(0, 1, 0); camera.fov = 45; applyOutput(camera.aspect); drawFrame(); redraw(); }
+
+  // where the front is: the main entrance on the ground floor, else the model's own front (+z); the architect can say
+  function detectFront() {
+    entrance = null; front = [0, 1]; frontFrom = "guessed";
+    if (frameBox.isEmpty()) return;
+    const b = frameBox, boxOf = e => new THREE.Box3().setFromObject(e);
+    const doors = elements.filter(e => /IfcDoor/.test(e.userData.ifcType || "") && e.userData.ifcType !== "IfcSpace").map(e => ({ e, b: boxOf(e) })).filter(d => !d.b.isEmpty());
+    if (!doors.length) return;
+    const low = Math.min(...doors.map(d => d.b.min.y));
+    const ground = doors.filter(d => d.b.min.y < low + 1.5);
+    let best = null;
+    for (const d of ground) {
+      const c = d.b.getCenter(new THREE.Vector3());
+      const sides = [[b.min.x - c.x, [-1, 0]], [c.x - b.max.x, [1, 0]], [b.min.z - c.z, [0, -1]], [c.z - b.max.z, [0, 1]]].map(([gap, dir]) => ({ gap: Math.abs(gap), dir }));
+      const side = sides.sort((x, y) => x.gap - y.gap)[0];
+      const named = /main|entrance|entry|front/i.test(`${d.e.userData.name || ""} ${d.e.userData.predefined || ""}`) ? -0.6 : 0;
+      const wide = -(d.b.max.x - d.b.min.x + d.b.max.z - d.b.min.z) * 0.05;   // a wider door is more likely the entrance
+      const score = side.gap + named + wide;
+      if (!best || score < best.score) best = { score, dir: side.dir, c, d };
+    }
+    if (best && best.d.b.min.y < frameBox.min.y + Math.max(1.5, (frameBox.max.y - frameBox.min.y) * 0.3)) {
+      front = best.dir; frontFrom = "entrance"; entrance = [best.c.x, best.d.b.min.y + 1.1, best.c.z];
+    }
+  }
+  function setFront(dir, from = "you") {
+    const l = Math.hypot(dir[0], dir[1]) || 1;
+    front = [dir[0] / l, dir[1] / l]; frontFrom = from;
+    placeArrow();
+    if (camSet && !camSet.interior) setCamera(camSet);
+    onFront?.({ front: [...front], from });
+  }
+  // an arrow on the ground in front of the building, pointing out of its front
+  const frontArrow = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-0.5, 0), new THREE.Vector2(0.5, 0), new THREE.Vector2(0.5, 1.2), new THREE.Vector2(1.1, 1.2), new THREE.Vector2(0, 2.4), new THREE.Vector2(-1.1, 1.2), new THREE.Vector2(-0.5, 1.2)])),
+    new THREE.MeshBasicMaterial({ color: "#b3261e", side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.9 }));
+  frontArrow.visible = false; frontArrow.renderOrder = 10; scene.add(frontArrow);
+  function placeArrow() {
+    if (frameBox.isEmpty()) return;
+    const b = frameBox, c = b.getCenter(new THREE.Vector3()), half = Math.abs(front[0]) > 0.5 ? (b.max.x - b.min.x) / 2 : (b.max.z - b.min.z) / 2;
+    const k = Math.max(1, buildingHeight() / 8);
+    frontArrow.scale.setScalar(k);
+    frontArrow.position.set(c.x + front[0] * (half + 1.5 * k), groundY + 0.05, c.z + front[1] * (half + 1.5 * k));
+    frontArrow.rotation.set(-Math.PI / 2, 0, Math.atan2(-front[0], front[1]));
+    redraw();
+  }
+
+  // the set picture's outline over the view, and the framing guides (thirds, centre, horizon, safe margin)
+  const frameEl = document.createElement("div");
+  frameEl.className = "cam-frame"; frameEl.setAttribute("aria-hidden", "true");
+  frameEl.style.cssText = "position:absolute;pointer-events:none;box-shadow:0 0 0 9999px rgba(10,12,16,.45);outline:1px solid rgba(255,255,255,.7);display:none;z-index:2";
+  host.style.overflow = "hidden"; if (getComputedStyle(host).position === "static") host.style.position = "relative";
+  host.append(frameEl);
+  function drawFrame() {
+    if (!pic || mode === "walk" && !camSet) { frameEl.style.display = "none"; return; }
+    const W = host.clientWidth, H = host.clientHeight, A = W / Math.max(1, H), a = pic.aspect;
+    const w = a >= A ? W : H * a, h = a >= A ? W / a : H;
+    Object.assign(frameEl.style, { display: "block", left: `${(W - w) / 2}px`, top: `${(H - h) / 2}px`, width: `${w}px`, height: `${h}px` });
+    const L = [];
+    const line = (x1, y1, x2, y2, dash = "") => L.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(255,255,255,.75)" stroke-width="1" ${dash ? `stroke-dasharray="${dash}"` : ""}/>`);
+    if (frameGuides.thirds) { line(w / 3, 0, w / 3, h); line(2 * w / 3, 0, 2 * w / 3, h); line(0, h / 3, w, h / 3); line(0, 2 * h / 3, w, 2 * h / 3); }
+    if (frameGuides.centre) { line(w / 2, 0, w / 2, h, "6 4"); line(0, h / 2, w, h / 2, "6 4"); }
+    if (frameGuides.safe) L.push(`<rect x="${w * 0.05}" y="${h * 0.05}" width="${w * 0.9}" height="${h * 0.9}" fill="none" stroke="rgba(255,255,255,.6)" stroke-dasharray="3 3"/>`);
+    if (frameGuides.horizon) {   // where a level line at the camera's height meets the picture
+      const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y = 0;
+      if (dir.lengthSq() > 1e-6) {
+        const p = camera.position.clone().addScaledVector(dir.normalize(), 1e4).project(camera);
+        const yIn = (1 - p.y) / 2 * H - (H - h) / 2;
+        if (yIn > -2 && yIn < h + 2) L.push(`<line x1="0" y1="${yIn}" x2="${w}" y2="${yIn}" stroke="#ffd166" stroke-width="1.5"/>`);
+      }
+    }
+    frameEl.innerHTML = (overlay.url ? `<img src="${overlay.url}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;opacity:${overlay.opacity}">` : "")
+      + (L.length ? `<svg width="${w}" height="${h}" style="position:absolute;inset:0">${L.join("")}</svg>` : "");
+  }
+  let overlay = { url: null, opacity: 0.5 };
+  /** The model's line drawing from the current camera, as pixels (for matching a picture). */
+  function linePixels(w, h) {
+    const pose = currentPose();
+    beginGuide("lines", w, h); guideFrame(pose);
+    const gl = renderer.getContext(), raw = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    endGuide();
+    const data = new Uint8ClampedArray(w * h * 4);   // top row first
+    for (let y = 0; y < h; y++) data.set(raw.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    return { data, width: w, height: h };
+  }
+  controls.addEventListener("change", () => { if (frameGuides.horizon) drawFrame(); });
+  controls.addEventListener("start", () => { if (camSet && !camSet.custom) camSet = { ...camSet, custom: true, preset: camSet.preset }; });
 
   // ---------------------------------------------------------------- materials the user sets (click to apply)
   // Each part is known by its element's GlobalId and its index among the element's parts ("2O2F...#1"), and one
@@ -878,23 +1052,38 @@ export function createViewer(host, { onSelect } = {}) {
   // near-identical colours (Revit models carry many) count as one material: each channel to steps of 24
   const q = hex => "#" + [1, 3, 5].map(i => Math.min(255, Math.round(parseInt(hex.slice(i, i + 2), 16) / 24) * 24).toString(16).padStart(2, "0")).join("");
   function materialKey(e) {
+    // a material the user set is its own material in the map (its class, colour and library id); everything else is
+    // keyed exactly as it always was (the reader's class and the model's colour), so those maps do not change
+    const a = e.userData.assigned, lib = a && findMaterial(a.id);
+    if (lib) return `${lib.cls}|${q(a.tint || averageColour(a.id))}|${a.id}`.slice(0, 80);
     return `${e.userData.cls || "paint"}|${q(e.userData.srcHex || "#cccccc")}`;
   }
   const MAX_MATERIALS = 24;
   /** The model's materials, largest first: key, class, the model's colour and its map colour. */
   function materialGroups() {
-    const area = new Map(), types = new Map();
+    const area = new Map(), types = new Map(), libs = new Map();
     for (const e of elements) {
       if (e.userData.ifcType === "IfcSpace" || e.userData.cls === "space") continue;
-      const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3();
-      area.set(k, (area.get(k) || 0) + sz.x * sz.y + sz.y * sz.z + sz.x * sz.z);
+      const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3(), A = sz.x * sz.y + sz.y * sz.z + sz.x * sz.z;
+      area.set(k, (area.get(k) || 0) + A);
+      const id = e.userData.assigned?.id || e.userData.mat?.id;   // which library material shows there, by area
+      if (id) { const l = libs.get(k) || new Map(); l.set(id, (l.get(id) || 0) + A); libs.set(k, l); }
       const t = types.get(k) || new Map(); t.set(e.userData.ifcType || "Element", (t.get(e.userData.ifcType || "Element") || 0) + 1); types.set(k, t);
     }
     const usedOn = k => [...(types.get(k) || new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t]) => t);
     // the main materials by size get their own map colour (chosen in key order, so it is the same in every view);
     // small ones are drawn grey and left out of the look
     const main = [...area.keys()].sort((a, b) => area.get(b) - area.get(a)).slice(0, MAX_MATERIALS).sort();
-    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k), types: usedOn(k) }));
+    // the library material each shows (when one covers most of it), so the AI is told "Travertine stone", not "stone"
+    const named = k => {
+      const l = [...(libs.get(k) || new Map()).entries()].sort((a, b) => b[1] - a[1])[0];
+      if (!l || l[1] < 0.6 * area.get(k)) return {};
+      const m = findMaterial(l[0]), user = k.split("|")[2] === l[0];
+      if (!m) return {};
+      const size = m.tile ? `${m.tile.w} x ${m.tile.h} mm ${m.cls === "tile" ? "tiles" : "units"}` : "";
+      return { lib: l[0], name: m.name, finish: [user ? "chosen in the 3D preview" : "", size].filter(Boolean).join("; ") };
+    };
+    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k), types: usedOn(k), ...named(k) }));
     return groups.sort((a, b) => b.area - a.area);
   }
   function mapMatFor(colour) {
@@ -923,7 +1112,8 @@ export function createViewer(host, { onSelect } = {}) {
     guide = { kind, owner, cam: { p: camera.position.clone(), q: camera.quaternion.clone(), fov: camera.fov, t: controls.target.clone() }, size: renderer.getSize(new THREE.Vector2()), pr: renderer.getPixelRatio(), aspect: camera.aspect, near: camera.near, far: camera.far,
       bg: scene.background, env: scene.environment, tone: renderer.toneMapping, sky: sky.visible, ground: ground.visible, groundMat: ground.material, mats: new Map() };
     owner = true; controls.enabled = false;
-    renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderer.setPixelRatio(1); renderer.setSize(w, h, false); applyOutput(w / h);
+    guide.arrow = frontArrow.visible; frontArrow.visible = false;
     const shown = elements.filter(e => e.visible && e.userData.ifcType !== "IfcSpace");
     elements.forEach(e => guide.mats.set(e, e.material));
     guide.vis = new Map(elements.map(e => [e, e.visible])); guide.clip = renderer.clippingPlanes;
@@ -949,7 +1139,15 @@ export function createViewer(host, { onSelect } = {}) {
   }
   /** Draws one guide frame (optionally from a pose) and returns the canvas holding it. */
   function guideFrame(pose) {
-    if (pose) { camera.position.fromArray(pose.position); camera.fov = pose.fov || camera.fov; camera.lookAt(new THREE.Vector3().fromArray(pose.target)); }
+    if (pose) {
+      // a pose with a set picture (lens, shape, shift) is drawn exactly as it shows in the view; others as before
+      if (guide && guide.frame === undefined) guide.frame = pic;
+      pic = pose.aspect ? { aspect: pose.aspect, v: pose.fov, shift: pose.shift || [0, 0] } : null;
+      camera.up.set(0, 1, 0); if (pose.up) camera.up.fromArray(pose.up);
+      camera.position.fromArray(pose.position);
+      if (pic) applyOutput(camera.aspect); else { camera.shift = [0, 0]; camera.fov = pose.fov || camera.fov; }
+      camera.lookAt(new THREE.Vector3().fromArray(pose.target));
+    }
     if (pose?.near) camera.near = pose.near;
     if (pose?.inside && guide && !guide.whole) {   // inside the house: every floor, wall and ceiling, no section cut
       guide.whole = { clip: renderer.clippingPlanes, vis: new Map(elements.map(e => [e, e.visible])) };
@@ -986,6 +1184,7 @@ export function createViewer(host, { onSelect } = {}) {
     sky.visible = guide.sky; ground.visible = guide.ground; ground.material = guide.groundMat; if (edgesGroup) edgesGroup.visible = false;
     renderer.setPixelRatio(guide.pr); camera.near = guide.near; camera.far = guide.far;
     camera.position.copy(guide.cam.p); camera.quaternion.copy(guide.cam.q); camera.fov = guide.cam.fov; controls.target.copy(guide.cam.t);
+    frontArrow.visible = guide.arrow; if (guide.frame !== undefined) pic = guide.frame;
     owner = guide.owner; controls.enabled = !owner && mode !== "walk";
     guide = null;
     if (classicOn && !owner) classicLight(false);
@@ -1006,13 +1205,16 @@ export function createViewer(host, { onSelect } = {}) {
         out.coverage = on / (s.width * s.height);
       }
     }
-    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map, types }) => ({ key, cls, hex, map, types }));
+    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map, types, name, finish, lib }) => ({ key, cls, hex, map, types, name, finish, lib }));
     endGuide();
     return out;
   }
   function currentPose() {
     const t = mode === "walk" ? camera.position.clone().add(forward()) : controls.target.clone();
-    return { mode: mode === "walk" ? "walk" : "orbit", position: camera.position.toArray(), target: t.toArray(), fov: camera.fov };
+    const p = { mode: mode === "walk" ? "walk" : "orbit", position: camera.position.toArray(), target: t.toArray(), fov: camera.fov };
+    // a set picture: its own angle of view, shape and shift (so a capture or a film shows exactly that picture)
+    if (pic) Object.assign(p, { fov: pic.v, aspect: pic.aspect, shift: [...pic.shift], ...(camera.up.y !== 1 ? { up: camera.up.toArray() } : {}), ...(camSet ? { camera: { ...camSet } } : {}) });
+    return p;
   }
   /** A pose part-way along a smooth path through several poses (t from 0 to 1). */
   function along(poses, t) {
@@ -1025,7 +1227,9 @@ export function createViewer(host, { onSelect } = {}) {
     return { position: P.getPoint(k).toArray(), target: T.getPoint(k).toArray(), fov: poses[i].fov + (poses[i + 1].fov - poses[i].fov) * f,
              ...(inside ? { inside: true } : {}), ...(poses[0].near ? { near: poses[0].near } : {}),
              ...(poses[0].build !== undefined ? { build: poses[0].build + (poses[poses.length - 1].build - poses[0].build) * t } : {}),
-             ...(poses[0].rise !== undefined ? { rise: poses[0].rise + (poses[poses.length - 1].rise - poses[0].rise) * t } : {}) };
+             ...(poses[0].rise !== undefined ? { rise: poses[0].rise + (poses[poses.length - 1].rise - poses[0].rise) * t } : {}),
+             // a set picture (Camera panel): its shape stays, its shift moves smoothly from one view to the next
+             ...(poses[0].aspect ? { aspect: poses[0].aspect, shift: [0, 1].map(j => (poses[i].shift?.[j] || 0) + ((poses[i + 1].shift?.[j] || 0) - (poses[i].shift?.[j] || 0)) * f) } : {}) };
   }
   /** The front door: the door on the ground floor nearest the outside, and the way into the house through it. */
   function entryPath() {
@@ -1108,9 +1312,13 @@ export function createViewer(host, { onSelect } = {}) {
   /** Shows a pose in the live view (for previewing a path). */
   function showPose(p) {
     if (mode === "walk") leaveWalk();
-    camera.position.fromArray(p.position); controls.target.fromArray(p.target); camera.fov = p.fov || 45;
+    camera.up.set(0, 1, 0); if (p.up) camera.up.fromArray(p.up);
+    camera.position.fromArray(p.position); controls.target.fromArray(p.target);
+    pic = p.aspect ? { aspect: p.aspect, v: p.fov, shift: p.shift || [0, 0] } : null;
+    camSet = p.camera ? { ...p.camera } : null;
+    if (!pic) camera.fov = p.fov || 45;
     if (p.near) camera.near = Math.min(camera.near, p.near);
-    camera.updateProjectionMatrix(); controls.update(); redraw();
+    applyOutput(camera.aspect); controls.update(); drawFrame(); redraw();
   }
 
   return {
@@ -1212,6 +1420,48 @@ export function createViewer(host, { onSelect } = {}) {
     assignments,
     onAssign(fn) { onAssign = fn; },
     select(key) { const o = key ? findPart(key) : null; select(o); return !!o; },
+    /** What the server needs to write the chosen materials into the IFC: each changed part and the materials. */
+    writeBackData() {
+      const parts = [], materials = {};
+      for (const e of elements) {
+        const a = e.userData.assigned;
+        if (!a) continue;
+        const m = findMaterial(a.id);
+        if (!m) continue;
+        parts.push({ key: partKey(e), id: a.id, tint: a.tint || null, scale: a.scale || 1, rotation: a.rotation || 0, parts_in_element: e.userData.parts || 1,
+          orig_name: e.userData.mat?.ifcName || null, orig_hex: e.userData.srcHex || null });
+        materials[a.id] = { name: m.name, cls: m.cls === "furniture" ? "stone" : m.cls, hex: averageColour(a.id), size_m: m.size || 1, tile_mm: m.tile ? [m.tile.w, m.tile.h] : null,
+          transparency: m.cls === "glass" ? +(1 - (m.opacity ?? 0.35)).toFixed(2) : 0 };
+      }
+      return { parts, materials };
+    },
+    /** The model as a GLB file with its materials and textures (what is shown: hidden storeys and the section cut out). */
+    async exportGlb() {
+      const [{ GLTFExporter }, { forPathTracing }] = await Promise.all([import("three/addons/exporters/GLTFExporter.js"), import("./materials/photomode.js")]);
+      const root = new THREE.Group(), cache = new Map();
+      root.name = "Ollic model";
+      for (const e of elements) {
+        if (!e.visible || e.userData.ifcType === "IfcSpace" || e.userData.cls === "space") continue;
+        let shown = true; for (let p = e.parent; p; p = p.parent) if (!p.visible) shown = false;
+        if (!shown) continue;
+        e.updateWorldMatrix(true, false);
+        const g = e.geometry.clone().applyMatrix4(e.matrixWorld);
+        for (const k of Object.keys(g.attributes)) if (!["position", "normal", "uv"].includes(k)) g.deleteAttribute(k);
+        const m = new THREE.Mesh(g, forPathTracing(e._look || e.material, cache));
+        const lib = findMaterial(e.userData.assigned?.id || e.userData.mat?.id);
+        m.name = [e.userData.ifcType, e.userData.name].filter(Boolean).join(" ") || "Element";
+        m.userData = { globalId: e.userData.globalId || null, ifcType: e.userData.ifcType || null, storey: e.userData.storey || null, part: e.userData.part ?? 0,
+          face: e.userData.faceName || null, material: lib?.name || null, materialId: lib?.id || null, materialFrom: e.userData.assigned ? "Set by you" : ({ ifc: "From your IFC", name: "Matched from its name", guess: "Guessed" }[e.userData.mat?.how] || null) };
+        if (m.material.name?.startsWith("ollic:")) { m.material = m.material.clone(); m.material.name = lib?.name || m.material.name; }
+        root.add(m);
+      }
+      // photos as JPEG (a tenth of the size of PNG)
+      root.traverse(o => { for (const k of ["map", "normalMap", "roughnessMap", "aoMap"]) if (o.material?.[k]) o.material[k].userData.mimeType = "image/jpeg"; });
+      const glb = await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: 2048, onlyVisible: true });
+      root.traverse(o => o.geometry?.dispose());
+      return new Blob([glb], { type: "model/gltf-binary" });
+    },
+    get lastPhotoCamera() { return lastPhotoCamera; },
     /** Photo mode: the current view path-traced (see materials/photomode.js); the view waits while it renders. */
     async photo(opts = {}) {
       if (owner) throw new Error("The view is busy.");
@@ -1219,9 +1469,38 @@ export function createViewer(host, { onSelect } = {}) {
       select(null);
       const { renderPhoto } = await import("./materials/photomode.js");
       owner = "photo"; controls.enabled = false;
-      try { return await renderPhoto(this.engine(), opts); }
+      // the set picture (Camera panel) drawn at the photo's shape: the same lens, shift and framing
+      if (pic && opts.width && opts.height) applyOutput(opts.width / opts.height);
+      try { return await renderPhoto({ ...this.engine(), lastCamera: c => { lastPhotoCamera = { projection: c.projectionMatrix.toArray(), world: c.matrixWorld.toArray() }; } }, opts); }
       finally { owner = null; controls.enabled = mode !== "walk"; resize(); redraw(); }
     },
+    /** Camera angles: a ready-made angle ({ preset }) or the architect's own numbers ({ lens, height, distance,
+     * azimuth, pitch, straight, shiftX, shiftY, aspect, fill }); returns the camera now. */
+    setCamera,
+    get camera() { return cameraInfo(); },
+    freeCamera,
+    /** The front of the building: [x, z] out of its front, and where that came from (entrance, guessed, you). */
+    setFront: (dir, from = "you") => setFront(dir, from),
+    get front() { return { dir: [...front], from: frontFrom, entrance: entrance ? [...entrance] : null }; },
+    onFront(fn) { onFront = fn; },
+    /** "Make this side the front": the next click on a wall sets the front (the side the wall faces, outward). */
+    pickFront() {
+      return new Promise(res => {
+        frontPick = hit => {
+          const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1);
+          n.y = 0; if (n.lengthSq() < 1e-6) { res(null); return; }
+          n.normalize();
+          const c = frameBox.getCenter(new THREE.Vector3());
+          if (n.dot(hit.point.clone().sub(c).setY(0)) < 0) n.negate();   // outward
+          setFront([n.x, n.z]); res([...front]);
+        };
+      });
+    },
+    showFront(on) { frontArrow.visible = !!on; placeArrow(); redraw(); },
+    setFrameGuides(g) { frameGuides = { ...frameGuides, ...g }; drawFrame(); },
+    /** A picture laid over the set picture (to match its camera): url (or null to remove) and how see-through. */
+    setOverlay(url, opacity = overlay.opacity) { overlay = { url, opacity }; drawFrame(); },
+    linePixels,
     guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
     /** Every part with its library material (for tests and the Materials panel): type, name, material, how, mean normal. */
     debugParts() {

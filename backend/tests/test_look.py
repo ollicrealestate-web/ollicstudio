@@ -49,6 +49,21 @@ def test_materials_come_from_the_model_and_keep_the_architects_names():
     assert colour_name("#ffffff") == "white" and colour_name("#5a3a22") == "brown"
 
 
+def test_the_3d_previews_materials_name_the_looks_materials():
+    """Each material of the model is named after the library material it shows in the 3D preview (travertine, a
+    600 x 600 tile the architect chose there), until the architect checks or writes the name."""
+    groups = [{"key": "stone|#e8dcc8", "cls": "stone", "hex": "#e8dcc8", "map": "#e6194b", "types": ["IfcCovering"], "name": "Travertine stone", "finish": ""},
+              {"key": "tile|#a8a8a8|mt-tile-porcelain-grey-600", "cls": "tile", "hex": "#a8a8a8", "map": "#3cb44b", "types": ["IfcSlab"],
+               "name": "Porcelain tile 600 x 600 - grey", "finish": "chosen in the 3D preview; 600 x 600 mm tiles"}]
+    look = merge_groups(Look(), groups)
+    assert [m.name for m in look.materials] == ["Travertine stone", "Porcelain tile 600 x 600 - grey"]
+    assert look.materials[1].finish == "chosen in the 3D preview; 600 x 600 mm tiles"
+    # changed in the preview: renamed, unless the architect has confirmed it
+    look.materials[1].confirmed = True
+    again = merge_groups(look, [groups[0] | {"name": "Granite - grey"}, groups[1] | {"name": "Marble tile 600 x 600"}])
+    assert [m.name for m in again.materials] == ["Granite - grey", "Porcelain tile 600 x 600 - grey"]
+
+
 def test_the_material_check_finds_a_wrong_colour_but_allows_light_and_shade():
     m = merge_groups(Look(), GROUPS).materials
     the_map = picture(WALL, PANEL)
@@ -422,3 +437,19 @@ def test_aerial_scenes_and_the_planting_rule():
                 "hillside_forest", "waterfront_topdown", "suburb_sunset", "terraced_green_city"):
         assert sid in SCENES and len(SCENES[sid][3]) > 200
     assert "PLANTING" in type_rule("front") and "PLANTING" in type_rule("estate") and "PLANTING" not in type_rule("interior")
+
+
+def test_the_camera_set_in_the_preview_goes_into_the_render(render_settings, repo, storage, alice):
+    """A view captured with a camera set in the Camera panel: the render is told that camera, in words, and to keep it."""
+    images = FakeImages()
+    app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
+                     fal={}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=None)
+    c = TestClient(app)
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    words = "elevated three-quarter corner view from the front-right at low drone height, 24 mm wide-angle lens, two-point perspective with vertical lines kept perfectly straight and parallel"
+    body = {"prompt": "photoreal render", "prompt_ready": True, "references": [{"file_id": view["id"], "role": "model"}], "guide_file_id": lines["id"], "camera": words}
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"]).status_code in (200, 201, 202)
+    p = images.calls[0]["prompt"]
+    assert f"CAMERA: {words}. The camera, lens and framing are exactly those of Image 1" in p and p.rstrip().endswith("watermarks.")
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=body | {"camera": "x" * 601}, headers=alice["headers"]).status_code == 422

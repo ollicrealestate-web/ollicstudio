@@ -118,6 +118,18 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#mpUndo"); page.wait_for_function("document.querySelector('#mpMsg').textContent === 'Saved.'", timeout=10000)
         assert stack["repo"].model_materials[model_id]["assignments"] == {}
         page.click("#matBtn")
+        # the Camera panel: a ready-made angle, saved as a view for this model on the server
+        page.click("#camBtn"); page.wait_for_selector("#camPanel:not([hidden]) [data-preset=corner-eye-right]")
+        page.click("[data-preset=corner-eye-right]"); page.fill("#cpViewName", "Corner eye level"); page.click("#cpSave")
+        page.wait_for_function("document.querySelectorAll('.cp-view').length === 1")
+        mid = page.evaluate("window.__ollic.modelId")
+        for _ in range(40):
+            if (stack["repo"].model_cameras.get(mid) or {}).get("views"):
+                break
+            page.wait_for_timeout(250)
+        v = stack["repo"].model_cameras[mid]["views"][0]
+        assert v["name"] == "Corner eye level" and v["settings"]["preset"] == "corner-eye-right" and v["pose"]["aspect"] == 1.5 and v["thumb"].startswith("data:image/jpeg")
+        page.click("#camBtn")   # the corner camera stays set: the capture below is taken with it
         # Photo mode: it starts refining; stopping keeps the picture so far, ready to save as PNG
         # (a small still: the test browser draws on the CPU, and a big one keeps the page busy for minutes)
         # (skipped on the CI servers: their software graphics take many minutes to build the path tracer and the page
@@ -144,6 +156,7 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         system, content = stack["writer"].calls[-1]
         texts = " ".join(b["text"] for b in content if b["type"] == "text")
         assert "VIEW TO RENDER: a plain, untextured view captured from the architect's BIM model" in texts and "Storeys in the model" in texts and "luxury bungalow" in texts
+        assert "Camera (set by the architect, keep it exactly): three-quarter corner view from the front-right at eye level" in texts
         page.click("#renderBtn")
         page.wait_for_selector(".shot img", timeout=30000)
         first, retry = stack["images"].calls[-2:]
@@ -156,6 +169,8 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         guide = next(f for f in stack["repo"].files.values() if f["original_name"].startswith("Guide - 3D view") and f["original_name"].endswith("lines.png"))
         (job,) = [j for j in stack["repo"].jobs.values() if j["type"] == "concept_render"]
         assert job["input"]["guide_file_id"] == guide["id"]
+        assert job["input"]["camera"].startswith("three-quarter corner view from the front-right") and "26 mm wide-angle lens" in job["input"]["camera"]
+        assert "CAMERA: three-quarter corner view from the front-right" in first["prompt"] and "do not move, raise, widen or tilt the camera" in first["prompt"]
         (img,) = stack["repo"].images.values()
         assert img["options"]["check"]["band"] == "poor" and img["options"]["check"]["retried"] is True
         page.wait_for_selector(".shot .chip[class*=check-]")

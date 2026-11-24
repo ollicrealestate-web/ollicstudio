@@ -33,7 +33,20 @@ export const api = {
   putModelMaterials: (modelId, assignments) => request("PUT", `/models/${modelId}/materials`, { assignments }),
   getMaterialPrefs: () => request("GET", "/material-prefs"),
   putMaterialPrefs: prefs => request("PUT", "/material-prefs", prefs),
+  getCameras: modelId => request("GET", `/models/${modelId}/cameras`),
+  putCameras: (modelId, body) => request("PUT", `/models/${modelId}/cameras`, body),
+  cameraWords: (text, buildingHeight) => request("POST", "/camera/words", { text, building_height: buildingHeight }),
+  matchPicture: (blob, buildingHeight) => { const f = new FormData(); f.append("image", blob, "picture.jpg"); f.append("building_height", String(buildingHeight)); return postForm("/camera/match-picture", f, null, "Ollic AI could not read the picture"); },
   listMyMaterials: () => request("GET", "/my-materials"),
+  /** The model's IFC with the materials chosen in the 3D preview written into it, as a file. */
+  ifcWithMaterials: async (modelId, body) => {
+    const token = await accessToken();
+    if (!token) throw new ApiError(401, "Sign in to continue.");
+    const res = await fetch(base() + `/models/${modelId}/ifc-with-materials`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new ApiError(res.status, d.detail || "The IFC could not be made."); }
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "")?.[1] || "model with materials.ifc";
+    return { blob: await res.blob(), name };
+  },
   deleteMyMaterial: id => request("DELETE", `/my-materials/${id.replace(/^my-/, "")}`),
   createMyMaterial: (form, onProgress) => postForm("/my-materials", form, onProgress, "The material could not be saved"),
   suggestMaterial: blob => { const f = new FormData(); f.append("image", blob, "photo.jpg"); return postForm("/my-materials/suggest", f, null, "Ollic AI could not look at the photo"); },

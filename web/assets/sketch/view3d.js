@@ -3,6 +3,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as G from "./geom.js";
+import { Sky } from "three/addons/objects/Sky.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources } from "../materials/look.js";
+import { shiftCameraClass, createCameraRig } from "../camerarig.js";
+
+const ShiftCamera = shiftCameraClass(THREE);
 
 export const toThree = (p, zMm = 0) => new THREE.Vector3(p.x / 1000, zMm / 1000, -p.y / 1000);
 
@@ -14,7 +19,7 @@ export class View3D {
     this.renderer.setClearColor(0x0c0c0e);
     host.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
+    this.camera = new ShiftCamera(45, 1, 0.05, 2000);
     this.camera.position.set(14, 11, 16);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -39,6 +44,11 @@ export class View3D {
     this.renderer.domElement.addEventListener("pointerdown", e => { downAt = { x: e.clientX, y: e.clientY, b: e.button }; });
     this.renderer.domElement.addEventListener("pointerup", e => {
       if (!downAt || downAt.b !== 0 || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
+      if (this.rig?.picking) {   // "Make this side the front": the wall clicked
+        const r = this.renderer.domElement.getBoundingClientRect();
+        ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+        this.rig.picked(ray.intersectObjects(this.root.children, true).find(h => h.object.isMesh && h.face) || null); return;
+      }
       // while sketching with Pick Lines, a click picks a model edge instead of selecting
       if (this.app.pickEdge3D?.active()) { const ed = this.edgeAt(e); if (ed) this.app.pickEdge3D.add(ed.a, ed.b); else this.app.toast("Click on an edge (a line of the model)."); this.setEdgeHi(null); return; }
       const r = this.renderer.domElement.getBoundingClientRect();
@@ -56,6 +66,17 @@ export class View3D {
     this.root = new THREE.Group();
     this.scene.add(this.root);
     this.style = "shaded";
+    // camera angles (the Camera panel): the same ready-made angles, lens, front and saved views as the Studio
+    this.rig = createCameraRig({ THREE, host, camera: this.camera, controls: this.controls, scene: this.scene,
+      box: () => this.modelBox(),
+      doors: () => {   // the doors (openings of kind door) as boxes, for finding the main entrance
+        const list = (app.doc?.openings || []).filter(o => o.kind === "door"), ids = new Set(list.map(d => d.id)), by = new Map();
+        this.root.traverse(o => { const id = o.userData?.id; if (o.isMesh && ids.has(id)) (by.get(id) || by.set(id, new THREE.Box3()).get(id)).expandByObject(o); });
+        return [...by].map(([id, box]) => { const d = list.find(x => x.id === id); return { box, name: `${d?.name || ""} ${d?.mark || ""}` }; });
+      },
+      projectFront: () => ({ south: [0, 1], north: [0, -1], east: [1, 0], west: [-1, 0] })[app.doc?.settings?.front] || null,
+      redraw: () => { this.needsRender = true; },
+      drawLines: (w, h) => this.drawLines(w, h), drawView: (w, h) => this.snapshot(w, h) });
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
     this.dirty = true;
@@ -89,7 +110,7 @@ export class View3D {
     const k = Math.min(1, max / width, max / height), W = Math.round(width * k), H = Math.round(height * k);
     try {
       r.setPixelRatio(1); r.setSize(W, H, false);
-      this.camera.aspect = W / H; this.camera.updateProjectionMatrix();
+      if (this.rig?.pic) this.rig.applyOutput(W / H); else { this.camera.aspect = W / H; this.camera.updateProjectionMatrix(); }
       this.grid.visible = false; if (this.edgeHi) this.edgeHi.visible = false;
       r.setClearColor(background === "white" ? 0xffffff : 0x0c0c0e, 1);
       r.render(this.scene, this.camera);
@@ -99,7 +120,7 @@ export class View3D {
     } finally {
       r.setClearColor(clear, alpha); this.grid.visible = grid; if (this.edgeHi) this.edgeHi.visible = hi;
       r.setPixelRatio(ratio); r.setSize(size.x, size.y, false);
-      this.camera.aspect = aspect; this.camera.updateProjectionMatrix();
+      if (this.rig?.pic) this.rig.applyOutput(aspect); else { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
       this.needsRender = true;
     }
   }
@@ -109,14 +130,57 @@ export class View3D {
     const w = Math.max(1, r.width), h = Math.max(1, r.height);
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = w + "px"; this.renderer.domElement.style.height = h + "px";
-    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    if (this.rig?.pic) { this.rig.applyOutput(w / h); this.rig.drawFrame(); }
+    else { this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
     this.needsRender = true;
+  }
+  /** The model's extent (metres, y up), without the grid, ground or helpers. */
+  modelBox() {
+    if (this.dirty) { this.dirty = false; this.rebuild(); }
+    const b = new THREE.Box3(); this.root.traverse(o => { if (o.isMesh && o.visible) b.expandByObject(o); });
+    return b;
+  }
+  /** The model's lines from the current camera at w x h: light lines on black, as pixels (top row first). */
+  drawLines(w, h) {
+    if (this.dirty) { this.dirty = false; this.rebuild(); }
+    const r = this.renderer, size = r.getSize(new THREE.Vector2()), ratio = r.getPixelRatio();
+    const clear = r.getClearColor(new THREE.Color()), alpha = r.getClearAlpha(), keep = [], added = [];
+    const black = new THREE.MeshBasicMaterial({ color: 0x000000, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    const white = new THREE.LineBasicMaterial({ color: 0xffffff });
+    const env = this.scene.environment, bg = this.scene.background;
+    const hidden = [this.grid, this.ground, this.edgeHi].filter(o => o && o.visible);
+    try {
+      this.root.traverse(o => {
+        if (o.isMesh) {
+          keep.push([o, o.material]); o.material = black;
+          const e = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 30), white); e.matrixAutoUpdate = false; e.matrix.copy(o.matrixWorld); added.push(e);
+        } else if (o.isLine) { keep.push([o, o.material]); o.material = white; }
+      });
+      for (const e of added) this.scene.add(e);
+      hidden.forEach(o => { o.visible = false; });
+      this.scene.environment = null; this.scene.background = null;
+      r.setPixelRatio(1); r.setSize(w, h, false); r.setClearColor(0x000000, 1);
+      r.render(this.scene, this.camera);
+      const gl = r.getContext(), raw = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+      const data = new Uint8ClampedArray(w * h * 4);
+      for (let y = 0; y < h; y++) data.set(raw.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+      return { data, width: w, height: h };
+    } finally {
+      for (const [o, m] of keep) o.material = m;
+      for (const e of added) { this.scene.remove(e); e.geometry.dispose(); }
+      black.dispose(); white.dispose();
+      hidden.forEach(o => { o.visible = true; });
+      this.scene.environment = env; this.scene.background = bg;
+      r.setClearColor(clear, alpha); r.setPixelRatio(ratio); r.setSize(size.x, size.y, false);
+      this.needsRender = true;
+    }
   }
 
   clear() {
     for (const o of [...this.root.children]) {
       this.root.remove(o);
-      o.traverse(n => { n.geometry?.dispose?.(); if (n.material) [].concat(n.material).forEach(m => m.dispose()); });
+      o.traverse(n => { n.geometry?.dispose?.(); if (n.material) [].concat(n.material).forEach(m => { if (!m.userData?.lib) m.dispose(); }); });   // library looks are shared
     }
   }
 
@@ -146,8 +210,35 @@ export class View3D {
     addLines(pts, 0xe8e8ec);
     addLines(selPts, 0x3b82f6);
     this.app.build3D?.(this, THREE);
+    if ((this.app.prefs?.visual || "shaded") === "realistic") this.realistic();
+    else if (this.scene.environment && this._env) this.scene.environment = null;
     // frame the model the first time there is something to see
     if (!this.fitted && this.root.children.length) { this.fitted = true; this.fit(); }
+  }
+
+  /**
+   * The Realistic style: every surface with a library material shows the Studio's photographed texture at its real
+   * size (the same library and pictures as the Studio's 3D preview), lit by a sunny sky that also gives reflections.
+   */
+  realistic() {
+    if (!this._env) {
+      const sky = new Sky(); sky.scale.setScalar(100);
+      const u = sky.material.uniforms; u.turbidity.value = 2.2; u.rayleigh.value = 1.6; u.sunPosition.value.set(0.6, 0.75, 0.3);
+      const sk = new THREE.Scene(); sk.add(sky);
+      this._env = new THREE.PMREMGenerator(this.renderer).fromScene(sk, 0.02).texture;
+      setupLooks({ redraw: () => { this.needsRender = true; } });
+      loadSources().then(() => { this.needsRender = true; });
+    }
+    this.scene.environment = this._env; this.scene.environmentIntensity = 0.6;
+    this.root.traverse(o => {
+      const id = o.userData?.mat;
+      if (!o.isMesh || typeof id !== "string" || !id.startsWith("mt-") || this.app.selection?.has(o.userData.id)) return;
+      const look = materialLook(id, { quality: "high" });
+      if (!look) return;
+      if (!o.geometry.attributes.uv || !o.geometry.userData.metric) { addMetricUVs(o.geometry); o.geometry.userData.metric = true; }
+      [].concat(o.material).forEach(m => m.dispose());
+      o.material = look;
+    });
   }
 
   /** The model edge (from the 3D outlines) under the mouse: { a, b } in model mm (x east, y north, z up), or null. */
@@ -178,6 +269,7 @@ export class View3D {
 
   /** Frames everything in view. */
   fit() {
+    if (this.rig?.pic && this.fitted) this.rig.freeCamera();   // zoom to fit leaves a set camera angle
     const box = new THREE.Box3().setFromObject(this.root);
     if (box.isEmpty()) { box.min.set(-1, 0, -9); box.max.set(11, 3, 1); }
     const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());

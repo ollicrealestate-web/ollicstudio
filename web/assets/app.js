@@ -188,7 +188,7 @@ $("#writePromptBtn").onclick = async () => {
   $("#planNote").textContent = "The AI is studying the picture and the references. This takes about 10–30 seconds.";
   try {
     const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim(),
-      ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}) });
+      ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}), ...(cameraWords.get(rPick) ? { camera: cameraWords.get(rPick) } : {}) });
     $("#rPrompt").value = r.prompt; promptByAI = true;
     $("#planNote").textContent = r.notes ? `AI: ${r.notes} Check the prompt below, then render.` : "Prompt written. Check it below, then render.";
   } catch (err) { if (err.status === 401) return handle(err); $("#planNote").textContent = err.message; }
@@ -204,7 +204,7 @@ const SERVICES = {
     lead: "Upload your model. Frame any view inside or out; the AI renders on top of an exact view of your model, and each render is checked against it.",
     hint: "Choose the model.", sections: ["modelSection", "studio"], modes: ["exterior", "interior", "walk"], icon: "M12 2 3 7v10l9 5 9-5V7zM3 7l9 5 9-5M12 12v10" },
   film: { name: "AI walkthrough", short: "Walkthrough", accept: ["ifc", "rvt"], multi: 1, needs: "your model (Revit .rvt or IFC)",
-    lead: "Claude plans the shots, Ollic records each camera move exactly from your model, and the AI films it photoreal, with people and cars if you like. Every shot is checked against the model.",
+    lead: "Ollic AI plans the shots, Ollic records each camera move exactly from your model, and the AI films it photoreal, with people and cars if you like. Every shot is checked against the model.",
     hint: "Choose the model.", sections: ["modelSection", "filmSection"], modes: ["exterior", "interior", "walk"], icon: "M4 6h12v12H4zM16 10l5-3v10l-5-3" },
   render: { name: "Photoreal render", short: "Photoreal render", accept: [...IMG, "pdf"], multi: 4, optional: true, needs: "a picture or a PDF drawing",
     lead: "Turn a sketch, photo or 3D view into a photoreal image, or just describe the building.",
@@ -503,6 +503,13 @@ async function loadModels() {
       const { createViewer } = await import("./viewer.js");
       $("#viewer").querySelector(".viewer-msg")?.remove();
       viewer = createViewer($("#viewer"), { onSelect: (x, info) => { showElement(x); matPanel?.selected(x, info); } });
+      const { createCameraPanel } = await import("./camerapanel.js");
+      camPanel = createCameraPanel({ root: $("#camPanel"), viewer, toast, store: {
+        load: () => (viewerModelId ? api.getCameras(viewerModelId) : Promise.resolve({})),
+        save: body => (viewerModelId ? api.putCameras(viewerModelId, body) : Promise.resolve()),
+        words: (text, h) => api.cameraWords(text, h).catch(() => null),
+        match: (blob, h) => api.matchPicture(blob, h),
+      }, onRender: list => renderViews(list), onFilm: (a, b) => filmShotFrom(a, b) });
       const { createMaterialsPanel } = await import("./materials/panel.js");
       matPanel = createMaterialsPanel({ root: $("#matPanel"), viewer, toast,
         store: {
@@ -521,6 +528,7 @@ async function loadModels() {
     const info = await modelLoading.finally(() => { modelLoading = null; });
     await initLight().catch(() => {}); restoreLight();
     await matPanel?.load();
+    await camPanel?.load();
     window.__ollic = { viewer, modelId: viewerModelId };   // for the browser tests
     const pick = $("#storeySelect");
     pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
@@ -568,16 +576,37 @@ document.querySelectorAll("[data-hold]").forEach(b => {
   b.addEventListener("contextmenu", e => e.preventDefault());
 });
 
+let camPanel = null;
+$("#camBtn").onclick = () => { const p = $("#camPanel"), open = p.hidden; p.hidden = !open; $("#camBtn").setAttribute("aria-expanded", String(open)); if (open) camPanel?.refresh(); };
 let matPanel = null, prefsTimer = 0;
+/* downloads with the materials of the 3D preview: a GLB with its textures; the IFC with the chosen materials written in */
+const saveBlob = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); };
+$("#dlGlbMat").onclick = async () => {
+  if (!viewer) return;
+  const b = $("#dlGlbMat"); b.disabled = true; $("#dlMsg").textContent = "Packing the model with its textures…";
+  try { saveBlob(await viewer.exportGlb(), `${(current?.name || "model").replace(/[^\w -]+/g, "")} with materials.glb`); $("#dlMsg").textContent = "Downloaded."; }
+  catch (err) { $("#dlMsg").textContent = "Not made: " + err.message; }
+  b.disabled = false;
+};
+$("#dlIfcMat").onclick = async () => {
+  if (!viewer || !viewerModelId) return;
+  const data = viewer.writeBackData();
+  if (!data.parts.length) { $("#dlMsg").textContent = "You have not changed any materials yet: Download IFC gives the file as it is."; return; }
+  const b = $("#dlIfcMat"); b.disabled = true; $("#dlMsg").textContent = "Writing your materials into the IFC…";
+  try { const r = await api.ifcWithMaterials(viewerModelId, data); saveBlob(r.blob, r.name); $("#dlMsg").textContent = `Downloaded (${data.parts.length} parts with your materials).`; }
+  catch (err) { if (err.status === 401) return handle(err); $("#dlMsg").textContent = err.message; }
+  b.disabled = false;
+};
 /* Photo mode: a path-traced still of the view, up to 4K */
 let photoRun = null;
 $("#photoBtn").onclick = () => { const p = $("#photoPanel"), open = p.hidden; p.hidden = !open; $("#photoBtn").setAttribute("aria-expanded", String(open)); };
 $("#photoGo").onclick = async () => {
   if (!viewer || photoRun) return;
-  const w = +$("#photoSize").value, cv = $("#viewer canvas"), shape = $("#photoShape").value === "view" ? (cv.clientWidth / cv.clientHeight || 16 / 9) : +$("#photoShape").value;
+  const w = +$("#photoSize").value, cv = $("#viewer canvas"), set = viewer.currentPose().aspect;
+  const shape = $("#photoShape").value === "view" ? (set || cv.clientWidth / cv.clientHeight || 16 / 9) : +$("#photoShape").value;
   const h = Math.round(w / shape / 2) * 2, samples = +$("#photoSamples").value, ctrl = new AbortController(), started = performance.now();
   photoRun = ctrl;
-  $("#photoGo").disabled = true; $("#photoStop").hidden = false; $("#photoSave").hidden = true; $("#photoProgress").hidden = false; $("#photoProgress").value = 0;
+  $("#photoGo").disabled = true; $("#photoStop").hidden = false; $("#photoSave").hidden = true; $("#photoRender").hidden = true; $("#photoProgress").hidden = false; $("#photoProgress").value = 0;
   $("#photoMsg").textContent = `Making a ${w} x ${h} photo…`;
   let last = null;
   try {
@@ -592,6 +621,8 @@ $("#photoGo").onclick = async () => {
   if (last) {
     $("#photoImg").src = last; $("#photoImg").hidden = false;
     $("#photoSave").href = last; $("#photoSave").download = `${(current?.name || "model").replace(/[^\w -]+/g, "")} photo ${w}x${h}.png`; $("#photoSave").hidden = false;
+    const pose = viewer.currentPose();   // the guides are drawn from exactly where the photo was taken
+    $("#photoRender").hidden = false; $("#photoRender").onclick = () => { if (viewer.mode !== "walk") viewer.showPose(pose); captureView({ url: last, width: w, height: h }); };
     $("#photoMsg").textContent = `Done in ${Math.round((performance.now() - started) / 1000)} s.`;
   }
   $("#photoGo").disabled = false; $("#photoStop").hidden = true; $("#photoProgress").hidden = true; photoRun = null;
@@ -682,25 +713,83 @@ $("#modelBadge").onclick = () => { const d = $("#modelDetails"); d.hidden = !d.h
    drawing saved beside it; the render is checked against the lines (see renders.geometry_check). */
 const dataBlob = url => fetch(url).then(r => r.blob());
 const stampNow = () => new Date().toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(/[/:]/g, "-");
-$("#useView").onclick = async () => {
-  if (!viewer) return;
+$("#useView").onclick = () => captureView();
+/** Captures the view (or a Photo mode still of it, same camera and shape) with its guides, ready to render. */
+async function captureView(photo = null, opts = {}) {
+  if (!viewer) return null;
   const btn = $("#useView"); btn.disabled = true; btn.textContent = "Capturing…";
+  let result = null;
   try {
-    const name = `3D view ${stampNow()}`;
-    const g = viewer.guides(1536, 1024, ["view", "lines", "depth", "materials"]);
+    const name = opts.name ? `${opts.name.replace(/[^\w ,.-]+/g, "").slice(0, 60)} ${stampNow()}` : `${photo ? "3D photo" : "3D view"} ${stampNow()}`;
+    // the picture's shape: a Photo mode still's, or the camera's set picture (Camera panel), else 3:2
+    const pose = viewer.currentPose(), a = photo ? photo.width / photo.height : pose.aspect || 1.5;
+    let W = a >= 1 ? 1536 : Math.round(1536 * a / 2) * 2, H = a >= 1 ? Math.round(1536 / a / 2) * 2 : 1536;
+    if (photo) { const k = 1536 / Math.max(photo.width, photo.height); W = Math.round(photo.width * k / 2) * 2; H = Math.round(photo.height * k / 2) * 2; }
+    const words = pose.aspect ? viewer.camera.words : null;
+    const g = viewer.guides(W, H, ["view", "lines", "depth", "materials"]);
+    if (photo) {   // the path-traced still is the picture to render on; the guides are drawn from the same camera
+      const img = new Image(); img.src = photo.url; await img.decode();
+      const c = document.createElement("canvas"); c.width = W; c.height = H; c.getContext("2d").drawImage(img, 0, 0, W, H);
+      g.view = c.toDataURL("image/jpeg", 0.92);
+    }
     if (g.coverage !== undefined && g.coverage < 0.03) { toast("Your building is not in view. Turn or zoom until you see it, then capture again."); return; }
     const saved = await uploadFile(current.id, new File([await dataBlob(g.view)], `${name}.jpg`, { type: "image/jpeg" }), () => {});
+    const gids = {};
     for (const k of ["lines", "depth", "materials"])
-      await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {});
+      gids[k] = (await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {}))?.id;
+    if (words) cameraWords.set(saved.id, words);
+    result = { viewId: saved.id, ...gids, camera: words };
     await syncLook(g.legend);
     const viewId = saved.id, matsId = (await api.getProject(current.id)).source_files.find(f => f.original_name === `Guide - ${name} - materials.png`)?.id;
     if (matsId && (look?.materials || []).some(m => !m.extra && m.source === "model" && !m.confirmed)) readMaterials(viewId, matsId);
     current = await api.getProject(current.id); rPick = saved.id; promptByAI = false; renderProject();
-    toast("View captured. Press “Read image and write prompt”.");
-    $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+    if (!opts.quiet) {
+      toast(photo ? "Photo captured. Press “Read image and write prompt”." : "View captured. Press “Read image and write prompt”.");
+      $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+    }
+  } catch (err) { if (err.status === 401) { handle(err); return null; } toast(err.message); if (opts.quiet) throw err; }
   finally { btn.disabled = false; btn.textContent = "Capture view"; }
+  return result;
+}
+/** The camera (in words) a captured view was taken with, kept on this device by the file's id. */
+const cameraWords = {
+  set(id, words) { try { localStorage.setItem(`ollic.camera.${id}`, words); } catch { /* storage off */ } },
+  get(id) { try { return id ? localStorage.getItem(`ollic.camera.${id}`) : null; } catch { return null; } },
 };
+/** Several saved views rendered in one go, each from its own camera, all in the project's look. */
+async function renderViews(list) {
+  if (!viewer || !current || !list.length) return;
+  const desc = $("#rDesc").value.trim(), tier = chosenTier(), quality = $("#rQuality").value, view = document.querySelector("input[name=rtype]:checked")?.value || "exterior";
+  let done = 0;
+  for (const v of list) {
+    toast(`Rendering “${v.name}” (${done + 1} of ${list.length})…`);
+    viewer.showPose(v.pose);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const c = await captureView(null, { quiet: true, name: v.name });
+      if (!c) return;
+      const refs = [{ file_id: c.viewId, role: "model" }];
+      const w = await api.writePrompt(current.id, { references: refs, description: desc, model_id: viewerModelId, ...(c.camera ? { camera: c.camera } : {}) });
+      const a = v.pose.aspect || 1.5;
+      await api.startRender(current.id, { prompt: w.prompt, prompt_ready: true, references: refs, tier, quality, view, model_id: viewerModelId,
+        ...(c.lines ? { guide_file_id: c.lines } : {}), ...(c.depth ? { depth_file_id: c.depth } : {}), ...(c.materials ? { material_file_id: c.materials } : {}),
+        ...(c.camera ? { camera: c.camera } : {}), aspect: a > 1.15 ? "landscape" : a < 0.87 ? "portrait" : "square" }, newKey());
+      done++;
+    } catch (err) { if (err.status === 401) return handle(err); toast(`“${v.name}” could not be rendered: ${err.message}`); }
+  }
+  current = await api.getProject(current.id); renderProject(); loadOutputs();
+  toast(`${done} of ${list.length} view${list.length > 1 ? "s" : ""} sent to render. They appear below as they finish.`);
+}
+/** A film shot from a saved view (a slow move in), or moving from one saved view to another. */
+function filmShotFrom(a, b = null) {
+  if (!viewer) return;
+  let s;
+  if (b) {
+    const poses = [{ ...a.pose }, { ...b.pose }];
+    s = { id: newKey(), kind: "push", seconds: 8, room: "", name: `${a.name} to ${b.name}`.slice(0, 80), poses, thumb: viewer.guides(320, 180, ["clay"], viewer.along(poses, 0)).clay, frame_prompt: "", motion_prompt: "", life: null };
+  } else { viewer.showPose(a.pose); s = newShot("push", 6, { name: a.name }); }
+  if (s) { shots.push(s); drawShots(); toast("Film shot added. Find it under AI walkthrough."); }
+}
 /* ---------- the project look: approved materials (from the model) and the hero render ---------- */
 let look = null, lookFor = null;
 async function loadLook() {
@@ -711,7 +800,7 @@ async function loadLook() {
 }
 async function syncLook(legend) {
   if (!legend?.length || !current) return;
-  try { look = await api.addModelMaterials(current.id, legend.map(({ key, cls, hex, map, types }) => ({ key, cls, hex, map, types: types || [] }))); lookFor = current.id; drawLook(); }
+  try { look = await api.addModelMaterials(current.id, legend.map(({ key, cls, hex, map, types, name, finish }) => ({ key, cls, hex, map, types: types || [], ...(name ? { name, finish: finish || "" } : {}) }))); lookFor = current.id; drawLook(); }
   catch (err) { console.warn("look", err); }
 }
 let lastCapture = null;
@@ -720,7 +809,7 @@ async function readMaterials(viewId, matsId) {
   lastCapture = { viewId, matsId };
   const pid = current.id;
   $("#lookCard").open = true;
-  $("#lookMsg").textContent = "Claude is studying your model's materials. This takes about a minute…"; $("#lookAsk").disabled = true;
+  $("#lookMsg").textContent = "Ollic AI is studying your model's materials. This takes about a minute…"; $("#lookAsk").disabled = true;
   try {
     look = await api.suggestLook(pid, { view_file_id: viewId, material_file_id: matsId, description: $("#rDesc")?.value.trim() || "" }); lookFor = pid; drawLook();
     const t0 = Date.now();
@@ -730,14 +819,14 @@ async function readMaterials(viewId, matsId) {
       if (!look.reading) drawLook();
     }
     if (current?.id !== pid) return;
-    if (look?.reading) { $("#lookMsg").textContent = "Claude is taking longer than usual. The list will update when you reopen the project."; return; }
+    if (look?.reading) { $("#lookMsg").textContent = "Ollic AI is taking longer than usual. The list will update when you reopen the project."; return; }
     $("#lookMsg").textContent = (look.read_notes ? look.read_notes + " " : "") + "Check each material, change anything, then press Confirm all.";
   } catch (err) {
     if (err.status === 401) return handle(err);
-    $("#lookMsg").textContent = err.status === 503 ? "Name the materials yourself for now (Claude is not connected)." : err.message;
+    $("#lookMsg").textContent = err.status === 503 ? "Name the materials yourself for now (Ollic AI is not connected)." : err.message;
   } finally { $("#lookAsk").disabled = false; }
 }
-const SOURCE = { ai: "Claude", architect: "You", model: "Model" };
+const SOURCE = { ai: "Ollic AI", architect: "You", model: "Model" };
 /* ---------- scenes: presets, or one copied from the architect's own picture; saved in the project look ---------- */
 let sceneList = null;
 const TYPE_NAMES = { exterior: "Exterior", interior: "Interior", site_plan: "Site plan", estate: "Estate layout" };
@@ -772,7 +861,7 @@ $("#rScene").addEventListener("change", async () => {
 $("#rSceneUpload").onchange = async e => {
   const file = e.target.files[0]; e.target.value = "";
   if (!file || !current) return;
-  $("#rSceneText").textContent = "Claude is studying the scene in your picture…";
+  $("#rSceneText").textContent = "Ollic AI is studying the scene in your picture…";
   try {
     const saved = await uploadFile(current.id, file, () => {});
     const out = await api.sceneFromImage(current.id, saved.id);
@@ -787,14 +876,14 @@ function drawLook() {
   drawScene();
   const mats = look.materials || [], open = mats.filter(m => !m.confirmed).length;
   $("#lookSummary").textContent = mats.length ? `${mats.length} material${mats.length > 1 ? "s" : ""}${open ? ` · ${open} to confirm` : " · all confirmed"}${look.hero_render_id ? " · hero render set" : ""}`
-    : "Capture a view of your model: Claude lists its materials for you to confirm.";
+    : "Capture a view of your model: Ollic AI lists its materials for you to confirm.";
   $("#lookMats").replaceChildren(...mats.map(m => {
     const touched = () => { m.source = "architect"; m.confirmed = true; row.classList.add("confirmed"); tag.textContent = "You ✓"; };
     const name = el("input", { type: "text", value: m.name, maxlength: "80", "aria-label": "Material name" });
     const finish = el("input", { type: "text", value: m.finish || "", maxlength: "300", placeholder: "Finish, e.g. smooth render, matt", "aria-label": `Finish of ${m.name}` });
     const colour = el("input", { type: "color", value: m.hex, "aria-label": `Approved colour of ${m.name}` });
     name.oninput = () => { m.name = name.value; touched(); }; finish.oninput = () => { m.finish = finish.value; touched(); }; colour.oninput = () => { m.hex = colour.value; touched(); };
-    const tag = el("span", { class: `chip src-${m.source}`, title: m.source === "ai" ? "Suggested by Claude" : m.source === "model" ? "From the model's colour only" : "Written by you" },
+    const tag = el("span", { class: `chip src-${m.source}`, title: m.source === "ai" ? "Suggested by Ollic AI" : m.source === "model" ? "From the model's colour only" : "Written by you" },
       `${SOURCE[m.source] || "Model"}${m.confirmed ? " ✓" : ""}`);
     const used = m.extra ? (m.note || "Added") : (m.types || []).map(t => t.replace(/^Ifc/, "")).join(", ") || m.cls;
     const del = m.extra ? el("button", { class: "btn sm danger", type: "button", "aria-label": `Remove ${m.name}`, onclick: () => { look.materials = look.materials.filter(x => x !== m); drawLook(); } }, "×") : "";
@@ -868,7 +957,7 @@ function drawShots() {
     return el("li", { class: "film-shot" },
       el("img", { src: s.thumb, alt: `First frame of ${s.name}`, width: "160", height: "90" }),
       el("div", { class: "film-shot-body" }, el("span", { class: "num" }, String(i + 1)), name,
-        el("span", { class: "hint" }, SHOT_NAME[s.kind] + (s.room ? `: ${s.room}` : "") + (s.frame_prompt ? " · prompts by Claude" : "")), secs,
+        el("span", { class: "hint" }, SHOT_NAME[s.kind] + (s.room ? `: ${s.room}` : "") + (s.frame_prompt ? " · prompts by Ollic AI" : "")), secs,
         el("div", { class: "film-shot-tools" },
           el("button", { class: "btn sm", type: "button", onclick: () => previewShot(s) }, "Preview"),
           el("button", { class: "btn sm", type: "button", "aria-label": `Move ${s.name} earlier`, ...(i === 0 ? { disabled: "" } : {}), onclick: () => { [shots[i - 1], shots[i]] = [shots[i], shots[i - 1]]; drawShots(); } }, "↑"),
@@ -920,14 +1009,14 @@ async function loadFilmEngines() {
 }
 async function planFilm(full) {
   if (!viewer || !current) { toast("Open your model first."); return; }
-  const btn = full ? $("#planFullBtn") : $("#planBtn"), label = btn.textContent; btn.disabled = true; btn.textContent = "Claude is planning…";
+  const btn = full ? $("#planFullBtn") : $("#planBtn"), label = btn.textContent; btn.disabled = true; btn.textContent = "Ollic AI is planning…";
   try {
     const plan = await api.planFilm(current.id, { ...viewer.facts, rooms: (viewer.rooms() || []).map(r => r.name), description: $("#filmDesc").value.trim(),
       seconds: full ? 60 : 24, full });
     if (viewer.mode === "walk" || viewer.mode === "interior") setViewMode("exterior");
     shots = plan.shots.map(s => newShot(s.kind, s.seconds, s)).filter(Boolean);
     drawShots();
-    $("#planNoteFilm").textContent = plan.notes || (plan.by === "claude" ? "Planned by Claude." : "A ready-made plan.");
+    $("#planNoteFilm").textContent = plan.notes || (plan.by === "claude" ? "Planned by Ollic AI." : "A ready-made plan.");
   } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
   finally { btn.disabled = false; btn.textContent = label; }
 }
@@ -1011,14 +1100,14 @@ function checkChip(v) {
   if (!c || c.score === undefined) return "";
   const word = { good: "Matches the model", fair: "Mostly matches the model", poor: "Drifted from the model" }[c.band] || "Checked";
   const n = c.claude ? (c.claude.issues || []).length : null;
-  const label = c.claude ? `${word} · ${c.claude.ok ? "checked by Claude" : `${n} difference${n === 1 ? "" : "s"} found`}` : `${word} · ${Math.round(c.score * 100)}%`;
+  const label = c.claude ? `${word} · ${c.claude.ok ? "checked by Ollic AI" : `${n} difference${n === 1 ? "" : "s"} found`}` : `${word} · ${Math.round(c.score * 100)}%`;
   const why = [c.framing === "corrected" ? "The AI reframed the building; Ollic put it back in your model's camera." : "",
-    c.claude ? (c.claude.ok ? "Claude checked floors and openings: no differences found." : "Claude found: " + c.claude.issues.join("; ")) : "",
+    c.claude ? (c.claude.ok ? "Ollic AI checked floors and openings: no differences found." : "Ollic AI found: " + c.claude.issues.join("; ")) : "",
     c.retried ? "Rendered twice, model first; the better one is kept." : "",
     c.materials ? "Materials: " + c.materials.materials.map(m => `${m.name} ${m.ok ? "as approved" : `off (looks ${m.seen})`}`).join("; ") + "." : ""].filter(Boolean).join(" ");
   const chip = el("span", { class: `chip check-${c.band}`, title: [why, `Edge match ${Math.round(c.score * 100)}%.`].filter(Boolean).join(" ") },
     `${label}${c.framing === "corrected" ? " · framing fixed" : ""}`);
-  if (c.claude && !c.claude.ok && n) chip.title = "Claude found: " + c.claude.issues.join(" · ") + "  " + chip.title;
+  if (c.claude && !c.claude.ok && n) chip.title = "Ollic AI found: " + c.claude.issues.join(" · ") + "  " + chip.title;
   if (!c.materials) return chip;
   const mb = c.materials.score >= 0.8 ? "good" : c.materials.score >= 0.65 ? "fair" : "poor";
   const off = c.materials.materials.filter(m => !m.ok).map(m => m.name);
@@ -1193,6 +1282,7 @@ function briefFromForm() {
     ...(guide ? { guide_file_id: guide } : {}), ...(depth ? { depth_file_id: depth } : {}), ...(mats ? { material_file_id: mats } : {}),
     ...(guide && viewerModelId ? { model_id: viewerModelId } : {}),
     view: document.querySelector("input[name=rtype]:checked")?.value || "exterior",
+    ...(cameraWords.get(rPick) ? { camera: cameraWords.get(rPick) } : {}),
     aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
 $("#renderForm").onsubmit = e => {
@@ -1488,11 +1578,11 @@ $("#filmLookBtn").onclick = async () => {
     try { const g = viewer.guides(1280, 853, ["view"]); if (g.coverage === undefined || g.coverage >= 0.03) view = g.view; } catch { view = null; }
   }
   if (!view && $("#filmDesc").value.trim().length < 3) { toast("Open your model and frame the building, or write a few words first."); return; }
-  btn.disabled = true; btn.textContent = "Studying your model…"; note.textContent = "Claude is reading the view, your scene and your notes. About 10–30 seconds.";
+  btn.disabled = true; btn.textContent = "Studying your model…"; note.textContent = "Ollic AI is reading the view, your scene and your notes. About 10–30 seconds.";
   try {
     const r = await api.writePrompt(current.id, { purpose: "look", description: $("#filmDesc").value.trim(), ...(view ? { view_image: view } : {}),
       ...(viewerModelId ? { model_id: viewerModelId } : {}) });
-    $("#filmDesc").value = r.prompt; note.textContent = r.notes ? `Claude: ${r.notes} Edit the look if you like.` : "Look written. Edit it if you like; every shot uses it.";
+    $("#filmDesc").value = r.prompt; note.textContent = r.notes ? `Ollic AI: ${r.notes} Edit the look if you like.` : "Look written. Edit it if you like; every shot uses it.";
   } catch (err) { if (err.status === 401) return handle(err); note.textContent = err.message; }
   finally { btn.disabled = false; btn.textContent = "Read the model and write the look"; }
 };
@@ -1516,7 +1606,7 @@ $("#iaWriteBtn").onclick = async () => {
   btn.disabled = true; btn.textContent = "Studying the images…";
   let done = 0;
   for (const fid of iaSel) {
-    note.textContent = `Claude is reading image ${iaSel.indexOf(fid) + 1} of ${iaSel.length}…`;
+    note.textContent = `Ollic AI is reading image ${iaSel.indexOf(fid) + 1} of ${iaSel.length}…`;
     try { const r = await api.writePrompt(current.id, { references: [{ file_id: fid, role: "model" }], description: $("#iaLook").value.trim() }); iaPrompts[fid] = r.prompt; done++; drawIAPrompts(); }
     catch (err) { if (err.status === 401) return handle(err); note.textContent = err.message; break; }
   }
@@ -1569,7 +1659,7 @@ function drawCine() {
   if (!FILM_HEAD.lead) FILM_HEAD.lead = $("#filmLead").textContent;
   $("#filmEyebrow").textContent = on ? "Cinematic video" : FILM_HEAD.eyebrow;
   $("#filmTitle").textContent = on ? CINE[cine.opt].name.replace(/^Cinematic \d · /, "") : FILM_HEAD.title;
-  $("#filmLead").textContent = on ? `${CINE[cine.opt].steps} Made from your model so the building stays exact, in the look of your render, and checked by Claude.` : FILM_HEAD.lead;
+  $("#filmLead").textContent = on ? `${CINE[cine.opt].steps} Made from your model so the building stays exact, in the look of your render, and checked by Ollic AI.` : FILM_HEAD.lead;
   if (pending && step === "start") {
     $("#svcTitle").textContent = `${CINE[cine.opt].name.replace(/^Cinematic \d · /, "Cinematic: ")}`;
     $("#svcLead").textContent = "Choose your model (IFC or Revit). The cinematic is made from it, so the building stays exact.";

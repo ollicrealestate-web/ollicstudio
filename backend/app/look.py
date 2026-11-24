@@ -110,9 +110,13 @@ def merge_groups(look: Look, groups: list[dict]) -> Look:
         if m:
             m.map = g["map"]
             m.types = g.get("types") or m.types
+            # the 3D preview's material names it, until the architect has checked or written it
+            if g.get("name") and m.source == "model" and not m.confirmed:
+                m.name, m.finish = g["name"][:80], (g.get("finish") or m.finish)[:300]
             continue
         cls, hx = g.get("cls") or "paint", g.get("hex") or "#cccccc"
-        look.materials.append(Material(key=g["key"], cls=cls, model_hex=hx, map=g["map"], name=default_name(cls, hx), hex=hx, types=g.get("types") or []))
+        look.materials.append(Material(key=g["key"], cls=cls, model_hex=hx, map=g["map"], name=(g.get("name") or default_name(cls, hx))[:80],
+                                       finish=(g.get("finish") or "")[:300], hex=hx, types=g.get("types") or []))
     look.materials = look.materials[:40]
     return look
 

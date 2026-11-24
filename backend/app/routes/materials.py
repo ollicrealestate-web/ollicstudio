@@ -249,3 +249,70 @@ def suggest_my_material(request: Request, user: CurrentUser = Depends(get_curren
             "size_mm": num(a.get("size_mm"), 20, 20000, None),
             "tile_mm": [num(tile[0], 10, 3000, None), num(tile[1], 10, 3000, None)] if isinstance(tile, list) and len(tile) == 2 else None,
             "notes": str(a.get("notes") or "")[:200]}
+
+
+# ---------------------------------------------------------------- the IFC with the chosen materials written back
+class WritePart(BaseModel):
+    key: str
+    id: str
+    tint: str | None = None
+    scale: float = Field(1, ge=0.05, le=20)
+    rotation: float = Field(0, ge=-360, le=360)
+    parts_in_element: int = Field(1, ge=1, le=500)
+    orig_name: str | None = Field(None, max_length=200)
+    orig_hex: str | None = None
+
+    @field_validator("key")
+    @classmethod
+    def _k(cls, v):
+        if not _KEY.match(v):
+            raise ValueError("not a part of the model")
+        return v
+
+    @field_validator("id")
+    @classmethod
+    def _i(cls, v):
+        if not _ID.match(v):
+            raise ValueError("unknown material")
+        return v
+
+
+class WriteMaterial(BaseModel):
+    name: str = Field(max_length=80)
+    cls: str = Field("stone", max_length=20)
+    hex: str = "#cccccc"
+    size_m: float = Field(1, gt=0, le=100)
+    tile_mm: list[float] | None = None
+    transparency: float = Field(0, ge=0, le=1)
+
+
+class WriteIn(BaseModel):
+    parts: list[WritePart] = Field(max_length=20000)
+    materials: dict[str, WriteMaterial]
+
+
+@router.post("/models/{model_id}/ifc-with-materials")
+def ifc_with_materials(model_id: uuid.UUID, body: WriteIn, request: Request, user: CurrentUser = Depends(get_current_user)):
+    """The model's own IFC with the materials chosen in the 3D preview written into it (names, colours, a property
+    set with texture, size and rotation). Geometry and GlobalIds are not touched."""
+    from fastapi.responses import Response
+    from ..bim.writeback import download_name, write_materials
+
+    m = _own_model(request, user, model_id)
+    src = _repo(request).get_source_file(user, m["source_file_id"]) if m.get("source_file_id") else None
+    if not src:
+        raise HTTPException(409, "This model's IFC file is no longer in the project.")
+    data = request.app.state.storage.download(user, src["storage_path"])
+    parts = []
+    for p in body.parts:
+        gid, rest = p.key.split("#", 1)
+        part, _, face = rest.partition("/")
+        parts.append({"global_id": gid, "part": int(part), "face": {"+": "outside", "-": "inside"}.get(face), "id": p.id, "tint": p.tint, "scale": p.scale,
+                      "rotation": p.rotation, "parts_in_element": p.parts_in_element, "orig_name": p.orig_name, "orig_hex": p.orig_hex})
+    try:
+        out, summary = write_materials(data, parts, {k: v.model_dump() for k, v in body.materials.items()})
+    except Exception as exc:
+        log.exception("material write-back failed")
+        raise HTTPException(422, f"The materials could not be written into this IFC: {str(exc)[:160]}")
+    name = download_name((src.get("original_name") or "model").rsplit(".", 1)[0])
+    return Response(out, media_type="application/x-step", headers={"Content-Disposition": f'attachment; filename="{name}"', "X-Ollic-Elements": str(summary["elements"])})

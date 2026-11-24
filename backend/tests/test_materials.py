@@ -119,3 +119,72 @@ def test_ollic_ai_suggests_what_the_photo_shows(settings, repo, storage, alice):
 def test_without_ollic_ai_the_suggestion_says_so(client, alice):
     r = client.post("/api/my-materials/suggest", files={"image": ("p.jpg", _jpeg(), "image/jpeg")}, headers=alice["headers"])
     assert r.status_code == 503
+
+
+# ---------------------------------------------------------------- the IFC with the materials written back
+from pathlib import Path
+
+FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "studio" / "fixtures" / "revit_style.ifc"
+
+
+def _ifc_model(client, repo, storage, user):
+    pid = client.post("/api/projects", json={"name": "Revit house"}, headers=user["headers"]).json()["id"]
+    owner = type("U", (), {"id": user["id"]})()
+    fid, path = str(uuid.uuid4()), f"{user['id']}/{pid}/house.ifc"
+    storage.upload(owner, path, FIXTURE.read_bytes(), "application/x-step")
+    repo.create_source_file(owner, {"id": fid, "project_id": pid, "original_name": "Revit house.ifc", "storage_path": path, "kind": "ifc", "size_bytes": 1})
+    return repo.create_model(owner, {"id": str(uuid.uuid4()), "project_id": pid, "source_file_id": fid, "job_id": None, "glb_path": f"{user['id']}/{pid}/m.glb", "report": {}})["id"]
+
+
+def test_the_ifc_gets_the_materials_written_back_and_keeps_its_geometry(client, repo, storage, alice, bob):
+    import tempfile
+
+    import ifcopenshell
+
+    from app.bim.writeback import validate
+
+    mid = _ifc_model(client, repo, storage, alice)
+    body = {"parts": [
+        {"key": "9YvctVUKr0kugbFTf53O9L#0", "id": "mt-tile-porcelain-grey-600", "tint": None, "parts_in_element": 1},           # the whole slab
+        {"key": "BYvctVUKr0kugbFTf53O9L#1", "id": "mt-glass-tinted", "parts_in_element": 2, "orig_name": "Glass", "orig_hex": "#bcd9e6"},  # only the window's glass
+        {"key": "7YvctVUKr0kugbFTf53O9L#0/+", "id": "mt-travertine", "parts_in_element": 1},                                   # the wall's outside face
+    ], "materials": {
+        "mt-tile-porcelain-grey-600": {"name": "Porcelain tile 600 x 600 - grey", "cls": "tile", "hex": "#a8a8a8", "size_m": 1.4, "tile_mm": [600, 600]},
+        "mt-glass-tinted": {"name": "Glass - tinted grey", "cls": "glass", "hex": "#5b6670", "size_m": 1, "transparency": 0.6},
+        "mt-travertine": {"name": "Travertine stone", "cls": "stone", "hex": "#e8dcc8", "size_m": 1.2},
+    }}
+    assert client.post(f"/api/models/{mid}/ifc-with-materials", json=body, headers=bob["headers"]).status_code == 404
+    r = client.post(f"/api/models/{mid}/ifc-with-materials", json=body, headers=alice["headers"])
+    assert r.status_code == 200, r.text
+    assert "with materials.ifc" in r.headers["content-disposition"] and r.headers["x-ollic-elements"] == "3"
+    # IfcOpenShell's validation finds nothing new (anything it says about the original file is not ours to fix)
+    new = [e for e in validate(r.content) if e not in validate(FIXTURE.read_bytes())]
+    assert new == [], new
+
+    def opened(data):
+        t = tempfile.NamedTemporaryFile(suffix=".ifc", delete=False); t.write(data); t.close()
+        return ifcopenshell.open(t.name)
+
+    before, after = opened(FIXTURE.read_bytes()), opened(r.content)
+    # every GlobalId kept, and the geometry exactly as it was
+    assert sorted(e.GlobalId for e in before.by_type("IfcRoot") if e.is_a("IfcProduct")) == sorted(e.GlobalId for e in after.by_type("IfcRoot") if e.is_a("IfcProduct"))
+    pts = lambda f: sorted(tuple(round(c, 9) for c in p.Coordinates) for p in f.by_type("IfcCartesianPoint"))
+    assert pts(before) == pts(after)
+    lists = lambda f: sorted(tuple(map(tuple, p.CoordList)) for p in f.by_type("IfcCartesianPointList3D"))
+    assert lists(before) == lists(after)
+    # the slab: a single IfcMaterial named after the library material, its style colour, and the property set
+    import ifcopenshell.util.element as U
+    slab = after.by_guid("9YvctVUKr0kugbFTf53O9L")
+    assert U.get_material(slab).Name == "Porcelain tile 600 x 600 - grey"
+    ps = U.get_psets(slab)["Pset_OllicMaterial"]
+    assert ps["LibraryId"] == "mt-tile-porcelain-grey-600" and ps["TileSize_mm"] == "600 x 600" and ps["TextureSize_mm"] == 1400
+    styles = {s.Name for s in after.by_type("IfcSurfaceStyle")}
+    assert {"Porcelain tile 600 x 600 - grey", "Glass - tinted grey"} <= styles
+    # the window: only its glass changed; the frame keeps its aluminium
+    win = after.by_guid("BYvctVUKr0kugbFTf53O9L")
+    names = [s.Name for it in win.Representation.Representations[0].Items for si in after.get_inverse(it) if si.is_a("IfcStyledItem") for s in si.Styles if s.is_a("IfcSurfaceStyle")]
+    assert "Glass - tinted grey" in names and "Aluminium" in names
+    # the layered wall keeps its layers; its outside face is recorded in the property set
+    wall = after.by_guid("7YvctVUKr0kugbFTf53O9L")
+    assert U.get_material(wall).is_a() in ("IfcMaterialLayerSetUsage", "IfcMaterialLayerSet")
+    assert U.get_psets(wall)["Pset_OllicMaterial"]["OutsideFaceMaterial"] == "Travertine stone"
