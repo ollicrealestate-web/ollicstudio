@@ -1,43 +1,199 @@
 {
-  "_about": "Texture sets for the Ollic material library: each is fetched once from ambientCG (CC0 1.0 public domain) by tools/fetch_assets.py, which records the asset id. 'q' is the search; 'prefer' pins an asset id when the search picks wrongly.",
-  "sets": {
-    "plaster-fine":      { "q": "plaster", "cls": "plaster" },
-    "render-sand":       { "q": "plaster rough", "cls": "plaster" },
-    "render-tyrolean":   { "q": "stucco", "cls": "plaster" },
-    "concrete-fairface": { "q": "concrete", "cls": "concrete" },
-    "concrete-polished": { "q": "concrete floor polished", "cls": "concrete" },
-    "concrete-board":    { "q": "concrete wood formwork", "cls": "concrete" },
-    "travertine":        { "q": "travertine", "cls": "stone" },
-    "granite-grey":      { "q": "granite", "cls": "stone" },
-    "marble-white":      { "q": "marble white", "cls": "stone" },
-    "marble-beige":      { "q": "marble", "cls": "stone" },
-    "slate":             { "q": "slate", "cls": "stone" },
-    "sandstone":         { "q": "sandstone", "cls": "stone" },
-    "terrazzo":          { "q": "terrazzo", "cls": "stone" },
-    "stone-wall":        { "q": "rock wall", "cls": "stone" },
-    "wood-teak":         { "q": "wood", "cls": "wood" },
-    "wood-dark":         { "q": "wood dark", "cls": "wood" },
-    "wood-planks":       { "q": "planks", "cls": "wood" },
-    "wood-floor":        { "q": "wood floor", "cls": "wood" },
-    "brick-red":         { "q": "bricks", "cls": "brick" },
-    "brick-buff":        { "q": "bricks white", "cls": "brick" },
-    "block-concrete":    { "q": "concrete blocks", "cls": "brick" },
-    "roof-tiles":        { "q": "roofing tiles", "cls": "roof" },
-    "roof-metal":        { "q": "corrugated steel", "cls": "roof" },
-    "metal-brushed":     { "q": "metal brushed", "cls": "metal" },
-    "metal-painted":     { "q": "painted metal", "cls": "metal" },
-    "grass":             { "q": "grass", "cls": "grass" },
-    "paving":            { "q": "paving stones", "cls": "paving" },
-    "gravel":            { "q": "gravel", "cls": "paving" },
-    "asphalt":           { "q": "asphalt", "cls": "asphalt" },
-    "soil":              { "q": "ground soil", "cls": "grass" },
-    "fabric":            { "q": "fabric", "cls": "furniture" }
+ "_about": "Texture sets for the Ollic material library: each is fetched once from ambientCG (CC0 1.0 public domain) by tools/fetch_assets.py, which records the asset id. 'q' is the search; 'prefer' pins an asset id when the search picks wrongly.",
+ "sets": {
+  "plaster-fine": {
+   "q": [
+    "painted plaster",
+    "plaster"
+   ],
+   "cls": "plaster"
   },
-  "vendor": {
-    "three@0.169.0": ["examples/jsm/postprocessing/SMAAPass.js", "examples/jsm/shaders/SMAAShader.js", "examples/jsm/postprocessing/SSRPass.js", "examples/jsm/shaders/SSRShader.js",
-      "examples/jsm/objects/ReflectorForSSRPass.js", "examples/jsm/exporters/GLTFExporter.js", "examples/jsm/postprocessing/TAARenderPass.js", "examples/jsm/postprocessing/SSAARenderPass.js",
-      "examples/jsm/loaders/RGBELoader.js"],
-    "three-mesh-bvh@0.8.3": ["build/index.module.js", "LICENSE"],
-    "three-gpu-pathtracer@0.0.23": ["build/index.module.js", "LICENSE"]
+  "render-sand": {
+   "q": [
+    "plaster",
+    "stucco"
+   ],
+   "cls": "plaster"
+  },
+  "render-tyrolean": {
+   "q": [
+    "plaster",
+    "facade"
+   ],
+   "cls": "plaster"
+  },
+  "concrete-fairface": {
+   "q": "concrete",
+   "cls": "concrete"
+  },
+  "concrete-polished": {
+   "q": [
+    "concrete",
+    "floor"
+   ],
+   "cls": "concrete"
+  },
+  "concrete-board": {
+   "q": [
+    "concrete",
+    "wood formwork"
+   ],
+   "cls": "concrete"
+  },
+  "travertine": {
+   "q": "travertine",
+   "cls": "stone"
+  },
+  "granite-grey": {
+   "q": [
+    "granite"
+   ],
+   "cls": "stone"
+  },
+  "marble-white": {
+   "q": [
+    "marble"
+   ],
+   "cls": "stone"
+  },
+  "marble-beige": {
+   "q": [
+    "marble",
+    "onyx"
+   ],
+   "cls": "stone"
+  },
+  "slate": {
+   "q": [
+    "slate",
+    "rock dark",
+    "tiles slate"
+   ],
+   "cls": "stone"
+  },
+  "sandstone": {
+   "q": [
+    "sandstone",
+    "rock",
+    "stone"
+   ],
+   "cls": "stone"
+  },
+  "terrazzo": {
+   "q": [
+    "terrazzo",
+    "tiles"
+   ],
+   "cls": "stone"
+  },
+  "stone-wall": {
+   "q": "rock wall",
+   "cls": "stone"
+  },
+  "wood-teak": {
+   "q": [
+    "wood",
+    "wood siding"
+   ],
+   "cls": "wood"
+  },
+  "wood-dark": {
+   "q": [
+    "wood",
+    "wood floor"
+   ],
+   "cls": "wood"
+  },
+  "wood-planks": {
+   "q": "planks",
+   "cls": "wood"
+  },
+  "wood-floor": {
+   "q": "wood floor",
+   "cls": "wood"
+  },
+  "brick-red": {
+   "q": "bricks",
+   "cls": "brick"
+  },
+  "brick-buff": {
+   "q": "bricks white",
+   "cls": "brick"
+  },
+  "block-concrete": {
+   "q": [
+    "concrete blocks",
+    "bricks concrete",
+    "cinder"
+   ],
+   "cls": "brick"
+  },
+  "roof-tiles": {
+   "q": "roofing tiles",
+   "cls": "roof"
+  },
+  "roof-metal": {
+   "q": "corrugated steel",
+   "cls": "roof"
+  },
+  "metal-brushed": {
+   "q": [
+    "metal",
+    "brushed"
+   ],
+   "cls": "metal"
+  },
+  "metal-painted": {
+   "q": [
+    "painted metal",
+    "metal"
+   ],
+   "cls": "metal"
+  },
+  "grass": {
+   "q": "grass",
+   "cls": "grass"
+  },
+  "paving": {
+   "q": "paving stones",
+   "cls": "paving"
+  },
+  "gravel": {
+   "q": "gravel",
+   "cls": "paving"
+  },
+  "asphalt": {
+   "q": "asphalt",
+   "cls": "asphalt"
+  },
+  "soil": {
+   "q": "ground soil",
+   "cls": "grass"
+  },
+  "fabric": {
+   "q": "fabric",
+   "cls": "furniture"
   }
+ },
+ "vendor": {
+  "three@0.169.0": [
+   "examples/jsm/postprocessing/SMAAPass.js",
+   "examples/jsm/shaders/SMAAShader.js",
+   "examples/jsm/postprocessing/SSRPass.js",
+   "examples/jsm/shaders/SSRShader.js",
+   "examples/jsm/objects/ReflectorForSSRPass.js",
+   "examples/jsm/exporters/GLTFExporter.js",
+   "examples/jsm/postprocessing/TAARenderPass.js",
+   "examples/jsm/postprocessing/SSAARenderPass.js",
+   "examples/jsm/loaders/RGBELoader.js"
+  ],
+  "three-mesh-bvh@0.8.3": [
+   "build/index.module.js",
+   "LICENSE"
+  ],
+  "three-gpu-pathtracer@0.0.23": [
+   "build/index.module.js",
+   "LICENSE"
+  ]
+ }
 }

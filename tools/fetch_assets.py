@@ -27,8 +27,22 @@ def get(url, tries=3):
 
 
 def search(q, n=12):
-    url = "https://ambientcg.com/api/v2/full_json?" + urllib.parse.urlencode({"type": "Material", "q": q, "sort": "Popular", "limit": n, "include": "downloadData,tagData"})
-    return json.loads(get(url)).get("foundAssets", [])
+    out, seen = [], set()
+    for one in (q if isinstance(q, list) else [q]):
+        url = "https://ambientcg.com/api/v2/full_json?" + urllib.parse.urlencode({"type": "Material", "q": one, "sort": "Popular", "limit": n, "include": "downloadData,tagData,imageData"})
+        for a in json.loads(get(url)).get("foundAssets", []):
+            if a["assetId"] not in seen:
+                seen.add(a["assetId"]); out.append(a)
+    return out
+
+
+def preview(asset):
+    imgs = asset.get("previewImage") or {}
+    url = imgs.get("128-PNG") or imgs.get("256-PNG") or next(iter(imgs.values()), None)
+    try:
+        return Image.open(io.BytesIO(get(url))).convert("RGB") if url else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def zip_url(asset, res="1K-JPG"):
@@ -52,12 +66,14 @@ def fetch_textures(only=None):
     src_path = TEX / "sources.json"
     sources = json.loads(src_path.read_text()) if src_path.exists() else {}
     used = {v["asset"] for v in sources.values()}
+    cands = []
     for key, s in CFG["sets"].items():
         if only and key not in only:
             continue
         if key in sources and (TEX / key / "color.jpg").exists() and not s.get("prefer") or (s.get("prefer") and sources.get(key, {}).get("asset") == s.get("prefer")):
             continue
         found = search(s["q"])
+        cands.append((key, found[:10]))
         pick = next((a for a in found if a["assetId"] == s.get("prefer")), None) or next((a for a in found if a["assetId"] not in used and zip_url(a)), None)
         if not pick:
             print("NOTHING FOR", key, s["q"]); continue
@@ -92,8 +108,18 @@ def fetch_textures(only=None):
         im = Image.open(TEX / k / "color.jpg").resize((cell, cell))
         x, y = (i % cols) * cell, (i // cols) * (cell + 22)
         sheet.paste(im, (x, y)); dr.text((x + 4, y + cell + 4), f"{k} = {sources[k]['asset']}", fill="black")
-    (ROOT / "tools/out").mkdir(exist_ok=True, parents=True)
-    sheet.save(ROOT / "tools/out/contact.jpg", quality=80)
+    sheet.save(ROOT / "tools/contact.jpg", quality=80)
+    # the other candidates for each set, to choose better ones by eye (set "prefer" in material_sets.json)
+    if cands:
+        cs = Image.new("RGB", (10 * 132 + 150, len(cands) * 150), "white"); dr = ImageDraw.Draw(cs)
+        for r, (key, found) in enumerate(cands):
+            dr.text((4, r * 150 + 60), key, fill="black")
+            for c, a in enumerate(found):
+                im = preview(a)
+                if im is not None:
+                    cs.paste(im.resize((128, 128)), (150 + c * 132, r * 150))
+                dr.text((150 + c * 132, r * 150 + 132), a["assetId"], fill="black")
+        cs.save(ROOT / "tools/candidates.jpg", quality=80)
 
 
 def fetch_vendor():
