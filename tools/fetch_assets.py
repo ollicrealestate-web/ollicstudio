@@ -96,6 +96,8 @@ def fetch_textures(only=None):
         if color is None:
             print("NO COLOUR MAP", key, pick["assetId"]); continue
         d = TEX / key; d.mkdir(exist_ok=True)
+        for old in d.glob("*.jpg"):
+            old.unlink()   # a new pick replaces every map of the old one
         save(color, d / "color.jpg")
         if normal is not None: save(normal, d / "normal.jpg", q=90)
         if rough is not None: save(rough, d / "rough.jpg", gray=True, size=512)
