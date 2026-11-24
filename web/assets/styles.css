@@ -714,3 +714,6 @@ tr:last-child td { border-bottom: 0; }
 .cp-go img, .cp-nothumb { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px; background: #e9edf1; display: block; }
 .cp-acts { display: flex; gap: 4px; flex-wrap: wrap; }
 .cp-rename { width: 100%; }
+.cp-match { border: 1px solid rgba(0,0,0,.12); border-radius: 10px; padding: 10px 14px; margin: 0; display: grid; gap: 8px; }
+.cp-match .row, .cp-nudges { flex-wrap: wrap; gap: 6px; align-items: center; }
+.cp-score { font-weight: 600; margin-left: 8px; }

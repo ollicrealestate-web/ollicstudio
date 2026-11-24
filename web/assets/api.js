@@ -36,6 +36,7 @@ export const api = {
   getCameras: modelId => request("GET", `/models/${modelId}/cameras`),
   putCameras: (modelId, body) => request("PUT", `/models/${modelId}/cameras`, body),
   cameraWords: (text, buildingHeight) => request("POST", "/camera/words", { text, building_height: buildingHeight }),
+  matchPicture: (blob, buildingHeight) => { const f = new FormData(); f.append("image", blob, "picture.jpg"); f.append("building_height", String(buildingHeight)); return postForm("/camera/match-picture", f, null, "Ollic AI could not read the picture"); },
   listMyMaterials: () => request("GET", "/my-materials"),
   /** The model's IFC with the materials chosen in the 3D preview written into it, as a file. */
   ifcWithMaterials: async (modelId, body) => {

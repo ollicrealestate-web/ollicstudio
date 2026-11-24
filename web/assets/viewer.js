@@ -716,7 +716,7 @@ export function createViewer(host, { onSelect } = {}) {
     camera.updateProjectionMatrix();
   }
   const buildingHeight = () => (frameBox.isEmpty() ? 10 : Math.max(3, frameBox.max.y - groundY));
-  const shapeOf = s => SHAPES[s?.aspect] || (typeof s?.aspect === "number" ? s.aspect : 1.5);
+  const shapeOf = s => SHAPES[s?.aspect] || (Number.isFinite(+s?.aspect) && +s?.aspect > 0 ? +s.aspect : 1.5);   // a named shape, or a picture's own
   /** Sets the camera from settings (a ready-made angle and any changes): the view moves there at once. */
   function setCamera(settings) {
     if (frameBox.isEmpty()) return null;
@@ -726,7 +726,7 @@ export function createViewer(host, { onSelect } = {}) {
     if (mode === "walk") leaveWalk();
     fly = null;
     const c = solve(st, { box: { min: frameBox.min.toArray(), max: frameBox.max.toArray() }, ground: groundY, front, aspect: shapeOf(st), entrance });
-    camSet = st;
+    camSet = st; lastSolve = { st, c };
     pic = { aspect: shapeOf(st), v: c.v, shift: c.shift };
     camera.up.set(0, 1, 0);
     if (c.plan) camera.up.set(...(c.up || [0, 0, -1]));
@@ -737,7 +737,8 @@ export function createViewer(host, { onSelect } = {}) {
     drawFrame(); redraw();
     return cameraInfo(c);
   }
-  function cameraInfo(c = null) {
+  let lastSolve = null;   // the last set camera's worked-out position (its distance is read back by the panel)
+  function cameraInfo(c = camSet && lastSolve?.st === camSet ? lastSolve.c : null) {
     const a = pic ? anglesOf(camSet?.lens || 35, pic.aspect) : null;
     return { settings: camSet ? { ...camSet } : null, aspect: pic?.aspect || null, angles: a, shift: pic ? [...pic.shift] : [0, 0], front: [...front], frontFrom,
       buildingHeight: +buildingHeight().toFixed(2), height: +(camera.position.y - groundY).toFixed(3), distance: c ? +c.distance.toFixed(2) : null,
@@ -829,7 +830,20 @@ export function createViewer(host, { onSelect } = {}) {
         if (yIn > -2 && yIn < h + 2) L.push(`<line x1="0" y1="${yIn}" x2="${w}" y2="${yIn}" stroke="#ffd166" stroke-width="1.5"/>`);
       }
     }
-    frameEl.innerHTML = L.length ? `<svg width="${w}" height="${h}" style="position:absolute;inset:0">${L.join("")}</svg>` : "";
+    frameEl.innerHTML = (overlay.url ? `<img src="${overlay.url}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;opacity:${overlay.opacity}">` : "")
+      + (L.length ? `<svg width="${w}" height="${h}" style="position:absolute;inset:0">${L.join("")}</svg>` : "");
+  }
+  let overlay = { url: null, opacity: 0.5 };
+  /** The model's line drawing from the current camera, as pixels (for matching a picture). */
+  function linePixels(w, h) {
+    const pose = currentPose();
+    beginGuide("lines", w, h); guideFrame(pose);
+    const gl = renderer.getContext(), raw = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    endGuide();
+    const data = new Uint8ClampedArray(w * h * 4);   // top row first
+    for (let y = 0; y < h; y++) data.set(raw.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    return { data, width: w, height: h };
   }
   controls.addEventListener("change", () => { if (frameGuides.horizon) drawFrame(); });
   controls.addEventListener("start", () => { if (camSet && !camSet.custom) camSet = { ...camSet, custom: true, preset: camSet.preset }; });
@@ -1484,6 +1498,9 @@ export function createViewer(host, { onSelect } = {}) {
     },
     showFront(on) { frontArrow.visible = !!on; placeArrow(); redraw(); },
     setFrameGuides(g) { frameGuides = { ...frameGuides, ...g }; drawFrame(); },
+    /** A picture laid over the set picture (to match its camera): url (or null to remove) and how see-through. */
+    setOverlay(url, opacity = overlay.opacity) { overlay = { url, opacity }; drawFrame(); },
+    linePixels,
     guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
     /** Every part with its library material (for tests and the Materials panel): type, name, material, how, mean normal. */
     debugParts() {

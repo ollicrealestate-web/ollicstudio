@@ -508,6 +508,7 @@ async function loadModels() {
         load: () => (viewerModelId ? api.getCameras(viewerModelId) : Promise.resolve({})),
         save: body => (viewerModelId ? api.putCameras(viewerModelId, body) : Promise.resolve()),
         words: (text, h) => api.cameraWords(text, h).catch(() => null),
+        match: (blob, h) => api.matchPicture(blob, h),
       }, onRender: list => renderViews(list), onFilm: (a, b) => filmShotFrom(a, b) });
       const { createMaterialsPanel } = await import("./materials/panel.js");
       matPanel = createMaterialsPanel({ root: $("#matPanel"), viewer, toast,

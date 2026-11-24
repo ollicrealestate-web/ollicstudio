@@ -56,3 +56,32 @@ def test_words_need_ollic_ai_and_are_read_with_it(settings, repo, storage, alice
     assert r.status_code == 200, r.text
     s = r.json()["settings"]
     assert s["preset"] == "drone-corner-right" and s["lens"] == 24 and s["height"] == 21 and s["pitch"] == 0 and s["straight"] is True and s["foreground"] == "street"
+
+
+def test_a_matched_picture_keeps_its_own_shape_and_ollic_ai_estimates_its_camera(settings, repo, storage, alice, client):
+    import io
+
+    from PIL import Image
+    mid = _model(client, repo, alice)
+    v = {"id": "m1", "name": "Matched Revit view", "settings": {"preset": "corner-eye-right", "aspect": 1.7778, "custom": True}, "pose": {**POSE, "aspect": 1.7778}}
+    r = client.put(f"/api/models/{mid}/cameras", json={"views": [v]}, headers=alice["headers"])
+    assert r.status_code == 200, r.text and r.json()["views"][0]["settings"]["aspect"] == "1.7778"
+    assert client.put(f"/api/models/{mid}/cameras", json={"views": [{**v, "settings": {"aspect": 9}}]}, headers=alice["headers"]).status_code == 422
+    b = io.BytesIO(); Image.new("RGB", (64, 40), (200, 190, 170)).save(b, "JPEG")
+    files = {"image": ("revit.jpg", b.getvalue(), "image/jpeg")}
+    assert client.post("/api/camera/match-picture", files=files, data={"building_height": "16"}, headers=alice["headers"]).status_code == 503
+    from fastapi.testclient import TestClient
+    from app.auth import TokenVerifier
+    from app.jobs import InlineRunner
+    from app.main import create_app
+
+    class Writer:
+        model = "test"
+        def ask_json(self, system, content, max_tokens=0, timeout=0):
+            assert content[0]["type"] == "image" and "16.0 m high" in content[1]["text"]
+            return {"answer": {"preset": "front-eye", "lens": 35, "height": 1.6, "azimuth": 0, "straight": True, "understood": ["front", "eye level"]}, "usage": {}}
+
+    c = TestClient(create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=InlineRunner(), prompt_writer=Writer()))
+    r = c.post("/api/camera/match-picture", files=files, data={"building_height": "16"}, headers=alice["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["settings"] == {"preset": "front-eye", "lens": 35, "height": 1.6, "azimuth": 0, "straight": True, "pitch": 0}

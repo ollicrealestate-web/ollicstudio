@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from ..auth import CurrentUser, get_current_user
@@ -49,9 +49,15 @@ class CameraSettings(BaseModel):
             raise ValueError("unknown camera angle")
         return v
 
-    @field_validator("aspect")
+    @field_validator("aspect", mode="before")
     @classmethod
     def _a(cls, v):
+        # a named shape, or a picture's own shape (a matched picture), as a number
+        if isinstance(v, (int, float)) or (isinstance(v, str) and re.fullmatch(r"\d+(\.\d+)?", v)):
+            f = float(v)
+            if not 0.3 <= f <= 3.5:
+                raise ValueError("picture shape out of range")
+            return f"{f:.4f}"
         if v not in SHAPES:
             raise ValueError("unknown picture shape")
         return v
@@ -155,3 +161,37 @@ def camera_words(body: WordsIn, request: Request, user: CurrentUser = Depends(ge
                 "pitch": 0 if straight else num(a.get("pitch"), -80, 89, 0), "straight": straight, "aspect": a.get("aspect") if a.get("aspect") in SHAPES else "3:2",
                 "foreground": "street" if a.get("foreground") == "street" else None}
     return {"settings": settings, "understood": [str(x)[:80] for x in (a.get("understood") or [])][:8]}
+
+
+MATCH_SYSTEM = """You look at a picture of a building (an architect's render or a photo) and estimate the camera it was
+taken with, so a 3D model can be viewed from the same place. Answer with one JSON object: {"preset": the nearest of
+front-eye, front-raised, corner-eye-left, corner-eye-right, drone-corner-left, drone-corner-right, aerial, hero-low,
+side, side-left, rear, rear-left, rear-right; "lens": millimetres (full-frame) judging by how much the perspective
+converges and how wide the view is; "height": camera height above the ground in metres (eye level is 1.6); "azimuth":
+degrees around the building from the side you believe is its front (the entrance side), positive when the camera is to
+the right of a person facing that front; "straight": true if the vertical lines are parallel in the picture;
+"pitch": degrees looking down (positive) or up (negative) when they are not; "understood": a short list of what you
+see}. Be honest about uncertainty in "understood"."""
+
+
+@router.post("/camera/match-picture")
+def camera_match_picture(request: Request, user: CurrentUser = Depends(get_current_user), image: UploadFile = File(...), building_height: float = Form(12)):
+    """Ollic AI's rough estimate of a picture's camera (the app then refines it from the edges)."""
+    writer = getattr(request.app.state, "prompt_writer", None)
+    if writer is None or not hasattr(writer, "ask_json"):
+        raise HTTPException(503, {"code": "not_configured", "reason": "Ollic AI is not connected; line the model up by hand, then press Fine-tune."})
+    from .materials import _picture
+    pic = _picture(image, "picture")
+    from ..prompt_writer import PromptWriterFailed, _image_block
+    try:
+        out = writer.ask_json(MATCH_SYSTEM, [_image_block(pic[0]), {"type": "text", "text": f"The building is about {building_height:.1f} m high."}], max_tokens=600, timeout=90)
+    except PromptWriterFailed as exc:
+        log.warning("camera match failed: %s", exc)
+        raise HTTPException(502, {"code": "ai_failed", "reason": "Ollic AI could not read the picture just now; line the model up by hand, then press Fine-tune."})
+    a = out.get("answer") or {}
+    num = lambda v, lo, hi, d: max(lo, min(hi, float(v))) if isinstance(v, (int, float)) else d
+    straight = bool(a.get("straight", True))
+    return {"settings": {"preset": a.get("preset") if a.get("preset") in PRESETS else "corner-eye-right", "lens": num(a.get("lens"), 12, 300, 35),
+                         "height": num(a.get("height"), 0.1, 1000, 1.6), "azimuth": num(a.get("azimuth"), -180, 180, 0), "straight": straight,
+                         "pitch": 0 if straight else num(a.get("pitch"), -80, 89, 0)},
+            "understood": [str(x)[:80] for x in (a.get("understood") or [])][:8]}

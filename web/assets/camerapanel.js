@@ -2,6 +2,7 @@
 // from the front, straight vertical lines, shift, picture shape), "say it in words", framing guides, the front of the
 // building, and saved views (kept for the model on the server).
 import { PRESETS, SHAPES, anglesOf, fromWords, presetSettings } from "./camera.js";
+import { matchView, prepare, pixelsOf, linesOf, matchScore } from "./cameramatch.js";
 
 const el = (tag, attrs = {}, ...kids) => {
   const e = document.createElement(tag);
@@ -39,6 +40,20 @@ export function createCameraPanel({ root, viewer, store, toast = () => {}, onRen
       el("span", { id: "cpFrontMsg" }),
       el("label", { class: "check" }, el("input", { type: "checkbox", id: "cpShowFront" }), " Show the front"),
       el("button", { type: "button", class: "btn sm", id: "cpPickFront" }, "Make this side the front")),
+    el("fieldset", { class: "cp-match" }, el("legend", {}, "Match a picture's angle"),
+      el("p", { class: "hint" }, "A Revit render or a photo of the building: the model is laid under it, and the camera moves until the lines meet."),
+      el("div", { class: "row" },
+        el("label", { class: "btn sm", style: "cursor:pointer" }, "Choose a picture", el("input", { type: "file", id: "cpMatchFile", accept: "image/jpeg,image/png,image/webp", hidden: true })),
+        el("label", {}, "See-through ", el("input", { type: "range", id: "cpMatchOpacity", min: "0", max: "1", step: "0.05", value: "0.5" })),
+        el("button", { type: "button", class: "btn sm", id: "cpMatchAI", disabled: true }, "Ollic AI: rough start"),
+        el("button", { type: "button", class: "btn sm primary", id: "cpMatchFine", disabled: true }, "Fine-tune automatically"),
+        el("button", { type: "button", class: "btn sm", id: "cpMatchStop", hidden: true }, "Stop"),
+        el("button", { type: "button", class: "btn sm", id: "cpMatchRemove", disabled: true }, "Remove the picture")),
+      el("div", { class: "row cp-nudges", id: "cpNudges", hidden: true },
+        ...[["lens", -1, "Lens −"], ["lens", 1, "Lens +"], ["height", -1, "Lower"], ["height", 1, "Higher"], ["azimuth", -1, "◀ Round"], ["azimuth", 1, "Round ▶"],
+          ["distance", -1, "Closer"], ["distance", 1, "Farther"], ["shiftY", 1, "Frame ▲"], ["shiftY", -1, "Frame ▼"], ["shiftX", -1, "Frame ◀"], ["shiftX", 1, "Frame ▶"]]
+          .map(([k, d, t]) => el("button", { type: "button", class: "btn sm", "data-nudge": k, "data-dir": d }, t)),
+        el("span", { class: "cp-score", id: "cpScore", role: "status" }))),
     el("div", { class: "cp-views" },
       el("div", { class: "row" }, el("input", { type: "text", id: "cpViewName", maxlength: "80", placeholder: "Name this view (e.g. Front eye level)", "aria-label": "Name of the view" }),
         el("button", { type: "button", class: "btn primary", id: "cpSave" }, "Save this view"), el("button", { type: "button", class: "btn", id: "cpFree" }, "Free camera"), el("span", { class: "hint", id: "cpMsg", role: "status" })),
@@ -58,7 +73,7 @@ export function createCameraPanel({ root, viewer, store, toast = () => {}, onRen
     root.querySelectorAll("[data-preset]").forEach(b => b.setAttribute("aria-pressed", String(!!now && b.dataset.preset === now.preset && !now.custom)));
     const s = now || { lens: 35, height: 1.6, azimuth: 0, straight: true, pitch: 0, shiftX: 0, shiftY: 0, aspect: "3:2", fill: 0.85, distance: "fit" };
     $("#cpLens").value = $("#cpLensR").value = Math.round(s.lens);
-    const a = anglesOf(s.lens, SHAPES[s.aspect] || 1.5);
+    const a = anglesOf(s.lens, SHAPES[s.aspect] || +s.aspect || 1.5);
     $("#cpAngle").textContent = `${a.h.toFixed(1)}° across, ${a.v.toFixed(1)}° up and down`;
     $("#cpHeight").value = info?.height ?? s.height ?? 1.6;
     $("#cpFit").checked = s.distance === "fit" || s.distance == null; $("#cpDist").disabled = $("#cpFit").checked;
@@ -68,7 +83,10 @@ export function createCameraPanel({ root, viewer, store, toast = () => {}, onRen
     $("#cpStraight").checked = s.straight !== false; $("#cpPitch").disabled = s.straight !== false;
     $("#cpPitch").value = Math.round(s.pitch || 0); $("#cpPitchOut").textContent = `${Math.round(s.pitch || 0)}°`;
     $("#cpShiftX").value = s.shiftX || 0; $("#cpShiftY").value = s.shiftY || 0;
-    $("#cpShape").value = s.aspect || "3:2";
+    const own = !SHAPES[s.aspect] && +s.aspect > 0;
+    root.querySelector("#cpShape option[data-own]")?.remove();
+    if (own) $("#cpShape").append(el("option", { value: String(s.aspect), "data-own": "1" }, `The picture's own (${(+s.aspect).toFixed(2)}:1)`));
+    $("#cpShape").value = String(s.aspect || "3:2");
     const f = viewer.front;
     $("#cpFrontMsg").textContent = `Front: ${FROM[f.from] || f.from}.`;
   }
@@ -173,6 +191,61 @@ export function createCameraPanel({ root, viewer, store, toast = () => {}, onRen
     if (!a || !b || a === b) { msg("Choose two different views."); return; }
     onFilm?.(a, b);
   };
+  // ---------------------------------------------------------------- match a picture's angle
+  let matchImg = null, matchPic = null, matchStop = null;
+  const scoreNow = () => {
+    if (!matchImg) return;
+    const a = matchImg.naturalWidth / matchImg.naturalHeight, w = a >= 1 ? 240 : Math.round(240 * a), h = a >= 1 ? Math.round(240 / a) : 240;
+    if (!matchPic || matchPic.w !== w) matchPic = { w, ...prepare(pixelsOf(matchImg, w, h)) };
+    const s = matchScore(matchPic, linesOf(viewer.linePixels(w, h)));
+    $("#cpScore").textContent = `Lines up: ${Math.round(s)} / 100`;
+    return s;
+  };
+  const numbers = () => { const c = viewer.camera; return { ...(now || presetSettings("corner-eye-right", c.buildingHeight)), height: c.height, distance: c.distance || 30, custom: true }; };
+  $("#cpMatchFile").onchange = async e => {
+    const f = e.target.files?.[0]; if (!f) return;
+    const url = URL.createObjectURL(f), img = new Image(); img.src = url;
+    try { await img.decode(); } catch { msg("That picture could not be opened."); return; }
+    matchImg = img; matchPic = null;
+    const a = img.naturalWidth / img.naturalHeight;
+    const info = viewer.setCamera({ ...numbers(), aspect: +a.toFixed(4), distance: "fit", custom: true });
+    draw(info);
+    viewer.setOverlay(url, +$("#cpMatchOpacity").value);
+    for (const id of ["#cpMatchAI", "#cpMatchFine", "#cpMatchRemove"]) $(id).disabled = false;
+    $("#cpNudges").hidden = false; scoreNow();
+    msg("Line the model up with the picture: Ollic AI's rough start, the buttons, then Fine-tune.");
+  };
+  $("#cpMatchOpacity").oninput = e => { if (matchImg) viewer.setOverlay(matchImg.src, +e.target.value); };
+  $("#cpMatchRemove").onclick = () => { matchImg = null; matchPic = null; viewer.setOverlay(null); $("#cpNudges").hidden = true; for (const id of ["#cpMatchAI", "#cpMatchFine", "#cpMatchRemove"]) $(id).disabled = true; $("#cpScore").textContent = ""; };
+  root.querySelectorAll("[data-nudge]").forEach(b => { b.onclick = () => {
+    const k = b.dataset.nudge, d = +b.dataset.dir, s = numbers();
+    const step = { lens: 2, height: Math.max(0.2, s.height * 0.08), azimuth: 2, distance: Math.max(0.5, s.distance * 0.05), shiftX: 0.02, shiftY: 0.02 }[k];
+    const info = viewer.setCamera({ ...s, aspect: now?.aspect, [k]: (s[k] || 0) + d * step });
+    draw(info); scoreNow();
+  }; });
+  $("#cpMatchAI").onclick = async () => {
+    if (!matchImg || !store.match) return;
+    $("#cpScore").textContent = "Ollic AI is looking…";
+    try {
+      const blob = await new Promise(r => { const c = document.createElement("canvas"), k = Math.min(1, 1024 / Math.max(matchImg.naturalWidth, matchImg.naturalHeight)); c.width = matchImg.naturalWidth * k; c.height = matchImg.naturalHeight * k; c.getContext("2d").drawImage(matchImg, 0, 0, c.width, c.height); c.toBlob(r, "image/jpeg", 0.88); });
+      const r = await store.match(blob, viewer.camera.buildingHeight);
+      const info = viewer.setCamera({ ...presetSettings(r.settings.preset, viewer.camera.buildingHeight), ...r.settings, aspect: now?.aspect, distance: "fit", custom: true });
+      draw(info); scoreNow();
+      msg(`Ollic AI: ${(r.understood || []).join(", ")}. Now press Fine-tune.`);
+    } catch (err) { $("#cpScore").textContent = ""; msg(err.message || "Ollic AI could not read the picture; line it up by hand, then press Fine-tune."); }
+  };
+  $("#cpMatchFine").onclick = async () => {
+    if (!matchImg) return;
+    const ctrl = new AbortController(); matchStop = ctrl;
+    $("#cpMatchFine").disabled = true; $("#cpMatchStop").hidden = false;
+    msg("Fine-tuning: the camera moves in small steps while the lines meet…");
+    try {
+      const r = await matchView(viewer, matchImg, numbers(), { signal: ctrl.signal, onStep: (_, sc) => { $("#cpScore").textContent = `Lines up: ${Math.round(sc)} / 100`; } });
+      draw(viewer.camera); $("#cpScore").textContent = `Lines up: ${Math.round(r.score)} / 100`;
+      msg(r.score >= 50 ? "Matched. Save it as a view if it looks right." : "Close, but not a clean match: nudge it nearer by hand and fine-tune again.");
+    } finally { $("#cpMatchFine").disabled = false; $("#cpMatchStop").hidden = true; matchStop = null; }
+  };
+  $("#cpMatchStop").onclick = () => matchStop?.abort();
   $("#cpFree").onclick = () => { viewer.freeCamera(); draw(); msg("Free camera: orbit as you like."); };
   function save() {
     clearTimeout(saveTimer);
