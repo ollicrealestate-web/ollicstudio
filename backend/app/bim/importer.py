@@ -161,7 +161,7 @@ def import_ifc(data: bytes | str, progress=lambda stage: None) -> ImportResult:
             shape = it.get()
             if shape.id in wanted:
                 try:
-                    meshes[shape.guid] = _to_mesh(shape)
+                    meshes[shape.guid] = _to_mesh(shape, f)
                 except Exception:
                     log.exception("could not convert geometry of %s", shape.guid)
             if not it.next():
@@ -255,7 +255,8 @@ class _Mesh:
         return np.array([self.verts.min(axis=0), self.verts.max(axis=0)])
 
 
-_UNNAMED = re.compile(r"^(ifc)?(surface[-_ ]?style|style|material|surfacestyle)[-_ #]?\d*$", re.I)
+_UNNAMED = re.compile(r"^(ifc)?(surface[-_ ]?style\w*|style|material|surfacestyle\w*)[-_ #]?\d*$", re.I)
+_ENTITY_REF = re.compile(r"^Ifc\w+-(\d+)$")
 
 
 def _rgba(m):
@@ -268,15 +269,32 @@ def _rgba(m):
         return None
 
 
-def _style_name(m) -> str | None:
-    """The name of a surface style (Revit and Ollic name them after the material); None for made-up names."""
+def _style_name(m, f=None) -> str | None:
+    """The name of a surface style (Revit and Ollic name them after the material); None for made-up names.
+    IfcOpenShell names a face's material after the entity it came from ("IfcSurfaceStyleRendering-27"): the name the
+    architect gave is then read from that entity's surface style (or material) in the file."""
     n = getattr(m, "name", None)
     n = n() if callable(n) else n
     n = str(n or "").strip()
-    return n[:120] if n and not _UNNAMED.match(n) else None
+    ref = _ENTITY_REF.match(n)
+    if ref and f is not None:
+        n = ""
+        try:
+            e = f.by_id(int(ref.group(1)))
+            if e.is_a("IfcSurfaceStyle") or e.is_a("IfcMaterial"):
+                n = e.Name or ""
+            else:
+                for inv in f.get_inverse(e):
+                    if inv.is_a("IfcSurfaceStyle") and inv.Name:
+                        n = inv.Name
+                        break
+        except Exception:
+            n = ""
+        n = str(n).strip()
+    return n[:120] if n and not _UNNAMED.match(n) and not _ENTITY_REF.match(n) else None
 
 
-def _to_mesh(shape) -> _Mesh:
+def _to_mesh(shape, f=None) -> _Mesh:
     """An element's triangles, split into parts by the material (surface style) of each face."""
     g = shape.geometry
     v = np.asarray(g.verts, dtype=np.float32).reshape(-1, 3)
@@ -292,9 +310,9 @@ def _to_mesh(shape) -> _Mesh:
     if mats and len(ids) == len(fc):
         for k in np.unique(ids):
             m = mats[int(k)] if 0 <= int(k) < len(mats) else None
-            parts.append((fc[ids == k], _rgba(m) if m is not None else None, _style_name(m) if m is not None else None))
+            parts.append((fc[ids == k], _rgba(m) if m is not None else None, _style_name(m, f) if m is not None else None))
     else:
-        parts.append((fc, _rgba(mats[0]) if mats else None, _style_name(mats[0]) if mats else None))
+        parts.append((fc, _rgba(mats[0]) if mats else None, _style_name(mats[0], f) if mats else None))
     return _Mesh(v, fc, parts[0][1], shape.type, parts)
 
 

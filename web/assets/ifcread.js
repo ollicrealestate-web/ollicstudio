@@ -251,11 +251,14 @@ function build(api, id, progress) {
       g.delete();
     }
     const comp = comps.get(mesh.expressID);
+    // the class stays what it always was (from the element's names and how many colours it has), so the material-map
+    // guide is unchanged; the part's own name is kept beside it for matching to the library
+    const colours = new Set([...groups.values()].filter(g => g.n).map(g => g.rgba.join(","))).size;
     const out = [], lu = layerUse.get(mesh.expressID), names = comp?.materials || [];
     for (const gr of groups.values()) {
       if (!gr.n) continue;
       // a layered wall drawn as one shape: its two faces get the layers on their sides, the rest (ends, top) its thickest layer
-      if (lu && groups.size === 1 && !gr.sname) { out.push(...splitLayers(gr, lu, comp, lo, hi)); continue; }
+      if (lu && groups.size === 1 && !gr.sname) { out.push(...splitLayers(gr, lu, comp, lo, hi, colours)); continue; }
       const pos = new Float32Array(gr.n * 3);
       let o = 0;
       for (const { vd, ix, m } of gr.list) {
@@ -268,7 +271,7 @@ function build(api, id, progress) {
         }
       }
       const pname = partName(gr.sname, gr.rgba, names);
-      out.push({ pos, rgba: gr.rgba, name: pname, cls: materialClass(comp?.ifc_type, pname ? [pname] : names, gr.rgba, groups.size) });
+      out.push({ pos, rgba: gr.rgba, name: pname, cls: materialClass(comp?.ifc_type, names, gr.rgba, colours) });
     }
     if (out.length) { meshes.push({ eid: mesh.expressID, parts: out }); if (comp) comp.has_geometry = true; }
     if (index % 50 === 0) progress(`Building the 3D geometry (${index + 1} of ${total})`, 0.15 + 0.7 * (index + 1) / Math.max(1, total));
@@ -302,7 +305,7 @@ function build(api, id, progress) {
  * Splits one layered wall's triangles by the side they face: along the layer direction (the wall's local Y), the
  * low side is the first layer and the high side the last (reversed when the direction is negative).
  */
-function splitLayers(gr, lu, comp, lo, hi) {
+function splitLayers(gr, lu, comp, lo, hi, colours) {
   const sides = [[], [], []];   // first layer, last layer, the rest
   let axis = null;
   for (const { vd, ix, m } of gr.list) {
@@ -321,7 +324,7 @@ function splitLayers(gr, lu, comp, lo, hi) {
   const core = lu.layers.reduce((x, y) => (y.t > x.t ? y : x)).name;
   const names = [lu.layers[0].name, lu.layers.at(-1).name, core];
   const out = [];
-  sides.forEach((arr, i) => { if (arr.length) out.push({ pos: new Float32Array(arr), rgba: gr.rgba, name: names[i] || null, cls: materialClass(comp?.ifc_type, names[i] ? [names[i]] : [], gr.rgba, 1) }); });
+  sides.forEach((arr, i) => { if (arr.length) out.push({ pos: new Float32Array(arr), rgba: gr.rgba, name: names[i] || null, cls: materialClass(comp?.ifc_type, comp?.materials || [], gr.rgba, colours) }); });
   void axis;
   return out;
 }

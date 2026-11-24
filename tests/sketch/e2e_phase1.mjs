@@ -14,10 +14,10 @@ const OUT = process.argv[2] || "out/sketch";
 mkdirSync(OUT, { recursive: true });
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml" };
-export function serve() {
+export function serve(root = WEB) {
   const srv = createServer(async (req, res) => {
     const path = normPath(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^([/\\])+/, "");
-    try { const body = await readFile(join(WEB, path || "index.html")); res.writeHead(200, { "Content-Type": TYPES[extname(path)] || "application/octet-stream" }); res.end(body); }
+    try { const body = await readFile(join(root, path || "index.html")); res.writeHead(200, { "Content-Type": TYPES[extname(path)] || "application/octet-stream" }); res.end(body); }
     catch { res.writeHead(404); res.end("not found"); }
   });
   return new Promise(r => srv.listen(0, "127.0.0.1", () => r(srv)));

@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the guides test compares against the viewer as it was
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -38,6 +40,7 @@ jobs:
           path: |
             out/sketch/*.png
             out/sketch/*.pdf
+            out/studio/*.png
             out/sketch/*.dxf
             out/sketch/*.glb
             out/sketch/*.ifc

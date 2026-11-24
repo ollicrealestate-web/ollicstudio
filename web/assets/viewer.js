@@ -129,8 +129,8 @@ export function createViewer(host, { onSelect } = {}) {
       const srgb = srcColor.clone().convertLinearToSRGB();
       const mat = matchMaterial({ name: src?.userData?.ifcName, names: x.materials || [], ollic: x.ollicMaterial, cls: named ? named[1] : guessClass(x.ifcType, opacity),
         rgba: [srgb.r, srgb.g, srgb.b, opacity], parts: o.parent?.children?.filter(c => c.isMesh).length || 1 });
-      const lib = materialById(mat.id);
-      const cls = lib?.cls || (named ? named[1] : guessClass(x.ifcType, opacity));
+      // the class stays the reader's own: the guides for AI renders (material map) are drawn from it and must not change
+      const cls = named ? named[1] : guessClass(x.ifcType, opacity);
       o.userData.mat = mat;
       const look = lookFor(cls, srcColor, opacity);
       if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres);
