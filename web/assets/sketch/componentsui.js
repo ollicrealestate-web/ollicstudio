@@ -1,6 +1,7 @@
 // In-place components in the workspace: Extrusion / Sweep (solid or void) in sketch mode, Wall Sweep and
 // Wall Reveal, Parapet, Reference Planes; their plan, 3D and Properties.
 import * as G from "./geom.js";
+import { matColor, MATERIALS } from "./library.js";
 import * as C from "./components.js";
 import * as S from "./solids.js";
 import { checkSketch, floorParts } from "./floors.js";
@@ -184,7 +185,7 @@ export function componentsAt(app, p, tol) {
 export function cutWallSolids(doc, w, solids) {
   let out = solids;
   for (const r of C.revealsFor(doc, w)) out = S.applyReveal(out, r);
-  const voids = C.voidCutters(doc);
+  const voids = C.voidCutters(doc).filter(v => !v.targets || v.targets.includes(w.id)); // a void made for chosen elements cuts only those
   if (voids.length) out = S.applyVoids(out, voids);
   return out;
 }
@@ -193,7 +194,7 @@ export function cutWallSolids(doc, w, solids) {
 export function cutWallPlan(doc, w, pieces, cutZ) {
   let out = pieces;
   for (const r of C.revealsFor(doc, w)) if (r.z0 <= cutZ && r.z1 >= cutZ) out = out.map(p => S.clipHalf(p, r.origin, r.n, r.max)).filter(Boolean);
-  for (const v of C.voidCutters(doc)) if (v.z0 <= cutZ && v.z1 >= cutZ) for (const vp of v.polys) out = S.subtractPolygon(out, vp);
+  for (const v of C.voidCutters(doc)) if ((!v.targets || v.targets.includes(w.id)) && v.z0 <= cutZ && v.z1 >= cutZ) for (const vp of v.polys) out = S.subtractPolygon(out, vp);
   return out;
 }
 
@@ -229,7 +230,7 @@ export function buildComponents3D(group, THREE, app, visible) {
     : new THREE.MeshStandardMaterial({ color: sel ? 0x3b82f6 : new THREE.Color(hex), roughness: 0.85, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   const edgeCol = style === "hidden" ? 0x111111 : style === "wire" ? 0xe8e8ec : 0x1b1b20;
   const add = (geo, c) => {
-    if (style !== "wire") { const m = new THREE.Mesh(geo, mat(c.material || "#cccccc", app.selection.has(c.id))); m.userData.id = c.id; m.castShadow = m.receiveShadow = style === "realistic"; group.add(m); }
+    if (style !== "wire") { const m = new THREE.Mesh(geo, mat(matColor(c.material || "#cccccc"), app.selection.has(c.id))); m.userData.id = c.id; m.castShadow = m.receiveShadow = style === "realistic"; group.add(m); }
     group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), new THREE.LineBasicMaterial({ color: app.selection.has(c.id) && style === "wire" ? 0x3b82f6 : edgeCol })));
   };
   for (const c of doc.components) {
@@ -407,6 +408,8 @@ export function addParapet(doc, wallIds, H, T, coping = true) {
   return made;
 }
 
+/** Material field: the library list for library materials, a colour picker for colours. */
+const matInput = (m, esc) => (/^#/.test(m || "#") ? `<input id="cMat" type="color" value="${m || "#cccccc"}">` : `<select id="cMat">${MATERIALS.map(x => `<option value="${x.id}"${x.id === m ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`);
 export function componentProps(app, ids, esc) {
   const doc = app.doc, cs = ids.map(id => doc.components.find(c => c.id === id) || doc.referencePlanes.find(r => r.id === id));
   if (cs.length !== 1) return `<div class="pnote">${cs.length} components selected.</div>`;
@@ -417,12 +420,12 @@ export function componentProps(app, ids, esc) {
     <div class="pgroup">Constraints</div><div class="prow"><span>Work Plane</span><input readonly value="${c.plane ? `Wall face (${esc(({ north: "North", south: "South", east: "East", west: "West" })[c.plane.side] || "")} elevation)` : `Level : ${esc(lv?.name || "")}`}"></div>
     ${c.plane ? `<div class="pnote">Start and End are in mm out from the wall face; negative goes into the wall.</div>` : ""}
     <div class="prow"><span>Extrusion Start</span><input id="cStart" type="number" step="50" value="${c.start}"></div><div class="prow"><span>Extrusion End</span><input id="cEnd" type="number" step="50" value="${c.end}"></div>
-    ${c.isVoid ? "" : `<div class="prow"><span>Material</span><input id="cMat" type="color" value="${c.material}"></div>`}<div class="pnote">Double-click to edit the profile.</div>`;
+    ${c.isVoid ? "" : `<div class="prow"><span>Material</span>${matInput(c.material, esc)}</div>`}<div class="pnote">Double-click to edit the profile.</div>`;
   if (c.kind === "sweep") return `<div class="ptype"><div class="row"><span>${c.name || "Sweep"}</span><button class="btn" type="button" id="cEdit">Edit path</button></div></div>
     <div class="prow"><span>Profile</span><select id="cProf">${C.defaultProfiles().map(p => `<option value="${p.id}"${p.id === c.profileId ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
     ${c.plane ? `<div class="prow"><span>Work Plane</span><input readonly value="Wall face (${esc(({ north: "North", south: "South", east: "East", west: "West" })[c.plane.side] || "")} elevation)"></div>` : `<div class="prow"><span>Height above level</span><input id="cHt" type="number" step="50" value="${c.height}"></div>`}
     <div class="prow"><span>Flip profile</span><input id="cFlip" type="checkbox"${c.flip ? " checked" : ""}></div>
-    ${c.isVoid ? "" : `<div class="prow"><span>Material</span><input id="cMat" type="color" value="${c.material}"></div>`}`;
+    ${c.isVoid ? "" : `<div class="prow"><span>Material</span>${matInput(c.material, esc)}</div>`}`;
   return `<div class="ptype"><div class="row"><span>Wall ${c.reveal ? "Reveal" : "Sweep"}</span><span>${c.wallIds.length} wall${c.wallIds.length > 1 ? "s" : ""}</span></div></div>
     <div class="prow"><span>Face</span><select id="cSide"><option value="exterior">Exterior</option><option value="interior"${c.side === "interior" ? " selected" : ""}>Interior</option></select></div>
     <div class="prow"><span>Measured from</span><select id="cFrom"><option value="base">Base</option><option value="top"${c.from === "top" ? " selected" : ""}>Top</option></select></div>

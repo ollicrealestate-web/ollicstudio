@@ -56,7 +56,7 @@ export function newProject(name = "Untitled sketch") {
     units: "mm",
     levels: [{ id: "lv-1", name: "Level 1", elevation: 0 }],
     ...defaultTypes(),
-    walls: [], openings: [], floors: [], roofs: [], components: [],
+    walls: [], openings: [], floors: [], roofs: [], components: [], details: [],
     lines: [], dimensions: [], texts: [], tags: [], referencePlanes: [], constraints: [],
     settings: { gridMm: 1000, defaultStoreyMm: DEFAULT_STOREY_MM },
   };
@@ -64,7 +64,7 @@ export function newProject(name = "Untitled sketch") {
 
 /** Collections that hold elements with ids; history and selection work over these. */
 export const COLLECTIONS = ["levels", "wallTypes", "floorTypes", "roofTypes", "doorTypes", "windowTypes", "profiles",
-  "walls", "openings", "floors", "roofs", "components", "lines", "dimensions", "texts", "tags", "referencePlanes", "constraints"];
+  "walls", "openings", "floors", "roofs", "components", "details", "lines", "dimensions", "texts", "tags", "referencePlanes", "constraints"];
 
 /** Accepts older or partial documents and fills in what is missing. Throws on anything that is not a sketch. */
 export function normalize(doc) {

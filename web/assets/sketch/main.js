@@ -16,6 +16,7 @@ import { OpeningTool, drawOpenings, drawOpeningDims, openingsAt, buildOpenings3D
 import * as OP from "./openings.js";
 import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
 import { floorLoops, floorParts, curvePoints as curvePts } from "./floors.js";
+import { drawDetails, detailsAt, detailBoxes, buildDetails3D, FINISHING, finishingDialog, detailProps, wireDetailProps } from "./detailsui.js";
 import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSketchProps, wireComponentSketchProps, drawComponents, drawRefPlanes, componentsAt, cutWallSolids, cutWallPlan, floorVoidHoles, buildComponents3D, RefPlaneTool, modelInPlaceDialog, wallSweepDialog, parapetDialog, componentProps, wireComponentProps, workPlaneDialog } from "./componentsui.js";
 import { checkSketch } from "./floors.js";
 import { chainPath as sweepChain, componentPlanStrip } from "./components.js";
@@ -143,7 +144,7 @@ app.chainOf = id => {
 };
 app.setLevel = id => setLevel(id);
 app.visibleLevels3D = () => { const hidden = new Set(app.prefs.hidden3D || []); return hidden.size ? new Set(app.doc.levels.filter(l => !hidden.has(l.id)).map(l => l.id)) : null; };
-app.drawModel = view => { drawFloors(view, app); drawRoofs(view, app); drawWalls(view, app); drawAnnotations(view, app); drawOpenings(view, app); drawComponents(view, app); drawRefPlanes(view, app); };
+app.drawModel = view => { drawFloors(view, app); drawRoofs(view, app); drawWalls(view, app); drawAnnotations(view, app); drawOpenings(view, app); drawComponents(view, app); drawDetails(view, app); drawRefPlanes(view, app); };
 app.cutWallSolids = (w, solids) => cutWallsByRoof(app.doc, w, cutWallSolids(app.doc, w, solids));
 app.drawSketchMarks = view => drawRoofSketchMarks(view, app);
 app.cutWallByRoof = (w, solids) => cutWallsByRoof(app.doc, w, solids);
@@ -152,6 +153,7 @@ app.buildRoofs3D = (group, THREE, visible) => buildRoofs3D(group, THREE, app, vi
 app.cutWallPlan = (w, pieces, cutZ) => cutWallPlan(app.doc, w, pieces, cutZ);
 app.floorVoidHoles = (part, top, bottom) => floorVoidHoles(app.doc, part, top, bottom);
 app.buildComponents3D = (group, THREE, visible) => buildComponents3D(group, THREE, app, visible);
+app.buildDetails3D = (group, THREE, visible) => buildDetails3D(group, THREE, app, visible);
 app.buildFloors3D = (group, THREE, visible) => buildFloors3D(group, THREE, app, visible);
 app.sketch = null;
 app.sketchChanged = () => { renderRibbon(); renderOptions(); renderProps(); setPrompt(); app.redraw(true); };
@@ -172,6 +174,7 @@ app.extraBoxes = () => [
   // components and reference planes, so Zoom to fit finds them too
   ...app.doc.components.filter(c => c.levelId === app.levelId && c.kind !== "wallSweep").map(c => { try { const o = app.outlineOf(c.id).flatMap(x => x.pts); return o.length ? boxOf(o) : null; } catch { return null; } }).filter(Boolean),
   ...app.doc.referencePlanes.map(r => boxOf([r.a, r.b])),
+  ...detailBoxes(app, app.levelId),
 ];
 /** Pick Lines in the 3D view while sketching a sweep or extrusion (on the level or in an elevation). */
 app.pickEdge3D = {
@@ -286,7 +289,7 @@ app.updateHover = c => {
     cands.push({ id: w.id, d: inside ? 0.5 : d }); // lines drawn on top of a wall win when right on them
   }
   cands.push(...openingsAt(app, c.raw));
-  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...roofsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol), ...annotationsAt(app, c.raw, tol));
+  if (!app.sketch) cands.push(...floorsAt(app, c.raw, tol), ...roofsAt(app, c.raw, tol), ...componentsAt(app, c.raw, tol), ...detailsAt(app, c.raw, tol), ...annotationsAt(app, c.raw, tol));
   const list = cands.filter(x => x.d <= tol).sort((a, b) => a.d - b.d).map(x => x.id);
   // Tab can also pick the whole chain of joined walls under the cursor
   const first = list[0];
@@ -438,6 +441,7 @@ const RIBBON = [
       { id: "wallReveal", label: "Wall Reveal", icon: "sweep", run: () => wallSweepDialog(app, ui, true) },
       { id: "parapet", label: "Parapet", icon: "wall", run: () => parapetDialog(app, ui) },
     ] },
+    { label: "Finishing", items: FINISHING.map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
     { label: "Model", items: [{ id: "modelLine", label: "Model Line", icon: "line", key: "LI", tool: "modelLine" }] },
     { label: "Work Plane", items: [{ id: "refPlane", label: "Ref Plane", icon: "section", key: "RP", tool: "refPlane" }, { id: "workPlane", label: "Set", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
   ] },
@@ -637,6 +641,7 @@ function renderProps() {
   }
   const els = ids.map(app.lookup);
   if (els.every(e => app.doc.components.some(c => c.id === e.id) || app.doc.referencePlanes.some(r => r.id === e.id))) { box.innerHTML = componentProps(app, ids, esc); wireComponentProps(app, ids, renderProps); return; }
+  if (els.every(e => app.doc.details.some(d => d.id === e.id))) { box.innerHTML = detailProps(app, ids, esc); wireDetailProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.floors.some(f => f.id === e.id))) { box.innerHTML = floorProps(app, ids, esc); wireFloorProps(app, ids, renderProps, ui); return; }
   if (els.every(e => app.doc.dimensions.some(d => d.id === e.id) || app.doc.texts.some(t => t.id === e.id)) && (els.every(e => e.text != null) || els.every(e => e.text == null))) { box.innerHTML = annotationProps(app, ids, esc); wireAnnotationProps(app, ids, renderProps); return; }
   if (els.every(e => app.doc.roofs.some(r => r.id === e.id))) { box.innerHTML = roofProps(app, ids, esc); wireRoofProps(app, ids, renderProps, ui); return; }
@@ -815,6 +820,7 @@ function deleteSelection() {
     doc.dimensions = doc.dimensions.filter(d => !ids.includes(d.id));
     doc.texts = doc.texts.filter(t => !ids.includes(t.id));
     doc.components = doc.components.filter(c => !ids.includes(c.id));
+    doc.details = doc.details.filter(d => !ids.includes(d.id));
     doc.referencePlanes = doc.referencePlanes.filter(r => !ids.includes(r.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
     doc.tags = doc.tags.filter(t => !ids.includes(t.id) && doc.openings.some(o => o.id === t.hostId));
@@ -1164,7 +1170,8 @@ function exportDialog() {
         download(blob, `${name} - 3D.png`); ok(`3D picture exported: ${shot.width} x ${shot.height} px.`);
       } catch (e) { err(e); }
     };
-    d.querySelector("#xIfc").onclick = () => { try { const r = modelIfc(app, THREE, { name: app.doc.name || "Sketch", typeMark: o => OP.typeMark(app.doc, o) }); download(new Blob([r.text], { type: "application/x-step" }), `${name}.ifc`); const c = r.counts; ok(`IFC exported: ${c.IFCWALL || 0} walls, ${c.IFCSLAB || 0} floors, ${c.IFCROOF || 0} roofs, ${c.IFCDOOR || 0} doors, ${c.IFCWINDOW || 0} windows, ${c.IFCBUILDINGELEMENTPROXY || 0} other parts.`); } catch (e) { err(e); } };
+    const fin = c => Object.entries(c).filter(([k]) => !["IFCWALL", "IFCSLAB", "IFCROOF", "IFCDOOR", "IFCWINDOW", "IFCBUILDINGELEMENTPROXY"].includes(k)).reduce((n, [, v]) => n + v, 0);
+    d.querySelector("#xIfc").onclick = () => { try { const r = modelIfc(app, THREE, { name: app.doc.name || "Sketch", typeMark: o => OP.typeMark(app.doc, o) }); download(new Blob([r.text], { type: "application/x-step" }), `${name}.ifc`); const c = r.counts; ok(`IFC exported: ${c.IFCWALL || 0} walls, ${c.IFCSLAB || 0} floors, ${c.IFCROOF || 0} roofs, ${c.IFCDOOR || 0} doors, ${c.IFCWINDOW || 0} windows, ${c.IFCBUILDINGELEMENTPROXY || 0} other parts${fin(c) ? `, ${fin(c)} finishing parts` : ""}.`); } catch (e) { err(e); } };
     d.querySelector("#xJson").onclick = () => { download(new Blob([JSON.stringify(app.doc, null, 1)], { type: "application/json" }), `${name}.ollic-sketch.json`); ok("Project file exported."); };
   });
 }
