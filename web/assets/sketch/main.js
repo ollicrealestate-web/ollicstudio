@@ -704,6 +704,39 @@ function setLevel(id) {
   renderBrowser(); app.toolChanged();
 }
 
+/** The Camera panel (the same as the Studio's): ready-made angles, lens, front and saved views for the 3D view. */
+let camPanel = null;
+async function toggleCamera(open = !app.camOpen) {
+  app.camOpen = open;
+  let d = document.getElementById("camDrawer");
+  if (!d) {
+    d = document.createElement("aside"); d.id = "camDrawer"; d.className = "sk-cam"; d.setAttribute("aria-label", "Camera");
+    d.innerHTML = `<div class="sk-cam-head"><h3>Camera</h3><button type="button" class="sk-cam-x" aria-label="Close the Camera panel">×</button></div><div class="sk-cam-body"></div>`;
+    document.body.append(d);
+    d.querySelector(".sk-cam-x").onclick = () => toggleCamera(false);
+  }
+  d.hidden = !open;
+  $("#v3Cam")?.setAttribute("aria-expanded", String(open));
+  if (open) {   // beside the 3D view where there is room (over the plan), else over the view's right side
+    const r = $("#view3dWrap").getBoundingClientRect(), W = Math.min(440, innerWidth - 24);
+    Object.assign(d.style, r.left >= W + 24 ? { left: `${r.left - W - 12}px`, right: "auto" } : { left: "auto", right: "12px" });
+  }
+  if (open && app.view3d.paused) setLive3D(true);
+  if (open && !camPanel) {
+    const { createCameraPanel } = await import("../camerapanel.js");
+    const { api } = await import("../api.js");
+    app.view3d.rig.detectFront();
+    camPanel = createCameraPanel({ root: d.querySelector(".sk-cam-body"), viewer: app.view3d.rig, toast: m => app.toast(m), store: {
+      load: async () => structuredClone(app.doc.cameras || {}),
+      // kept with the sketch: in this browser at once, and in the account with the next save
+      save: async b => { app.doc.cameras = { front: b.front || null, views: b.views || [] }; app.store.changed(); },
+      words: (text, h) => api.cameraWords(text, h).catch(() => null),
+      match: (blob, h) => api.matchPicture(blob, h) } });
+    await camPanel.load();
+  }
+}
+app.openCamera = toggleCamera;
+
 function renderViewBars() {
   const scale = app.prefs.scale || "100";
   $("#planBar").innerHTML = `<label>Scale <select id="vScale">${["50", "100", "200"].map(s => `<option value="${s}"${s === scale ? " selected" : ""}>1 : ${s}</option>`).join("")}</select></label>
@@ -720,7 +753,9 @@ function renderViewBars() {
     <button type="button" id="v3Fit">Zoom to fit</button>
     <details class="lvpick"><summary>Levels</summary><div>${LV.sorted(app.doc).map(l => `<label><input type="checkbox" data-l3="${l.id}"${(app.prefs.hidden3D || []).includes(l.id) ? "" : " checked"}> ${esc(l.name)}</label>`).join("")}</div></details>
     <button type="button" data-corner="sw">SW</button><button type="button" data-corner="se">SE</button><button type="button" data-corner="ne">NE</button><button type="button" data-corner="nw">NW</button><button type="button" data-corner="top">Top</button>
+    <button type="button" id="v3Cam" aria-expanded="${!!app.camOpen}" aria-controls="camDrawer">Camera</button>
     <button type="button" id="v3Ai" class="ai-btn">Complete my design</button>`;
+  $("#v3Cam").onclick = () => toggleCamera();
   $("#v3Ai").onclick = () => app.completeDesign();
   $("#vStyle").onchange = e => { app.prefs.visual = e.target.value; app.savePrefs(); app.view3d.style = e.target.value; app.view3d.invalidate(); };
   $("#v3Fit").onclick = () => fit3D();

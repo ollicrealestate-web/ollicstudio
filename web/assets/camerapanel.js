@@ -12,7 +12,7 @@ const el = (tag, attrs = {}, ...kids) => {
 };
 const GROUPS = [["Outside", ["front-eye", "front-raised", "corner-eye-left", "corner-eye-right", "drone-corner-left", "drone-corner-right", "aerial", "hero-low"]],
   ["Sides and rear", ["side-left", "side", "rear-left", "rear", "rear-right"]], ["Details", ["entrance", "plan"]], ["Inside", ["interior-one", "interior-two"]]];
-const FROM = { entrance: "found from the main entrance", guessed: "guessed (the model's own front)", you: "set by you" };
+const FROM = { entrance: "found from the main entrance", guessed: "guessed (the model's own front)", you: "set by you", project: "the project's front side (Project settings)" };
 
 /** root: the panel. viewer: the Studio viewer. store: { load() -> { front, views }, save({ front, views }), words(text, height) -> { settings, understood } }. */
 export function createCameraPanel({ root, viewer, store, toast = () => {}, onRender = null, onFilm = null }) {
@@ -41,7 +41,7 @@ export function createCameraPanel({ root, viewer, store, toast = () => {}, onRen
       el("label", { class: "check" }, el("input", { type: "checkbox", id: "cpShowFront" }), " Show the front"),
       el("button", { type: "button", class: "btn sm", id: "cpPickFront" }, "Make this side the front")),
     el("fieldset", { class: "cp-match" }, el("legend", {}, "Match a picture's angle"),
-      el("p", { class: "hint" }, "A Revit render or a photo of the building: the model is laid under it, and the camera moves until the lines meet."),
+      el("p", { class: "hint" }, "A render from another program or a photo of the building: the model is laid under it, and the camera moves until the lines meet."),
       el("div", { class: "row" },
         el("label", { class: "btn sm", style: "cursor:pointer" }, "Choose a picture", el("input", { type: "file", id: "cpMatchFile", accept: "image/jpeg,image/png,image/webp", hidden: true })),
         el("label", {}, "See-through ", el("input", { type: "range", id: "cpMatchOpacity", min: "0", max: "1", step: "0.05", value: "0.5" })),

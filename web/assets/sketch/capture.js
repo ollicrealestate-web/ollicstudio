@@ -18,7 +18,7 @@ export const VIEW_NAMES = ["ne", "nw", "se", "sw", "front"];
  * The 3D view on screen is put back as it was.
  */
 export async function capture3D(app, names = VIEW_NAMES, { style = "clay", width = 1024, height = 768, quality = 0.85 } = {}) {
-  const v = app.view3d, cam = v.camera.position.clone(), target = v.controls.target.clone();
+  const v = app.view3d, cam = v.camera.position.clone(), target = v.controls.target.clone(), pose = v.rig?.pic ? v.rig.currentPose() : null;
   const keep = { visual: app.prefs.visual, hidden: app.prefs.hidden3D, sel: app.selection, box: app.prefs.sectionBox, paused: v.paused };
   const out = [];
   try {
@@ -37,6 +37,7 @@ export async function capture3D(app, names = VIEW_NAMES, { style = "clay", width
     Object.assign(app.prefs, { visual: keep.visual, hidden3D: keep.hidden }); app.selection = keep.sel; v.paused = keep.paused;
     if (keep.box) applySectionBox(v, keep.box);
     v.camera.position.copy(cam); v.controls.target.copy(target); v.controls.update?.(); v.invalidate();
+    if (pose) v.rig.showPose(pose);   // the camera angle set in the Camera panel comes back
   }
   return out;
 }
