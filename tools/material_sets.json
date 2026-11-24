@@ -1,0 +1,250 @@
+{
+ "_about": "Texture sets for the Ollic material library: each is fetched once from ambientCG (CC0 1.0 public domain) by tools/fetch_assets.py, which records the asset id. 'q' is the search; 'prefer' pins an asset id when the search picks wrongly.",
+ "sets": {
+  "plaster-fine": {
+   "q": [
+    "painted plaster",
+    "plaster"
+   ],
+   "cls": "plaster",
+   "prefer": "PaintedPlaster017"
+  },
+  "render-sand": {
+   "q": [
+    "plaster",
+    "stucco"
+   ],
+   "cls": "plaster",
+   "prefer": "Plaster002"
+  },
+  "render-tyrolean": {
+   "q": [
+    "plaster",
+    "facade"
+   ],
+   "cls": "plaster",
+   "prefer": "Plaster004"
+  },
+  "concrete-fairface": {
+   "q": "concrete",
+   "cls": "concrete",
+   "prefer": "Concrete042A"
+  },
+  "concrete-polished": {
+   "q": [
+    "concrete",
+    "floor"
+   ],
+   "cls": "concrete",
+   "prefer": "Concrete030"
+  },
+  "concrete-board": {
+   "q": [
+    "concrete",
+    "wood formwork"
+   ],
+   "cls": "concrete",
+   "prefer": "Concrete031"
+  },
+  "travertine": {
+   "q": "travertine",
+   "cls": "stone",
+   "prefer": "Travertine009"
+  },
+  "granite-grey": {
+   "q": [
+    "granite"
+   ],
+   "cls": "stone",
+   "prefer": "Granite002A"
+  },
+  "marble-white": {
+   "q": [
+    "marble"
+   ],
+   "cls": "stone",
+   "prefer": "Marble012"
+  },
+  "marble-beige": {
+   "q": [
+    "marble",
+    "onyx"
+   ],
+   "cls": "stone",
+   "prefer": "Marble014"
+  },
+  "slate": {
+   "q": [
+    "slate",
+    "rock dark",
+    "tiles slate"
+   ],
+   "cls": "stone",
+   "prefer": "Rock031"
+  },
+  "sandstone": {
+   "q": [
+    "sandstone",
+    "rock",
+    "stone"
+   ],
+   "cls": "stone",
+   "prefer": "Bricks084"
+  },
+  "terrazzo": {
+   "q": [
+    "terrazzo",
+    "tiles"
+   ],
+   "cls": "stone",
+   "prefer": "Terrazzo013"
+  },
+  "stone-wall": {
+   "q": "rock wall",
+   "cls": "stone",
+   "prefer": "Rock023"
+  },
+  "wood-teak": {
+   "q": [
+    "wood",
+    "wood siding"
+   ],
+   "cls": "wood",
+   "prefer": "Wood092"
+  },
+  "wood-dark": {
+   "q": [
+    "wood",
+    "wood floor"
+   ],
+   "cls": "wood",
+   "prefer": "Wood051"
+  },
+  "wood-planks": {
+   "q": "planks",
+   "cls": "wood",
+   "prefer": "Planks037A"
+  },
+  "wood-floor": {
+   "q": "wood floor",
+   "cls": "wood",
+   "prefer": "WoodFloor051"
+  },
+  "brick-red": {
+   "q": [
+    "bricks red",
+    "red brick wall",
+    "bricks"
+   ],
+   "cls": "brick",
+   "prefer": [
+    "Bricks101",
+    "Bricks059"
+   ]
+  },
+  "brick-buff": {
+   "q": "bricks white",
+   "cls": "brick",
+   "prefer": "Bricks093"
+  },
+  "block-concrete": {
+   "q": [
+    "concrete blocks",
+    "bricks concrete",
+    "cinder"
+   ],
+   "cls": "brick",
+   "prefer": "Bricks038"
+  },
+  "roof-tiles": {
+   "q": "roofing tiles",
+   "cls": "roof",
+   "prefer": [
+    "RoofingTiles013A"
+   ]
+  },
+  "roof-metal": {
+   "q": "corrugated steel",
+   "cls": "roof",
+   "prefer": "CorrugatedSteel005"
+  },
+  "metal-brushed": {
+   "q": [
+    "metal",
+    "brushed"
+   ],
+   "cls": "metal",
+   "prefer": [
+    "Metal049A"
+   ]
+  },
+  "metal-painted": {
+   "q": [
+    "painted metal",
+    "metal"
+   ],
+   "cls": "metal",
+   "prefer": [
+    "Metal027"
+   ]
+  },
+  "grass": {
+   "q": "grass",
+   "cls": "grass",
+   "prefer": "Grass004"
+  },
+  "paving": {
+   "q": "paving stones",
+   "cls": "paving",
+   "prefer": "PavingStones146"
+  },
+  "gravel": {
+   "q": "gravel",
+   "cls": "paving",
+   "prefer": "Gravel041"
+  },
+  "asphalt": {
+   "q": "asphalt",
+   "cls": "asphalt",
+   "prefer": "Asphalt031"
+  },
+  "soil": {
+   "q": "ground soil",
+   "cls": "grass",
+   "prefer": "Ground048"
+  },
+  "fabric": {
+   "q": "fabric",
+   "cls": "furniture",
+   "prefer": "Fabric061"
+  },
+  "roof-clay": {
+   "q": "roofing tiles",
+   "cls": "roof",
+   "prefer": [
+    "RoofingTiles012A"
+   ]
+  }
+ },
+ "vendor": {
+  "three@0.169.0": [
+   "examples/jsm/postprocessing/SMAAPass.js",
+   "examples/jsm/shaders/SMAAShader.js",
+   "examples/jsm/postprocessing/SSRPass.js",
+   "examples/jsm/shaders/SSRShader.js",
+   "examples/jsm/objects/ReflectorForSSRPass.js",
+   "examples/jsm/exporters/GLTFExporter.js",
+   "examples/jsm/postprocessing/TAARenderPass.js",
+   "examples/jsm/postprocessing/SSAARenderPass.js",
+   "examples/jsm/loaders/RGBELoader.js"
+  ],
+  "three-mesh-bvh@0.8.3": [
+   "build/index.module.js",
+   "LICENSE"
+  ],
+  "three-gpu-pathtracer@0.0.23": [
+   "build/index.module.js",
+   "LICENSE"
+  ]
+ }
+}

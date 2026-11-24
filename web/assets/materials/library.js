@@ -34,7 +34,7 @@ export const MATERIALS = [
   { id: "mt-terrazzo", name: "Terrazzo", category: "Stone", cls: "stone", set: "terrazzo", size: 1.0, color: "#ffffff", rough: 0.3, words: "terrazzo" },
   { id: "mt-stone-wall", name: "Rough stone wall", category: "Stone", cls: "stone", set: "stone-wall", size: 2.0, color: "#ffffff", rough: 0.9, words: "rubble|random stone|stone wall|fieldstone|rock" },
   // ---- tiles (drawn at their exact size over a base surface)
-  { id: "mt-tile-porcelain-white-600", name: "Porcelain tile 600 x 600 - white", category: "Tiles", cls: "tile", set: "marble-white", size: 1.4, color: "#f4f2ee", rough: 0.18, tile: { w: 600, h: 600, grout: 3, groutColor: "#d8d4cc" }, words: "porcelain|floor tile|tile.*600|polished tile|vitrified" },
+  { id: "mt-tile-porcelain-white-600", name: "Porcelain tile 600 x 600 - white", category: "Tiles", cls: "tile", set: "plaster-fine", size: 1.6, color: "#f4f2ee", rough: 0.18, tile: { w: 600, h: 600, grout: 3, groutColor: "#d8d4cc" }, words: "porcelain|floor tile|tile.*600|polished tile|vitrified" },
   { id: "mt-tile-porcelain-grey-600", name: "Porcelain tile 600 x 600 - grey", category: "Tiles", cls: "tile", set: "concrete-polished", size: 2.0, color: "#a9a8a4", rough: 0.3, tile: { w: 600, h: 600, grout: 3, groutColor: "#8e8d89" }, words: "grey tile|gray tile|concrete.look tile" },
   { id: "mt-tile-porcelain-beige-600x1200", name: "Porcelain tile 600 x 1200 - beige", category: "Tiles", cls: "tile", set: "marble-beige", size: 1.4, color: "#efe6d6", rough: 0.22, tile: { w: 1200, h: 600, grout: 2, groutColor: "#d9cdb9" }, words: "large format tile|1200|beige tile" },
   { id: "mt-tile-marble-600", name: "Marble tile 600 x 600", category: "Tiles", cls: "tile", set: "marble-white", size: 1.4, color: "#ffffff", rough: 0.12, tile: { w: 600, h: 600, grout: 2, groutColor: "#e2dfd9" }, words: "marble tile" },
@@ -67,7 +67,7 @@ export const MATERIALS = [
   { id: "mt-roof-longspan-grey", name: "Long-span aluminium roofing - grey", category: "Roofing", cls: "roof", set: "roof-metal", size: 1.2, color: "#9ea3a8", rough: 0.4, metal: 0.6, words: "long.?span|aluminium roof|aluminum roof|metal roof|corrugated|roofing sheet|profiled sheet|zinc roof" },
   { id: "mt-roof-longspan-red", name: "Long-span aluminium roofing - red", category: "Roofing", cls: "roof", set: "roof-metal", size: 1.2, color: "#8f3a2f", rough: 0.45, metal: 0.4, words: "red long.?span|red roofing sheet" },
   { id: "mt-roof-longspan-blue", name: "Long-span aluminium roofing - blue", category: "Roofing", cls: "roof", set: "roof-metal", size: 1.2, color: "#3a5a7e", rough: 0.45, metal: 0.4, words: "blue roof" },
-  { id: "mt-roof-clay", name: "Clay roof tiles", category: "Roofing", cls: "roof", set: "roof-tiles", size: 1.5, color: "#c9764e", rough: 0.85, words: "clay tile|terracotta tile|spanish tile|pantile" },
+  { id: "mt-roof-clay", name: "Clay roof tiles", category: "Roofing", cls: "roof", set: "roof-clay", size: 1.5, color: "#c9764e", rough: 0.85, words: "clay tile|terracotta tile|spanish tile|pantile" },
   { id: "mt-roof-membrane", name: "Roof membrane / flat roof", category: "Roofing", cls: "roof", set: "concrete-fairface", size: 2.4, color: "#8b8b88", rough: 0.9, words: "membrane|bitumen|waterproof|flat roof|felt" },
   // ---- metal
   { id: "mt-alu-black", name: "Black aluminium", category: "Metal", cls: "metal", set: "metal-painted", size: 1.0, color: "#2a2b2d", rough: 0.45, metal: 0.6, words: "black alumin|black metal|powder.?coat.*black|black frame|anodi[sz]ed black" },
@@ -89,6 +89,14 @@ export const MATERIALS = [
   { id: "mt-asphalt", name: "Asphalt", category: "Landscape", cls: "asphalt", set: "asphalt", size: 2.5, color: "#ffffff", rough: 0.95, words: "asphalt|tarmac|road" },
   { id: "mt-soil", name: "Planting soil and plants", category: "Landscape", cls: "grass", set: "soil", size: 2.0, color: "#ffffff", rough: 1, words: "soil|earth|planting|planter|topsoil|garden" },
   { id: "mt-water", name: "Pool water", category: "Landscape", cls: "glass", set: null, size: 1, color: "#3f8fa8", rough: 0.02, opacity: 0.6, words: "water|pool" },
+  // ---- more finishes used on Nigerian projects
+  { id: "mt-tile-porcelain-black-600", name: "Porcelain tile 600 x 600 - black", category: "Tiles", cls: "tile", set: "granite-grey", size: 1.0, color: "#3a3a3c", rough: 0.15, tile: { w: 600, h: 600, grout: 2, groutColor: "#2b2b2d" }, words: "black tile|tile.*black" },
+  { id: "mt-tile-stone-cladding-600x300", name: "Stone cladding tile 600 x 300 - grey", category: "Tiles", cls: "tile", set: "granite-grey", size: 1.0, color: "#d9d5cc", rough: 0.5, tile: { w: 600, h: 300, grout: 4, groutColor: "#9b978f", offset: 0.5 }, words: "cladding tile|wall cladding|stone tile" },
+  { id: "mt-paving-slabs-600", name: "Concrete paving slabs 600 x 600", category: "Landscape", cls: "paving", set: "concrete-fairface", size: 2.4, color: "#d8d5ce", rough: 0.85, tile: { w: 600, h: 600, grout: 8, groutColor: "#6f6c66" }, words: "paving slab|patio slab|concrete slab paving" },
+  { id: "mt-brick-white", name: "Painted brick - white", category: "Brick and block", cls: "brick", set: "brick-buff", size: 1.0, color: "#fbf8f2", rough: 0.85, words: "painted brick|white brick" },
+  { id: "mt-timber-decking", name: "Timber decking boards", category: "Timber", cls: "wood", set: "wood-teak", size: 1.0, color: "#c9a27a", rough: 0.7, tile: { w: 2400, h: 140, grout: 6, groutColor: "#2a2118", offset: 0.37 }, words: "decking|deck board" },
+  { id: "mt-steel-weathering", name: "Weathering steel (rust finish)", category: "Metal", cls: "metal", set: "metal-painted", size: 1.0, color: "#8a4a2a", rough: 0.8, metal: 0.4, words: "corten|cor-ten|weathering steel|rust" },
+  { id: "mt-marble-black", name: "Marble - black", category: "Stone", cls: "stone", set: "slate", size: 1.2, color: "#56565a", rough: 0.15, words: "black marble|marble.*black|nero marquina" },
   // ---- other
   { id: "mt-fabric", name: "Fabric / upholstery", category: "Other", cls: "furniture", set: "fabric", size: 0.6, color: "#ffffff", rough: 0.95, words: "fabric|upholster|textile|cushion|carpet|rug" },
   { id: "mt-plastic-white", name: "White plastic / uPVC", category: "Other", cls: "paint", set: null, size: 1, color: "#f0f0ee", rough: 0.4, words: "upvc|pvc|plastic|acrylic|resin|sanitary|porcelain fixture|ceramic fixture|vitreous" },

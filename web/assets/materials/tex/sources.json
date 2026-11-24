@@ -1,0 +1,805 @@
+{
+ "asphalt": {
+  "asset": "Asphalt031",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Concrete049",
+   "Asphalt033",
+   "Road012A",
+   "Asphalt031",
+   "Road007",
+   "Road008A",
+   "Road013A",
+   "Road012B"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Asphalt031",
+  "query": "asphalt",
+  "title": "Asphalt 031"
+ },
+ "block-concrete": {
+  "asset": "Bricks038",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Bricks088"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Bricks038",
+  "query": [
+   "concrete blocks",
+   "bricks concrete",
+   "cinder"
+  ],
+  "title": "Bricks 038"
+ },
+ "brick-buff": {
+  "asset": "Bricks093",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Bricks060",
+   "Bricks093",
+   "PaintedPlaster016",
+   "PaintedPlaster015",
+   "Bricks038",
+   "PaintedPlaster014",
+   "PaintedBricks004",
+   "Bricks019"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Bricks093",
+  "query": "bricks white",
+  "title": "Bricks 093"
+ },
+ "brick-red": {
+  "asset": "Bricks101",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Bricks104",
+   "Bricks097",
+   "Bricks101",
+   "Bricks085",
+   "Bricks094",
+   "Bricks059",
+   "Bricks051",
+   "Bricks090"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Bricks101",
+  "query": [
+   "bricks red",
+   "red brick wall",
+   "bricks"
+  ],
+  "title": "Bricks 101"
+ },
+ "concrete-board": {
+  "asset": "Concrete031",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Concrete049",
+   "Concrete048",
+   "Concrete034",
+   "Concrete047A",
+   "Concrete046",
+   "Concrete042A",
+   "Concrete031",
+   "Concrete030"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Concrete031",
+  "query": [
+   "concrete",
+   "wood formwork"
+  ],
+  "title": "Concrete 031"
+ },
+ "concrete-fairface": {
+  "asset": "Concrete042A",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Concrete049",
+   "Concrete048",
+   "Concrete034",
+   "Concrete047A",
+   "Concrete046",
+   "Concrete042A",
+   "Concrete031",
+   "Concrete030"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Concrete042A",
+  "query": "concrete",
+  "title": "Concrete 042 A"
+ },
+ "concrete-polished": {
+  "asset": "Concrete030",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Concrete049",
+   "Concrete048",
+   "Concrete034",
+   "Concrete047A",
+   "Concrete046",
+   "Concrete042A",
+   "Concrete031",
+   "Concrete030"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Concrete030",
+  "query": [
+   "concrete",
+   "floor"
+  ],
+  "title": "Concrete 030"
+ },
+ "fabric": {
+  "asset": "Fabric061",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Fabric086",
+   "Fabric085",
+   "Fabric084",
+   "Carpet016",
+   "Fabric081C",
+   "Fabric083",
+   "Fabric061",
+   "Fabric066"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Fabric061",
+  "query": "fabric",
+  "title": "Fabric 061"
+ },
+ "granite-grey": {
+  "asset": "Granite002A",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Granite002A",
+   "Granite002B",
+   "Granite001A",
+   "Granite005A",
+   "Granite003A",
+   "Granite005B",
+   "Granite001B",
+   "Granite006A"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Granite002A",
+  "query": [
+   "granite"
+  ],
+  "title": "Granite 002 A"
+ },
+ "grass": {
+  "asset": "Grass004",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Grass005",
+   "Grass004",
+   "Grass001",
+   "Ground037",
+   "Snow015",
+   "Grass008",
+   "Grass006",
+   "Grass007"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Grass004",
+  "query": "grass",
+  "title": "Grass 004"
+ },
+ "gravel": {
+  "asset": "Gravel041",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Ground111",
+   "Ground110",
+   "Ground108",
+   "Gravel043",
+   "Gravel041",
+   "Ground079S",
+   "Gravel023",
+   "Ground081"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Gravel041",
+  "query": "gravel",
+  "title": "Gravel 041"
+ },
+ "marble-beige": {
+  "asset": "Marble014",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Marble012",
+   "Onyx015",
+   "Travertine009",
+   "Marble016",
+   "Marble021",
+   "Marble006",
+   "Onyx013",
+   "Marble014"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Marble014",
+  "query": [
+   "marble",
+   "onyx"
+  ],
+  "title": "Marble 014"
+ },
+ "marble-white": {
+  "asset": "Marble012",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Marble012",
+   "Onyx015",
+   "Travertine009",
+   "Marble016",
+   "Marble021",
+   "Marble006",
+   "Onyx013",
+   "Marble014"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Marble012",
+  "query": [
+   "marble"
+  ],
+  "title": "Marble 012"
+ },
+ "metal-brushed": {
+  "asset": "Metal049A",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Metal064",
+   "Metal063",
+   "CorrugatedSteel009",
+   "Metal049A",
+   "Metal055A",
+   "Metal046B",
+   "Metal048A",
+   "Metal032"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Metal049A",
+  "query": [
+   "metal",
+   "brushed"
+  ],
+  "title": "Metal 049 A"
+ },
+ "metal-painted": {
+  "asset": "Metal027",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Metal027",
+   "Metal029",
+   "Metal028",
+   "PaintedMetal004",
+   "CorrugatedSteel005",
+   "PaintedMetal006",
+   "PaintedMetal016",
+   "PaintedMetal013"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Metal027",
+  "query": [
+   "painted metal",
+   "metal"
+  ],
+  "title": "Metal 027"
+ },
+ "paving": {
+  "asset": "PavingStones146",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "PavingStones153",
+   "PavingStones152",
+   "PavingStones151",
+   "PavingStones150",
+   "PavingStones138",
+   "PavingStones128",
+   "PavingStones142",
+   "PavingStones146"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=PavingStones146",
+  "query": "paving stones",
+  "title": "Paving Stones 146"
+ },
+ "plaster-fine": {
+  "asset": "PaintedPlaster017",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "PaintedPlaster017",
+   "PaintedPlaster016",
+   "PaintedPlaster015",
+   "PaintedPlaster010",
+   "PaintedPlaster006",
+   "PaintedPlaster014",
+   "PaintedPlaster013",
+   "PaintedPlaster001"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=PaintedPlaster017",
+  "query": [
+   "painted plaster",
+   "plaster"
+  ],
+  "title": "Painted Plaster 017"
+ },
+ "render-sand": {
+  "asset": "Plaster002",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Concrete034",
+   "Plaster001",
+   "PaintedPlaster017",
+   "Plaster007",
+   "Plaster002",
+   "Concrete036",
+   "Plaster004",
+   "Plaster003"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Plaster002",
+  "query": [
+   "plaster",
+   "stucco"
+  ],
+  "title": "Plaster 002"
+ },
+ "render-tyrolean": {
+  "asset": "Plaster004",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Concrete034",
+   "Plaster001",
+   "PaintedPlaster017",
+   "Plaster007",
+   "Plaster002",
+   "Concrete036",
+   "Plaster004",
+   "Plaster003"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Plaster004",
+  "query": [
+   "plaster",
+   "facade"
+  ],
+  "title": "Plaster 004"
+ },
+ "roof-clay": {
+  "asset": "RoofingTiles012A",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "RoofingTiles013A",
+   "RoofingTiles014A",
+   "RoofingTiles012A",
+   "RoofingTiles006",
+   "RoofingTiles014B",
+   "RoofingTiles011A",
+   "RoofingTiles012B",
+   "RoofingTiles013B"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=RoofingTiles012A",
+  "query": "roofing tiles",
+  "title": "Roofing Tiles 012 A"
+ },
+ "roof-metal": {
+  "asset": "CorrugatedSteel005",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "CorrugatedSteel009",
+   "CorrugatedSteel007A",
+   "CorrugatedSteel005",
+   "CorrugatedSteel007B",
+   "CorrugatedSteel006A",
+   "CorrugatedSteel007C",
+   "CorrugatedSteel006C",
+   "CorrugatedSteel008A"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=CorrugatedSteel005",
+  "query": "corrugated steel",
+  "title": "Corrugated Steel 005"
+ },
+ "roof-tiles": {
+  "asset": "RoofingTiles013A",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "RoofingTiles013A",
+   "RoofingTiles014A",
+   "RoofingTiles012A",
+   "RoofingTiles006",
+   "RoofingTiles014B",
+   "RoofingTiles011A",
+   "RoofingTiles012B",
+   "RoofingTiles013B"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=RoofingTiles013A",
+  "query": "roofing tiles",
+  "title": "Roofing Tiles 013 A"
+ },
+ "sandstone": {
+  "asset": "Bricks084",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Tiles144",
+   "Bricks084",
+   "Bricks083",
+   "Concrete012",
+   "Bricks008",
+   "Ground111",
+   "Rock064",
+   "Rock063"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Bricks084",
+  "query": [
+   "sandstone",
+   "rock",
+   "stone"
+  ],
+  "title": "Bricks 084"
+ },
+ "slate": {
+  "asset": "Rock031",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Gravel040",
+   "RoofingTiles003",
+   "RoofingTiles001",
+   "RoofingTiles002",
+   "RoofingTiles004",
+   "RoofingTiles005",
+   "Rock031",
+   "Rock048"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Rock031",
+  "query": [
+   "slate",
+   "rock dark",
+   "tiles slate"
+  ],
+  "title": "Rock 031"
+ },
+ "soil": {
+  "asset": "Ground048",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Ground109",
+   "Ground106",
+   "Ground103",
+   "Ground048",
+   "Ground104",
+   "Ground094A",
+   "Ground082S",
+   "Ground092C"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Ground048",
+  "query": "ground soil",
+  "title": "Ground 048"
+ },
+ "stone-wall": {
+  "asset": "Rock023",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Rock051",
+   "Rock030",
+   "Rock022",
+   "Rock056",
+   "Rock023",
+   "Rock034",
+   "Rock055",
+   "Rock052"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Rock023",
+  "query": "rock wall",
+  "title": "Rock 023"
+ },
+ "terrazzo": {
+  "asset": "Terrazzo013",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Tiles040",
+   "Terrazzo013",
+   "Tiles043",
+   "Terrazzo018",
+   "Tiles110",
+   "Terrazzo005",
+   "Terrazzo004",
+   "Terrazzo011"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Terrazzo013",
+  "query": [
+   "terrazzo",
+   "tiles"
+  ],
+  "title": "Terrazzo 013"
+ },
+ "travertine": {
+  "asset": "Travertine009",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Travertine009",
+   "Travertine005",
+   "Travertine004",
+   "Travertine001",
+   "Travertine003",
+   "Travertine013",
+   "Travertine002",
+   "Travertine014"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Travertine009",
+  "query": "travertine",
+  "title": "Travertine 009"
+ },
+ "wood-dark": {
+  "asset": "Wood051",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Wood099",
+   "Wood097",
+   "Wood098",
+   "Wood096",
+   "Wood095",
+   "WoodFloor051",
+   "Wood094",
+   "Wood092"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Wood051",
+  "query": [
+   "wood",
+   "wood floor"
+  ],
+  "title": "Wood 051"
+ },
+ "wood-floor": {
+  "asset": "WoodFloor051",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "WoodFloor051",
+   "WoodFloor064",
+   "WoodFloor070",
+   "WoodFloor043",
+   "Planks037A",
+   "WoodFloor040",
+   "WoodFloor041",
+   "WoodFloor062"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=WoodFloor051",
+  "query": "wood floor",
+  "title": "Wood Floor 051"
+ },
+ "wood-planks": {
+  "asset": "Planks037A",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Planks040",
+   "WoodFloor064",
+   "WoodFloor043",
+   "Planks037A",
+   "WoodFloor040",
+   "WoodFloor041",
+   "WoodFloor062",
+   "Planks023A"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "ao",
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Planks037A",
+  "query": "planks",
+  "title": "Planks 037 A"
+ },
+ "wood-teak": {
+  "asset": "Wood092",
+  "author": "ambientCG (Lennart Demes)",
+  "candidates": [
+   "Wood099",
+   "Wood097",
+   "Wood098",
+   "Wood096",
+   "Wood095",
+   "WoodFloor051",
+   "Wood094",
+   "Wood092"
+  ],
+  "licence": "CC0 1.0 (public domain)",
+  "maps": [
+   "color",
+   "normal",
+   "rough"
+  ],
+  "page": "https://ambientcg.com/view?id=Wood092",
+  "query": [
+   "wood",
+   "wood siding"
+  ],
+  "title": "Wood 092"
+ }
+}
