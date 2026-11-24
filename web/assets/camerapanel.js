@@ -151,9 +151,11 @@ export function createCameraPanel({ root, viewer, store, toast = () => {}, onRen
       el("div", { class: "cp-acts" },
         el("button", { type: "button", class: "btn sm", "aria-label": `Rename ${v.name}`, onclick: e => {
           const li = e.target.closest("li"), input = el("input", { type: "text", value: v.name, maxlength: "80", "aria-label": "New name", class: "cp-rename" });
-          const done = () => { const n = input.value.trim(); if (n) { v.name = n.slice(0, 80); save(); } drawViews(); };
-          input.addEventListener("keydown", k => { if (k.key === "Enter") done(); if (k.key === "Escape") drawViews(); });
-          input.addEventListener("blur", done, { once: true });
+          // once only: Enter redraws the list, which takes the box away and fires its blur as well
+          let over = false;
+          const done = (keep = true) => { if (over) return; over = true; const n = input.value.trim(); if (keep && n) { v.name = n.slice(0, 80); save(); } drawViews(); };
+          input.addEventListener("keydown", k => { if (k.key === "Enter") done(); if (k.key === "Escape") done(false); });
+          input.addEventListener("blur", () => done(), { once: true });
           li.querySelector(".cp-go span:last-child").replaceWith(input); input.focus(); input.select();
         } }, "Rename"),
         el("button", { type: "button", class: "btn sm", "aria-label": `Duplicate ${v.name}`, onclick: () => { views.splice(views.indexOf(v) + 1, 0, { ...structuredClone(v), id: `v${Date.now().toString(36)}`, name: `${v.name} (copy)`.slice(0, 80) }); drawViews(); save(); } }, "Duplicate"),
