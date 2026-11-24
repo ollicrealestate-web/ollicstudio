@@ -67,6 +67,7 @@ class ConceptRenderIn(BaseModel):
     material_file_id: uuid.UUID | None = None   # the model's material map from the same camera (see the project look)
     model_id: uuid.UUID | None = None           # the 3D model the view was captured from: its facts help check the result
     rounds: int = Field(default=1, ge=1, le=2)    # 2: after the re-render, a finishing pass fixes what Claude still sees
+    camera: str | None = Field(default=None, max_length=600)   # the camera set in the 3D preview, in words (kept exactly)
 
     @field_validator("prompt")
     @classmethod
@@ -371,6 +372,7 @@ class RenderPromptIn(BaseModel):
     model_id: uuid.UUID | None = None
     view_image: str | None = Field(default=None, max_length=6_000_000)   # a JPEG of the model view on screen (base64), not saved
     purpose: Literal["render", "look"] = "render"                          # "look": a short description of the look, for videos
+    camera: str | None = Field(default=None, max_length=600)              # the camera set in the 3D preview, in words
 
     @field_validator("references")
     @classmethod
@@ -439,6 +441,8 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
             raise HTTPException(422, {"code": "bad_view", "reason": "The view of the model could not be read. Try again."})
     from ..look import with_scene
     description = with_scene(body.description, repo.get_project(user, str(project_id)))
+    if body.camera:   # the camera the architect set: the prompt must describe exactly this angle, not another
+        description = (description + "\n" if description else "") + f"Camera (set by the architect, keep it exactly): {_clean(body.camera)}"
     model = None
     if body.model_id:
         model = repo.get_model(user, str(body.model_id))

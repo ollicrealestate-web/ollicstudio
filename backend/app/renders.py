@@ -186,6 +186,9 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             rule = type_rule(inp.get("view"))
             if rule:
                 prompt = (prompt[: -len(SAFE_TAIL)].rstrip() if prompt.endswith(SAFE_TAIL) else prompt) + "\nRENDER TYPE: " + rule + "\n" + SAFE_TAIL
+            if inp.get("camera"):   # the camera set in the 3D preview: the picture keeps exactly this angle
+                prompt = (prompt[: -len(SAFE_TAIL)].rstrip() if prompt.endswith(SAFE_TAIL) else prompt) + "\nCAMERA: " + str(inp["camera"])[:600] + \
+                    ". The camera, lens and framing are exactly those of Image 1; do not move, raise, widen or tilt the camera.\n" + SAFE_TAIL
             if "plan" not in roles and not inp.get("anim_line"):
                 images, roles, block, look_ctx = apply_look(state, user, job, inp, images, roles, exact=(tier == "exact"))
                 if block:
@@ -304,7 +307,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         if check:
             options["check"] = check
         if job["type"] == "concept_render":
-            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line", "prompt_ready", "guide_file_id", "film_shot")})
+            options.update({k: inp.get(k) for k in ("view", "time_of_day", "aspect", "materials", "landscaping", "style", "storeys", "ground_floor", "references", "shot_id", "shot_name", "anim_hero", "anim_line", "prompt_ready", "guide_file_id", "film_shot", "camera")})
         elif inp.get("anim_line"):
             options["anim_line"] = inp["anim_line"]
         try:

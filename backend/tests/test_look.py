@@ -437,3 +437,19 @@ def test_aerial_scenes_and_the_planting_rule():
                 "hillside_forest", "waterfront_topdown", "suburb_sunset", "terraced_green_city"):
         assert sid in SCENES and len(SCENES[sid][3]) > 200
     assert "PLANTING" in type_rule("front") and "PLANTING" in type_rule("estate") and "PLANTING" not in type_rule("interior")
+
+
+def test_the_camera_set_in_the_preview_goes_into_the_render(render_settings, repo, storage, alice):
+    """A view captured with a camera set in the Camera panel: the render is told that camera, in words, and to keep it."""
+    images = FakeImages()
+    app = create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
+                     fal={}, kling=None, gemini=None, runway=None, aps=None, prompt_writer=None)
+    c = TestClient(app)
+    pid = new_project(c, alice)
+    view, lines, depth, mats = captured(c, alice, pid)
+    words = "elevated three-quarter corner view from the front-right at low drone height, 24 mm wide-angle lens, two-point perspective with vertical lines kept perfectly straight and parallel"
+    body = {"prompt": "photoreal render", "prompt_ready": True, "references": [{"file_id": view["id"], "role": "model"}], "guide_file_id": lines["id"], "camera": words}
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"]).status_code in (200, 201, 202)
+    p = images.calls[0]["prompt"]
+    assert f"CAMERA: {words}. The camera, lens and framing are exactly those of Image 1" in p and p.rstrip().endswith("watermarks.")
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=body | {"camera": "x" * 601}, headers=alice["headers"]).status_code == 422

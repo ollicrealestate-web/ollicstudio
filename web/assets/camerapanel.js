@@ -14,7 +14,7 @@ const GROUPS = [["Outside", ["front-eye", "front-raised", "corner-eye-left", "co
 const FROM = { entrance: "found from the main entrance", guessed: "guessed (the model's own front)", you: "set by you" };
 
 /** root: the panel. viewer: the Studio viewer. store: { load() -> { front, views }, save({ front, views }), words(text, height) -> { settings, understood } }. */
-export function createCameraPanel({ root, viewer, store, toast = () => {} }) {
+export function createCameraPanel({ root, viewer, store, toast = () => {}, onRender = null, onFilm = null }) {
   let views = [], frontSaved = null, saveTimer = 0, now = null;
   root.replaceChildren(
     el("div", { class: "cp-presets", id: "cpPresets" }),
@@ -42,7 +42,12 @@ export function createCameraPanel({ root, viewer, store, toast = () => {} }) {
     el("div", { class: "cp-views" },
       el("div", { class: "row" }, el("input", { type: "text", id: "cpViewName", maxlength: "80", placeholder: "Name this view (e.g. Front eye level)", "aria-label": "Name of the view" }),
         el("button", { type: "button", class: "btn primary", id: "cpSave" }, "Save this view"), el("button", { type: "button", class: "btn", id: "cpFree" }, "Free camera"), el("span", { class: "hint", id: "cpMsg", role: "status" })),
-      el("ul", { class: "cp-list", id: "cpList" })));
+      el("ul", { class: "cp-list", id: "cpList" }),
+      el("div", { class: "row cp-batch", id: "cpBatch", hidden: true },
+        el("button", { type: "button", class: "btn primary", id: "cpRenderTicked" }, "Render the ticked views"),
+        el("span", { class: "hint" }, "Each is rendered from its own camera, in the project's look, with the settings of the render form."),
+        el("span", { class: "cp-between" }, "Film shot from ", el("select", { id: "cpFrom", "aria-label": "Film shot from this view" }), " to ", el("select", { id: "cpTo", "aria-label": "to this view" }),
+          el("button", { type: "button", class: "btn sm", id: "cpFilmBetween" }, "Add film shot")))));
   const $ = s => root.querySelector(s);
   $("#cpPresets").append(...GROUPS.map(([g, keys]) => el("div", { class: "cp-group" }, el("span", { class: "cp-gname" }, g),
     ...keys.map(k => el("button", { type: "button", class: "chip", "data-preset": k, "aria-pressed": "false", title: PRESETS[k].words, onclick: () => setPreset(k) }, PRESETS[k].name)))));
@@ -122,6 +127,7 @@ export function createCameraPanel({ root, viewer, store, toast = () => {} }) {
   // saved views
   function drawViews() {
     $("#cpList").replaceChildren(...views.map(v => el("li", { class: "cp-view" },
+      el("label", { class: "check cp-tick" }, el("input", { type: "checkbox", "data-view": v.id, "aria-label": `Tick ${v.name} to render` }), " Render"),
       el("button", { type: "button", class: "cp-go", title: v.words || v.name, onclick: () => goTo(v) },
         v.thumb ? el("img", { src: v.thumb, alt: "" }) : el("span", { class: "cp-nothumb" }), el("span", {}, v.name)),
       el("div", { class: "cp-acts" },
@@ -133,7 +139,13 @@ export function createCameraPanel({ root, viewer, store, toast = () => {} }) {
           li.querySelector(".cp-go span:last-child").replaceWith(input); input.focus(); input.select();
         } }, "Rename"),
         el("button", { type: "button", class: "btn sm", "aria-label": `Duplicate ${v.name}`, onclick: () => { views.splice(views.indexOf(v) + 1, 0, { ...structuredClone(v), id: `v${Date.now().toString(36)}`, name: `${v.name} (copy)`.slice(0, 80) }); drawViews(); save(); } }, "Duplicate"),
+        onFilm ? el("button", { type: "button", class: "btn sm", "aria-label": `Film shot from ${v.name}`, onclick: () => onFilm(v) }, "Film shot") : null,
         el("button", { type: "button", class: "btn sm", "aria-label": `Delete ${v.name}`, onclick: () => { views = views.filter(x => x !== v); drawViews(); save(); msg(`${v.name} deleted.`); } }, "Delete")))));
+    $("#cpBatch").hidden = !views.length || (!onRender && !onFilm);
+    $("#cpRenderTicked").hidden = !onRender;
+    root.querySelector(".cp-between").hidden = !onFilm || views.length < 2;
+    for (const id of ["#cpFrom", "#cpTo"]) $(id).replaceChildren(...views.map(v => el("option", { value: v.id }, v.name)));
+    if (views.length > 1) $("#cpTo").value = views[1].id;
     if (!views.length) $("#cpList").append(el("li", { class: "hint" }, "No saved views yet. Set an angle you like and press Save this view."));
   }
   function goTo(v) {
@@ -150,6 +162,16 @@ export function createCameraPanel({ root, viewer, store, toast = () => {} }) {
     try { const W = 240, H = Math.round(240 / pose.aspect); thumb = viewer.guides(W, H, ["view"], pose).view; } catch { /* no picture */ }
     const v = { id: `v${Date.now().toString(36)}`, name: name.slice(0, 80), settings: now ? { ...now } : null, pose, thumb, words: viewer.camera.words || null };
     views.push(v); $("#cpViewName").value = ""; drawViews(); save(); msg(`Saved “${v.name}”.`);
+  };
+  $("#cpRenderTicked").onclick = () => {
+    const ids = [...root.querySelectorAll("[data-view]:checked")].map(c => c.dataset.view), list = views.filter(v => ids.includes(v.id));
+    if (!list.length) { msg("Tick the views to render first."); return; }
+    onRender?.(list);
+  };
+  $("#cpFilmBetween").onclick = () => {
+    const a = views.find(v => v.id === $("#cpFrom").value), b = views.find(v => v.id === $("#cpTo").value);
+    if (!a || !b || a === b) { msg("Choose two different views."); return; }
+    onFilm?.(a, b);
   };
   $("#cpFree").onclick = () => { viewer.freeCamera(); draw(); msg("Free camera: orbit as you like."); };
   function save() {

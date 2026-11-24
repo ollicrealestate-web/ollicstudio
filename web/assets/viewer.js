@@ -702,7 +702,7 @@ export function createViewer(host, { onSelect } = {}) {
   // frame: the set picture (its shape, its angle of view up and down, its shift), or null for the free 3D view.
   // camSet: the settings it came from (a ready-made angle, or the architect's own numbers).
   let pic = null, camSet = null, front = [0, 1], frontFrom = "guessed", entrance = null, frontPick = null, interiorSetting = false, onFront = null;
-  let frameGuides = { thirds: false, centre: false, horizon: false, safe: false };
+  let frameGuides = { thirds: false, centre: false, horizon: false, safe: false }, lastPhotoCamera = null;
   /** The camera drawn into a picture of the given shape (the canvas, or a guide): the set picture fits inside it. */
   function applyOutput(outAspect) {
     camera.aspect = outAspect;
@@ -1213,7 +1213,9 @@ export function createViewer(host, { onSelect } = {}) {
     return { position: P.getPoint(k).toArray(), target: T.getPoint(k).toArray(), fov: poses[i].fov + (poses[i + 1].fov - poses[i].fov) * f,
              ...(inside ? { inside: true } : {}), ...(poses[0].near ? { near: poses[0].near } : {}),
              ...(poses[0].build !== undefined ? { build: poses[0].build + (poses[poses.length - 1].build - poses[0].build) * t } : {}),
-             ...(poses[0].rise !== undefined ? { rise: poses[0].rise + (poses[poses.length - 1].rise - poses[0].rise) * t } : {}) };
+             ...(poses[0].rise !== undefined ? { rise: poses[0].rise + (poses[poses.length - 1].rise - poses[0].rise) * t } : {}),
+             // a set picture (Camera panel): its shape stays, its shift moves smoothly from one view to the next
+             ...(poses[0].aspect ? { aspect: poses[0].aspect, shift: [0, 1].map(j => (poses[i].shift?.[j] || 0) + ((poses[i + 1].shift?.[j] || 0) - (poses[i].shift?.[j] || 0)) * f) } : {}) };
   }
   /** The front door: the door on the ground floor nearest the outside, and the way into the house through it. */
   function entryPath() {
@@ -1445,6 +1447,7 @@ export function createViewer(host, { onSelect } = {}) {
       root.traverse(o => o.geometry?.dispose());
       return new Blob([glb], { type: "model/gltf-binary" });
     },
+    get lastPhotoCamera() { return lastPhotoCamera; },
     /** Photo mode: the current view path-traced (see materials/photomode.js); the view waits while it renders. */
     async photo(opts = {}) {
       if (owner) throw new Error("The view is busy.");
@@ -1452,7 +1455,9 @@ export function createViewer(host, { onSelect } = {}) {
       select(null);
       const { renderPhoto } = await import("./materials/photomode.js");
       owner = "photo"; controls.enabled = false;
-      try { return await renderPhoto(this.engine(), opts); }
+      // the set picture (Camera panel) drawn at the photo's shape: the same lens, shift and framing
+      if (pic && opts.width && opts.height) applyOutput(opts.width / opts.height);
+      try { return await renderPhoto({ ...this.engine(), lastCamera: c => { lastPhotoCamera = { projection: c.projectionMatrix.toArray(), world: c.matrixWorld.toArray() }; } }, opts); }
       finally { owner = null; controls.enabled = mode !== "walk"; resize(); redraw(); }
     },
     /** Camera angles: a ready-made angle ({ preset }) or the architect's own numbers ({ lens, height, distance,

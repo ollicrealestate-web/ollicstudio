@@ -188,7 +188,7 @@ $("#writePromptBtn").onclick = async () => {
   $("#planNote").textContent = "The AI is studying the picture and the references. This takes about 10–30 seconds.";
   try {
     const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim(),
-      ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}) });
+      ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}), ...(cameraWords.get(rPick) ? { camera: cameraWords.get(rPick) } : {}) });
     $("#rPrompt").value = r.prompt; promptByAI = true;
     $("#planNote").textContent = r.notes ? `AI: ${r.notes} Check the prompt below, then render.` : "Prompt written. Check it below, then render.";
   } catch (err) { if (err.status === 401) return handle(err); $("#planNote").textContent = err.message; }
@@ -508,7 +508,7 @@ async function loadModels() {
         load: () => (viewerModelId ? api.getCameras(viewerModelId) : Promise.resolve({})),
         save: body => (viewerModelId ? api.putCameras(viewerModelId, body) : Promise.resolve()),
         words: (text, h) => api.cameraWords(text, h).catch(() => null),
-      } });
+      }, onRender: list => renderViews(list), onFilm: (a, b) => filmShotFrom(a, b) });
       const { createMaterialsPanel } = await import("./materials/panel.js");
       matPanel = createMaterialsPanel({ root: $("#matPanel"), viewer, toast,
         store: {
@@ -601,7 +601,8 @@ let photoRun = null;
 $("#photoBtn").onclick = () => { const p = $("#photoPanel"), open = p.hidden; p.hidden = !open; $("#photoBtn").setAttribute("aria-expanded", String(open)); };
 $("#photoGo").onclick = async () => {
   if (!viewer || photoRun) return;
-  const w = +$("#photoSize").value, cv = $("#viewer canvas"), shape = $("#photoShape").value === "view" ? (cv.clientWidth / cv.clientHeight || 16 / 9) : +$("#photoShape").value;
+  const w = +$("#photoSize").value, cv = $("#viewer canvas"), set = viewer.currentPose().aspect;
+  const shape = $("#photoShape").value === "view" ? (set || cv.clientWidth / cv.clientHeight || 16 / 9) : +$("#photoShape").value;
   const h = Math.round(w / shape / 2) * 2, samples = +$("#photoSamples").value, ctrl = new AbortController(), started = performance.now();
   photoRun = ctrl;
   $("#photoGo").disabled = true; $("#photoStop").hidden = false; $("#photoSave").hidden = true; $("#photoRender").hidden = true; $("#photoProgress").hidden = false; $("#photoProgress").value = 0;
@@ -713,13 +714,17 @@ const dataBlob = url => fetch(url).then(r => r.blob());
 const stampNow = () => new Date().toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(/[/:]/g, "-");
 $("#useView").onclick = () => captureView();
 /** Captures the view (or a Photo mode still of it, same camera and shape) with its guides, ready to render. */
-async function captureView(photo = null) {
-  if (!viewer) return;
+async function captureView(photo = null, opts = {}) {
+  if (!viewer) return null;
   const btn = $("#useView"); btn.disabled = true; btn.textContent = "Capturing…";
+  let result = null;
   try {
-    const name = `${photo ? "3D photo" : "3D view"} ${stampNow()}`;
-    let W = 1536, H = 1024;
+    const name = opts.name ? `${opts.name.replace(/[^\w ,.-]+/g, "").slice(0, 60)} ${stampNow()}` : `${photo ? "3D photo" : "3D view"} ${stampNow()}`;
+    // the picture's shape: a Photo mode still's, or the camera's set picture (Camera panel), else 3:2
+    const pose = viewer.currentPose(), a = photo ? photo.width / photo.height : pose.aspect || 1.5;
+    let W = a >= 1 ? 1536 : Math.round(1536 * a / 2) * 2, H = a >= 1 ? Math.round(1536 / a / 2) * 2 : 1536;
     if (photo) { const k = 1536 / Math.max(photo.width, photo.height); W = Math.round(photo.width * k / 2) * 2; H = Math.round(photo.height * k / 2) * 2; }
+    const words = pose.aspect ? viewer.camera.words : null;
     const g = viewer.guides(W, H, ["view", "lines", "depth", "materials"]);
     if (photo) {   // the path-traced still is the picture to render on; the guides are drawn from the same camera
       const img = new Image(); img.src = photo.url; await img.decode();
@@ -728,16 +733,61 @@ async function captureView(photo = null) {
     }
     if (g.coverage !== undefined && g.coverage < 0.03) { toast("Your building is not in view. Turn or zoom until you see it, then capture again."); return; }
     const saved = await uploadFile(current.id, new File([await dataBlob(g.view)], `${name}.jpg`, { type: "image/jpeg" }), () => {});
+    const gids = {};
     for (const k of ["lines", "depth", "materials"])
-      await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {});
+      gids[k] = (await uploadFile(current.id, new File([await dataBlob(g[k])], `Guide - ${name} - ${k}.png`, { type: "image/png" }), () => {}))?.id;
+    if (words) cameraWords.set(saved.id, words);
+    result = { viewId: saved.id, ...gids, camera: words };
     await syncLook(g.legend);
     const viewId = saved.id, matsId = (await api.getProject(current.id)).source_files.find(f => f.original_name === `Guide - ${name} - materials.png`)?.id;
     if (matsId && (look?.materials || []).some(m => !m.extra && m.source === "model" && !m.confirmed)) readMaterials(viewId, matsId);
     current = await api.getProject(current.id); rPick = saved.id; promptByAI = false; renderProject();
-    toast(photo ? "Photo captured. Press “Read image and write prompt”." : "View captured. Press “Read image and write prompt”.");
-    $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
-  } catch (err) { if (err.status === 401) return handle(err); toast(err.message); }
+    if (!opts.quiet) {
+      toast(photo ? "Photo captured. Press “Read image and write prompt”." : "View captured. Press “Read image and write prompt”.");
+      $("#renderForm").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "start" });
+    }
+  } catch (err) { if (err.status === 401) { handle(err); return null; } toast(err.message); if (opts.quiet) throw err; }
   finally { btn.disabled = false; btn.textContent = "Capture view"; }
+  return result;
+}
+/** The camera (in words) a captured view was taken with, kept on this device by the file's id. */
+const cameraWords = {
+  set(id, words) { try { localStorage.setItem(`ollic.camera.${id}`, words); } catch { /* storage off */ } },
+  get(id) { try { return id ? localStorage.getItem(`ollic.camera.${id}`) : null; } catch { return null; } },
+};
+/** Several saved views rendered in one go, each from its own camera, all in the project's look. */
+async function renderViews(list) {
+  if (!viewer || !current || !list.length) return;
+  const desc = $("#rDesc").value.trim(), tier = chosenTier(), quality = $("#rQuality").value, view = document.querySelector("input[name=rtype]:checked")?.value || "exterior";
+  let done = 0;
+  for (const v of list) {
+    toast(`Rendering “${v.name}” (${done + 1} of ${list.length})…`);
+    viewer.showPose(v.pose);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const c = await captureView(null, { quiet: true, name: v.name });
+      if (!c) return;
+      const refs = [{ file_id: c.viewId, role: "model" }];
+      const w = await api.writePrompt(current.id, { references: refs, description: desc, model_id: viewerModelId, ...(c.camera ? { camera: c.camera } : {}) });
+      const a = v.pose.aspect || 1.5;
+      await api.startRender(current.id, { prompt: w.prompt, prompt_ready: true, references: refs, tier, quality, view, model_id: viewerModelId,
+        ...(c.lines ? { guide_file_id: c.lines } : {}), ...(c.depth ? { depth_file_id: c.depth } : {}), ...(c.materials ? { material_file_id: c.materials } : {}),
+        ...(c.camera ? { camera: c.camera } : {}), aspect: a > 1.15 ? "landscape" : a < 0.87 ? "portrait" : "square" }, newKey());
+      done++;
+    } catch (err) { if (err.status === 401) return handle(err); toast(`“${v.name}” could not be rendered: ${err.message}`); }
+  }
+  current = await api.getProject(current.id); renderProject(); loadOutputs();
+  toast(`${done} of ${list.length} view${list.length > 1 ? "s" : ""} sent to render. They appear below as they finish.`);
+}
+/** A film shot from a saved view (a slow move in), or moving from one saved view to another. */
+function filmShotFrom(a, b = null) {
+  if (!viewer) return;
+  let s;
+  if (b) {
+    const poses = [{ ...a.pose }, { ...b.pose }];
+    s = { id: newKey(), kind: "push", seconds: 8, room: "", name: `${a.name} to ${b.name}`.slice(0, 80), poses, thumb: viewer.guides(320, 180, ["clay"], viewer.along(poses, 0)).clay, frame_prompt: "", motion_prompt: "", life: null };
+  } else { viewer.showPose(a.pose); s = newShot("push", 6, { name: a.name }); }
+  if (s) { shots.push(s); drawShots(); toast("Film shot added. Find it under AI walkthrough."); }
 }
 /* ---------- the project look: approved materials (from the model) and the hero render ---------- */
 let look = null, lookFor = null;
@@ -1231,6 +1281,7 @@ function briefFromForm() {
     ...(guide ? { guide_file_id: guide } : {}), ...(depth ? { depth_file_id: depth } : {}), ...(mats ? { material_file_id: mats } : {}),
     ...(guide && viewerModelId ? { model_id: viewerModelId } : {}),
     view: document.querySelector("input[name=rtype]:checked")?.value || "exterior",
+    ...(cameraWords.get(rPick) ? { camera: cameraWords.get(rPick) } : {}),
     aspect: ratio > 1.15 ? "landscape" : ratio < 0.87 ? "portrait" : "square" };
 }
 $("#renderForm").onsubmit = e => {

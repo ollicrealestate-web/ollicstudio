@@ -112,6 +112,7 @@ export async function renderPhoto(engine, { width = 1920, height = 1080, samples
   const before = { size: renderer.getSize(new THREE.Vector2()), pr: renderer.getPixelRatio(), aspect: camera.aspect };
   renderer.setPixelRatio(1); renderer.setSize(width, height, false);
   const cam = camera.clone(); cam.aspect = width / height; cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+  engine.lastCamera?.(cam);   // (for tests: the camera the path tracer draws with)
   const tracer = new WebGLPathTracer(renderer);
   tracer.renderScale = 1; tracer.dynamicLowRes = false; tracer.minSamples = 1; tracer.renderDelay = 0; tracer.fadeDuration = 0;
   tracer.tiles.set(width > 2000 ? 3 : 2, width > 2000 ? 3 : 2); tracer.bounces = 6; tracer.filterGlossyFactor = 0.5; tracer.multipleImportanceSampling = true;
