@@ -207,3 +207,39 @@ button { cursor: pointer; }
 .cmp-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; }
 .cmp-tag { position: absolute; top: 8px; font-size: 11px; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px; }
 .cmp-tag.l { left: 8px; } .cmp-tag.r { right: 8px; }
+/* Complete my design */
+.sk-ai .ai-flow { display: grid; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.sk-ai .ai-chat { max-height: 220px; overflow: auto; display: grid; gap: 6px; font-size: 13px; background: var(--surface-2); border-radius: 8px; padding: 8px; }
+.sk-ai .ai-chat .msg b { display: block; font-size: 11px; color: var(--muted); }
+.sk-ai .ai-chat .msg.you { justify-self: end; text-align: right; }
+.sk-ai .ai-busy { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.sk-ai .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #3b82f6; border-right-color: transparent; animation: aispin .8s linear infinite; }
+@keyframes aispin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sk-ai .spin { animation: none; } }
+.sk-ai .ai-field { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 4px; font-size: 13px; margin: 0; }
+.sk-ai .ai-field legend { font-weight: 600; font-size: 12px; padding: 0 4px; }
+.sk-ai textarea, .sk-ai input.wide { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px; color: inherit; font: inherit; font-size: 13px; }
+.sk-ai .ai-levels { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-left: 20px; }
+.sk-ai .ai-refs { display: flex; flex-wrap: wrap; gap: 6px; }
+.sk-ai .ai-refs figure { position: relative; margin: 0; width: 72px; height: 54px; }
+.sk-ai .ai-refs img, .sk-ai .ai-ref img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; }
+.sk-ai .ai-refs .x { position: absolute; top: 2px; right: 2px; border: 0; border-radius: 50%; width: 20px; height: 20px; background: rgba(0,0,0,.7); color: #fff; cursor: pointer; }
+.sk-ai .ai-upload { justify-self: start; cursor: pointer; }
+.sk-ai .ai-ref { display: grid; grid-template-columns: 72px 1fr; gap: 8px; font-size: 12px; }
+.sk-ai .ai-ref img { height: 54px; }
+.sk-ai .ai-q p { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.sk-ai .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.sk-ai .chip { background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 14px; padding: 4px 10px; color: inherit; font-size: 12px; cursor: pointer; }
+.sk-ai .chip[aria-pressed=true] { background: #2b4a7a; border-color: #3b82f6; }
+.sk-ai .ai-plan { padding-left: 0; list-style: none; display: grid; gap: 8px; margin: 0; }
+.sk-ai .ai-plan li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 4px; font-size: 13px; }
+.sk-ai .ai-plan .n, .sk-ai .ai-title .n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 10px; background: #2b4a7a; font-size: 11px; margin: 0 6px; }
+.sk-ai .ai-progress { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 13px; }
+.sk-ai .ai-progress .done span { color: #4ade80; } .sk-ai .ai-progress .failed span { color: #ff8a8d; } .sk-ai .ai-progress .building span { color: #fbbf24; }
+.sk-ai .ai-report { background: var(--surface-2); border-radius: 8px; padding: 8px; font-size: 13px; }
+.sk-ai .ai-report p { margin: 6px 0 2px; color: var(--muted); }
+.sk-ai .ai-report ul { margin: 0; padding-left: 18px; }
+.sk-ai .ai-issues { margin: 0; padding-left: 18px; font-size: 13px; }
+.sk-vbar .ai-btn { border-color: #3b82f6; }
+/* on wide screens the panel sits beside the views instead of over them */
+@media (min-width: 1100px) { body.ai-open .sk-views { margin-right: 396px; } }

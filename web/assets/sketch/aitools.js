@@ -250,7 +250,8 @@ export function runTool(history, name, input = {}, ctx = {}) {
   try {
     if (READ[name]) return { ok: true, result: READ[name](history.doc, a, ctx) };
     let out;
-    history.transact(labelFor(name, a), doc => { out = WRITE(doc, name, T, a, ctx); });
+    const item = a.plan_item ?? (a.id ? findById(history.doc, a.id)?.el?.planItem : undefined) ?? ctx.planItem;
+    history.transact(labelFor(name, { ...a, plan_item: item }), doc => { out = WRITE(doc, name, T, a, ctx); });
     return { ok: true, ...out };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };

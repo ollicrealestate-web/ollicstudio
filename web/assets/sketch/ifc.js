@@ -24,6 +24,7 @@ export function ifcText(s) {
 }
 import { detailIfc } from "./details.js";
 import { matName } from "./library.js";
+import { hasProposal } from "./options.js";
 const num = v => { const r = Math.round(v * 1000) / 1000; return Number.isInteger(r) ? `${r}.` : String(r); };
 
 /**
@@ -32,6 +33,7 @@ const num = v => { const r = Math.round(v * 1000) / 1000; return Number.isIntege
  */
 export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = {}) {
   const doc = app.doc, v3 = app.view3d;
+  if (hasProposal(doc)) throw new Error("Accept or discard the AI proposal first, so nothing half-finished is exported.");
   // a fresh 3D build with every level shown and nothing selected (selection colours would be exported)
   const keep = { hidden: app.prefs.hidden3D, sel: app.selection };
   app.prefs.hidden3D = []; app.selection = new Set();

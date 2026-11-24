@@ -10,6 +10,7 @@ export async function serverTransport() {
   const { api } = await import("../api.js");
   return {
     config: () => api.aiConfig(),
+    estimate: q => api.aiEstimate(q),
     createSession: body => api.aiCreateSession(body),
     step: (id, body) => api.aiStep(id, body),
     update: (id, body) => api.aiUpdateSession(id, body),
@@ -86,6 +87,7 @@ export function standInTransport(script, { costPerStep = 0.05 } = {}) {
   return {
     calls,
     config: async () => ({ available: true, max_references: 6 }),
+    estimate: async () => ({ low_usd: 0.4, high_usd: 1.2, model: "stand-in" }),
     createSession: async body => ({ id: `standin-${++sessions}`, status: "open", estimate: { low_usd: 0.4, high_usd: 1.2, model: "stand-in" }, ...body }),
     step: async (id, body) => {
       calls.push({ id, stage: body.stage, messages: body.messages, tools: body.tools.map(t => t.name) });
@@ -102,4 +104,10 @@ let uid = 0;
 /** A tool call block, for stand-in scripts. */
 export const use = (name, input) => ({ type: "tool_use", id: `tu_${++uid}`, name, input });
 /** The tool results in the last message (what the browser sent back). */
+/** Adds to the conversation as the person: joined to the last message when that is theirs (tool results). */
+export function addUser(messages, content) {
+  const blocks = typeof content === "string" ? [{ type: "text", text: content }] : content, last = messages.at(-1);
+  if (last?.role === "user") return [...messages.slice(0, -1), { role: "user", content: [...(typeof last.content === "string" ? [{ type: "text", text: last.content }] : last.content), ...blocks] }];
+  return [...messages, { role: "user", content: blocks }];
+}
 export const lastResults = messages => (messages.at(-1)?.content || []).filter(b => b.type === "tool_result");

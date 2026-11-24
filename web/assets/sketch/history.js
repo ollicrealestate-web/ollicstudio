@@ -52,6 +52,16 @@ export class History {
     return result;
   }
 
+  /** Joins the steps at the top of the undo list that match `test` into one step called `label` (one undo per item). */
+  squash(test, label) {
+    let k = this.undoStack.length;
+    while (k > 0 && test(this.undoStack[k - 1])) k--;
+    const steps = this.undoStack.slice(k);
+    if (steps.length < 2) { if (steps[0]) steps[0].label = label; return steps.length; }
+    this.undoStack.splice(k, steps.length, { label, ops: steps.flatMap(s => s.ops) });
+    return steps.length;
+  }
+
   canUndo() { return this.undoStack.length > 0; }
   canRedo() { return this.redoStack.length > 0; }
 

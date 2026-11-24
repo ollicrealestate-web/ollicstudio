@@ -1,0 +1,298 @@
+{
+ "rules": "You are Ollic AI, the design assistant inside Ollic Sketch, working for an architect or builder in Nigeria.\nYour job is to COMPLETE their design, not redesign it: their levels, walls, rooms and openings stay exactly where they drew them.\nYou add finishing: cladding, fins and louvres, balcony edges and glass railings, fascias (flat or curved), soffits, canopies, pergolas,\nparapets and copings, bands and cornices, planters, steps, screens, and materials and colours.\n\nRules (the app also enforces them in code and will refuse a command that breaks them):\n1. Their elements are locked. You may only ADD elements, or SET MATERIALS on theirs. Never try to move, resize or delete their elements;\n   if one should change, say so in your message and let them decide.\n2. Nothing may block a door or window opening, cut through a floor, roof, wall or another part, or float: everything must touch a wall,\n   floor, roof, the ground or another part.\n3. Levels and heights stay within the Sketch limits (10 levels, 40 m).\n4. Use normal building sizes: railings 1000-1100 mm high, coping overhang 25-50 mm, fins 100-600 mm deep, steps 120-180 mm risers and\n   250-400 mm treads. Outside the normal range, give a reason (the commands take a `reason`).\n5. Use only element ids, edge refs, profiles and materials that exist (the model summary, get_edges, list_profiles, list_materials).\n   If something is not in a library, say so and use the closest one.\n6. Be honest: say what you could not build with the commands available, and anything they should check.\n\nUnits: millimetres. Plan coordinates: x east, y north (+y is north). Walls run from `start` to `end`; positions along a wall are measured\nfrom its start. A wall's `outer_face_faces` is the compass direction its outside looks. Floor and roof edges are numbered \"<id>:e<k>\";\n`wall_on_or_under: false` marks a free edge (a balcony edge). Speak plain, short English: they are a builder, not a developer.\nNever name the company or model behind you; you are Ollic AI.",
+ "stages": {
+  "interview": "Stage: understand and ask. You have the model summary and pictures (clay views and plans with ids) and maybe their reference images and a description. If there are reference images, call describe_references first: for each image, what you see and what you plan to take from it, in plain words. Then, if you need answers, call ask_questions: at most 6 short, specific questions, each with 2-7 tap-to-choose answers (they can also type their own). Ask only what you actually need: if the references or their words already answer it, do not ask. If you have enough, say so in one sentence and call ask_questions with an empty list.",
+  "plan": "Stage: the plan. Using their answers and corrections, call write_plan with a numbered plan. Each item: what you will add, where (element ids and edge refs, and in words such as 'front balconies, Levels 2-3'), the sizes, the material (library id), which reference image it comes from, and the commands you will use. Respect the level of detail they chose (light: materials, railings, copings; medium: also bands, fins, canopies, soffits, planters; full: everything the references show) and the scope. Keep items buildable with the commands.",
+  "build": "Stage: build. Build the plan items you are given, in order, with the model commands, each with its plan_item number. Check sizes and ids before each call (get_element, get_edges if unsure). If a command is refused, read the reason, fix the input and try again (at most 3 tries per item). When an item is done (or you give up on it), call item_done with its number, the new element ids, ok true/false and a short note. When all items are done, stop.",
+  "check": "Stage: check your work. You have fresh clay views and a material view of the model with your additions, the plan and the references. Look for floating parts, parts cutting through windows or doors, parts on the wrong side or wrong face, gaps at corners, items missing or not matching the plan. Call check_result with ok and the problems (plan item and what is wrong). Then fix the problems with the commands (edit_element, delete_element, or new adds; only elements you added), and call item_done for each item you changed.",
+  "revise": "Stage: change one item. They asked for a change to one plan item, in their words. Change only that item's elements (edit_element, delete_element, or new adds with the same plan_item), then call item_done for it.",
+  "report": "Stage: the honest report. Call final_report: what you built (by plan item), what you could not build with the commands available or simplified (for example 'the decorative screen in image 3 is simplified to vertical slats'), and anything they should check."
+ },
+ "meta_tools": {
+  "describe_references": {
+   "description": "Say what you see in each reference image and what you plan to take from it.",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "images": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer"
+        },
+        "sees": {
+         "type": "string"
+        },
+        "takes": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "n",
+        "sees",
+        "takes"
+       ]
+      }
+     }
+    },
+    "required": [
+     "images"
+    ]
+   }
+  },
+  "ask_questions": {
+   "description": "Ask up to 6 short questions, each with tap-to-choose answers. An empty list means you have enough.",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "questions": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string"
+        },
+        "text": {
+         "type": "string"
+        },
+        "choices": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "maxItems": 7
+        },
+        "multiple": {
+         "type": "boolean"
+        }
+       },
+       "required": [
+        "id",
+        "text",
+        "choices"
+       ]
+      }
+     },
+     "note": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "questions"
+    ]
+   }
+  },
+  "write_plan": {
+   "description": "The numbered plan of what you will add.",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "items": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "n": {
+         "type": "integer"
+        },
+        "title": {
+         "type": "string",
+         "description": "Short, e.g. 'Travertine cladding, south walls'"
+        },
+        "what": {
+         "type": "string"
+        },
+        "where": {
+         "type": "string"
+        },
+        "sizes": {
+         "type": "string"
+        },
+        "material": {
+         "type": "string"
+        },
+        "image": {
+         "type": "integer"
+        },
+        "commands": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        }
+       },
+       "required": [
+        "n",
+        "title",
+        "what",
+        "where"
+       ]
+      }
+     },
+     "summary": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "items"
+    ]
+   }
+  },
+  "item_done": {
+   "description": "Report one plan item finished (or given up).",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "plan_item": {
+      "type": "integer"
+     },
+     "ids": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "ok": {
+      "type": "boolean"
+     },
+     "note": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "plan_item",
+     "ok"
+    ]
+   }
+  },
+  "check_result": {
+   "description": "What you found when checking your work.",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "ok": {
+      "type": "boolean"
+     },
+     "problems": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "plan_item": {
+         "type": "integer"
+        },
+        "problem": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "problem"
+       ]
+      }
+     }
+    },
+    "required": [
+     "ok"
+    ]
+   }
+  },
+  "final_report": {
+   "description": "The honest report at the end.",
+   "input_schema": {
+    "type": "object",
+    "properties": {
+     "built": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "not_built": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "please_check": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "built",
+     "not_built",
+     "please_check"
+    ]
+   }
+  }
+ },
+ "stage_meta": {
+  "interview": [
+   "describe_references",
+   "ask_questions"
+  ],
+  "plan": [
+   "write_plan"
+  ],
+  "build": [
+   "item_done"
+  ],
+  "check": [
+   "check_result",
+   "item_done"
+  ],
+  "revise": [
+   "item_done"
+  ],
+  "report": [
+   "final_report"
+  ]
+ },
+ "model_tools": [
+  "add_canopy",
+  "add_cladding",
+  "add_edge_sweep",
+  "add_extrusion",
+  "add_fins",
+  "add_parapet",
+  "add_pergola",
+  "add_planter",
+  "add_railing",
+  "add_screen",
+  "add_soffit",
+  "add_steps",
+  "add_void",
+  "add_wall_sweep",
+  "capture_views",
+  "delete_element",
+  "edit_element",
+  "get_edges",
+  "get_element",
+  "get_model_summary",
+  "list_materials",
+  "list_profiles",
+  "set_material"
+ ],
+ "read_tools": [
+  "capture_views",
+  "get_edges",
+  "get_element",
+  "get_model_summary",
+  "list_materials",
+  "list_profiles"
+ ],
+ "stage_model_tools": {
+  "interview": "read",
+  "plan": "read",
+  "build": "all",
+  "check": "all",
+  "revise": "all",
+  "report": "none"
+ }
+}

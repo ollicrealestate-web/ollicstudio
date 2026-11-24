@@ -17,7 +17,8 @@ import * as OP from "./openings.js";
 import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
 import { floorLoops, floorParts, curvePoints as curvePts } from "./floors.js";
 import { initAiPanel } from "./aipanel.js";
-import { shownMaterial, shownFinishes, OPTION_NAME } from "./options.js";
+import { initAiFlow } from "./aiflow.js";
+import { shownMaterial, shownFinishes, OPTION_NAME, hasProposal } from "./options.js";
 import { drawDetails, detailsAt, detailBoxes, buildDetails3D, FINISHING, finishingDialog, detailProps, wireDetailProps } from "./detailsui.js";
 import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSketchProps, wireComponentSketchProps, drawComponents, drawRefPlanes, componentsAt, cutWallSolids, cutWallPlan, floorVoidHoles, buildComponents3D, RefPlaneTool, modelInPlaceDialog, wallSweepDialog, parapetDialog, componentProps, wireComponentProps, workPlaneDialog } from "./componentsui.js";
 import { checkSketch } from "./floors.js";
@@ -445,7 +446,7 @@ const RIBBON = [
       { id: "wallReveal", label: "Wall Reveal", icon: "sweep", run: () => wallSweepDialog(app, ui, true) },
       { id: "parapet", label: "Parapet", icon: "wall", run: () => parapetDialog(app, ui) },
     ] },
-    { label: "Ollic AI", items: [{ id: "aiComplete", label: "Complete my design", icon: "threed", run: () => app.completeDesign ? app.completeDesign() : app.aiPanel.show() }] },
+    { label: "Ollic AI", items: [{ id: "aiComplete", label: "Complete my design", icon: "threed", run: () => app.completeDesign() }] },
     { label: "Finishing", items: FINISHING.map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
     { label: "Model", items: [{ id: "modelLine", label: "Model Line", icon: "line", key: "LI", tool: "modelLine" }] },
     { label: "Work Plane", items: [{ id: "refPlane", label: "Ref Plane", icon: "section", key: "RP", tool: "refPlane" }, { id: "workPlane", label: "Set", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
@@ -712,7 +713,9 @@ function renderViewBars() {
   $("#bar3d").innerHTML = `<label>Visual style <select id="vStyle">${[["wire", "Wireframe"], ["hidden", "Hidden Line"], ["shaded", "Shaded"], ["consistent", "Consistent Colours"], ["realistic", "Realistic"]].map(([k, v]) => `<option value="${k}"${k === vs ? " selected" : ""}>${v}</option>`).join("")}</select></label>
     <button type="button" id="v3Fit">Zoom to fit</button>
     <details class="lvpick"><summary>Levels</summary><div>${LV.sorted(app.doc).map(l => `<label><input type="checkbox" data-l3="${l.id}"${(app.prefs.hidden3D || []).includes(l.id) ? "" : " checked"}> ${esc(l.name)}</label>`).join("")}</div></details>
-    <button type="button" data-corner="sw">SW</button><button type="button" data-corner="se">SE</button><button type="button" data-corner="ne">NE</button><button type="button" data-corner="nw">NW</button><button type="button" data-corner="top">Top</button>`;
+    <button type="button" data-corner="sw">SW</button><button type="button" data-corner="se">SE</button><button type="button" data-corner="ne">NE</button><button type="button" data-corner="nw">NW</button><button type="button" data-corner="top">Top</button>
+    <button type="button" id="v3Ai" class="ai-btn">Complete my design</button>`;
+  $("#v3Ai").onclick = () => app.completeDesign();
   $("#vStyle").onchange = e => { app.prefs.visual = e.target.value; app.savePrefs(); app.view3d.style = e.target.value; app.view3d.invalidate(); };
   $("#v3Fit").onclick = () => fit3D();
   $("#bar3d").querySelectorAll("[data-l3]").forEach(c => c.onchange = () => {
@@ -1153,7 +1156,7 @@ function exportDialog() {
       <div><button class="btn" type="button" id="x3Png">PNG</button></div></div>
     <div class="opt"><div><b>3D model (GLB)</b><small>Everything shown in the 3D view (levels you have hidden are left out), with colours. Opens in Blender, Windows 3D Viewer and online viewers.</small></div><div><button class="btn" type="button" id="xGlb">GLB</button></div></div>
     <div class="opt"><div><b>Project file</b><small>The whole sketch, to open again with Import.</small></div><div><button class="btn" type="button" id="xJson">JSON</button></div></div>
-    <div class="opt"><div><b>IFC (building model)</b><small>IFC4, millimetres: walls, floors, roofs, doors, windows and other parts as building objects on their levels, shaped as in 3D, with colours. Opens in Revit (File > Open > IFC), ArchiCAD, BIM viewers and the studio.</small></div><div><button class="btn primary" type="button" id="xIfc">IFC</button></div></div>
+    <div class="opt"><div><b>IFC (building model)</b><small>IFC4, millimetres: walls, floors, roofs, doors, windows and other parts as building objects on their levels, shaped as in 3D, with colours. Opens in Revit (File > Open > IFC), ArchiCAD, BIM viewers and the studio.</small></div><div><button class="btn primary" type="button" id="xIfc"${hasProposal(app.doc) ? " disabled" : ""}>IFC</button></div>${hasProposal(app.doc) ? `<div class="err" id="xIfcGate">The ${OPTION_NAME} is still open: accept or discard it in the Ollic AI panel first, so nothing half-finished is exported.</div>` : ""}</div>
     <div id="xErr"></div></div><div class="actions"><button class="btn" type="button" id="xClose">Close</button></div>`, d => {
     const name = safeName(app.doc.name), lvId = () => d.querySelector("#xLevel").value, sc = () => +d.querySelector("#xScale").value;
     const lvName = () => safeName(app.doc.levels.find(l => l.id === lvId())?.name);
@@ -1195,6 +1198,7 @@ app.store = new Store(app);
 app.setTool("select");
 setLayout(app.prefs.layout || "tile");
 initAiPanel(app);
+initAiFlow(app);
 renderAll();
 window.__sketch = app; // test hook: lets the browser tests read the model
 
