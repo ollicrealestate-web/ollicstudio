@@ -717,3 +717,16 @@ tr:last-child td { border-bottom: 0; }
 .cp-match { border: 1px solid rgba(0,0,0,.12); border-radius: 10px; padding: 10px 14px; margin: 0; display: grid; gap: 8px; }
 .cp-match .row, .cp-nudges { flex-wrap: wrap; gap: 6px; align-items: center; }
 .cp-score { font-weight: 600; margin-left: 8px; }
+
+/* Camera settings beside the 3D preview: the view and the settings side by side, the settings scrolling on their own */
+.viewer-stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.viewer-stage.cam-open { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
+.viewer-stage.cam-open .viewer { position: sticky; top: 12px; }
+.viewer-stage.cam-open .cam-panel { margin-top: 0; height: min(68vh, 620px); min-height: 340px; overflow: auto; overscroll-behavior: contain; padding: 12px; }
+.viewer-stage.cam-open .cam-panel .cp-settings, .viewer-stage.cam-open .cam-panel .cp-guides { grid-template-columns: minmax(0, 1fr); }
+.viewer-stage.cam-open .cam-panel .cp-list { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+@media (max-width: 900px) {
+  .viewer-stage.cam-open { grid-template-columns: minmax(0, 1fr); }
+  .viewer-stage.cam-open .viewer { position: sticky; top: 0; z-index: 5; height: 42vh; min-height: 240px; }
+  .viewer-stage.cam-open .cam-panel { height: auto; overflow: visible; }
+}

@@ -110,3 +110,8 @@ Built from `OLLIC_STUDIO_REALISTIC_MATERIALS_PROMPT.md`, in 7 phases.
 | What works | Tested by |
 |---|---|
 | Pressing **Complete my design** no longer sends the architect back to fix the model. Outer walls that stop short of a corner or run past it are trimmed or extended to meet; an outer wall drawn on a face line is put on its centre line in the same place; a gap still open gets an outer wall across it, the same as the wall beside it; a level with walls but no floor gets a floor inside its outer walls. Doors and windows stay where they are. All of it is one step that Undo takes back, and the start form lists what was fixed. Only an empty sketch (no outer walls drawn) still asks for walls. Done differently: a gap is closed with a straight wall, so a gap left on purpose (for an open front) should be drawn as a wall with a large opening instead. | `tests/sketch/autofix.test.mjs`, `tests/sketch/e2e_ready.mjs` |
+## Camera settings beside the preview, and free navigation (24 Nov 2026)
+
+| What works | Tested by |
+|---|---|
+| **Camera** opens its settings beside the 3D preview (below it on a phone, with the preview kept in sight at the top), so every change shows at once while the settings scroll on their own. Navigation in the Studio and Ollic Sketch 3D views is free: drag past the horizon to look up from below or over the top to look straight down; the turn is round whatever is under the pointer (the view does not jump); zooming in no longer slows to a stop near the turning point, it carries on through the model; nothing is cut off very close up or very far away. Usual views and the AI guides are drawn exactly as before. | `tests/studio/e2e_navigation.mjs`, `tests/studio/e2e_guides_same.mjs` |

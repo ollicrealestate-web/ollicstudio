@@ -577,7 +577,12 @@ document.querySelectorAll("[data-hold]").forEach(b => {
 });
 
 let camPanel = null;
-$("#camBtn").onclick = () => { const p = $("#camPanel"), open = p.hidden; p.hidden = !open; $("#camBtn").setAttribute("aria-expanded", String(open)); if (open) camPanel?.refresh(); };
+// the Camera settings sit beside the 3D preview (below it on a phone, with the preview kept in sight), so every change shows at once
+$("#camBtn").onclick = () => {
+  const p = $("#camPanel"), open = p.hidden; p.hidden = !open;
+  $("#viewerStage").classList.toggle("cam-open", open);
+  $("#camBtn").setAttribute("aria-expanded", String(open)); if (open) camPanel?.refresh();
+};
 let matPanel = null, prefsTimer = 0;
 /* downloads with the materials of the 3D preview: a GLB with its textures; the IFC with the chosen materials written in */
 const saveBlob = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); };

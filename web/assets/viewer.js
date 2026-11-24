@@ -68,7 +68,10 @@ export function createViewer(host, { onSelect } = {}) {
   controls.dampingFactor = 0.12;
   controls.zoomToCursor = true;          // zoom towards whatever is under the pointer
   controls.screenSpacePanning = true;
-  controls.maxPolarAngle = Math.PI * 0.495;
+  // free navigation: round the building to any angle, over the top and from below, zooming in as far as you like
+  controls.maxPolarAngle = Math.PI - 0.001;
+  controls.minDistance = 0.05;
+  controls.rotateSpeed = 0.9;
 
   // sky, sun and the sky's light in reflections
   const sky = new Sky();
@@ -480,6 +483,22 @@ export function createViewer(host, { onSelect } = {}) {
     if (frontPick && hit) { const f = frontPick; frontPick = null; f(hit); return; }
     select(hit ? hit.object : null, hit);
   });
+  // the orbit turns round what is under the pointer (at its depth on the view's centre line, so the view does not jump),
+  // not round a point far behind it; zooming in keeps going through the model instead of slowing to a stop
+  renderer.domElement.addEventListener("pointerdown", e => {
+    if (e.button !== 0 || mode === "walk" || !controls.enabled || owner) return;
+    const hit = hitAt(e); if (!hit) return;
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+    const depth = hit.point.clone().sub(camera.position).dot(fwd);
+    if (depth > 0.1) controls.target.copy(camera.position).addScaledVector(fwd, depth);
+  }, true);
+  renderer.domElement.addEventListener("wheel", e => {
+    if (mode === "walk" || !controls.enabled || owner || e.deltaY >= 0) return;
+    const d = camera.position.distanceTo(controls.target), near = Math.max(0.6, (frameBox.isEmpty() ? 10 : frameBox.getSize(new THREE.Vector3()).length()) * 0.02);
+    if (d > near) return;
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+    camera.position.addScaledVector(fwd, near * 0.6); controls.target.addScaledVector(fwd, near * 0.6); redraw();
+  }, { capture: true, passive: true });
   renderer.domElement.addEventListener("dblclick", e => {
     const hit = hitAt(e);
     if (!hit) return;
@@ -707,7 +726,7 @@ export function createViewer(host, { onSelect } = {}) {
   function applyOutput(outAspect) {
     camera.aspect = outAspect;
     // a set picture may be level (eye level: the camera looks straight across) or look up (a low hero angle)
-    controls.maxPolarAngle = pic ? Math.PI * 0.8 : Math.PI * 0.495;
+    controls.maxPolarAngle = Math.PI - 0.001;
     if (pic) {
       const h = 2 * Math.atan(Math.tan(pic.v * Math.PI / 360) * pic.aspect) * 180 / Math.PI;
       const o = forOutput({ aspect: pic.aspect, v: pic.v, h, shift: pic.shift }, outAspect);
@@ -988,6 +1007,16 @@ export function createViewer(host, { onSelect } = {}) {
   // drawing (every edge) and a depth map (how far each part is). Same camera, same size, so the
   // AI keeps the geometry and the result can be checked against the lines.
   let edgesGroup = null, guide = null;
+  // near and far follow the distance, so nothing is cut off close up or far away
+  controls.addEventListener("change", () => {
+    if (mode === "walk" || guide) return;
+    // only when the camera comes very close or goes very far: the usual views (and the guides) keep their own
+    const d = camera.position.distanceTo(controls.target);
+    let changed = false;
+    if (d < camera.near * 30) { camera.near = Math.max(0.02, d / 300); changed = true; }
+    if (d * 40 > camera.far) { camera.far = d * 60; changed = true; }
+    if (changed) { camera.updateProjectionMatrix(); sky.scale.setScalar(Math.min(4500, camera.far * 0.8)); }
+  });
   const clayMat = new THREE.MeshStandardMaterial({ color: "#d9d7d2", roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
   const clayGlass = new THREE.MeshStandardMaterial({ color: "#9fb4c4", roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
   const clayGround = new THREE.MeshStandardMaterial({ color: "#c8cac4", roughness: 1 });
