@@ -69,7 +69,7 @@
   "title": "Bricks 093"
  },
  "brick-red": {
-  "asset": "Bricks076C",
+  "asset": "Bricks101",
   "author": "ambientCG (Lennart Demes)",
   "candidates": [
    "Bricks104",
@@ -88,13 +88,13 @@
    "normal",
    "rough"
   ],
-  "page": "https://ambientcg.com/view?id=Bricks076C",
+  "page": "https://ambientcg.com/view?id=Bricks101",
   "query": [
    "bricks red",
    "red brick wall",
    "bricks"
   ],
-  "title": "Bricks 076 C"
+  "title": "Bricks 101"
  },
  "concrete-board": {
   "asset": "Concrete031",
@@ -323,7 +323,7 @@
   "title": "Marble 012"
  },
  "metal-brushed": {
-  "asset": "Metal055A",
+  "asset": "Metal049A",
   "author": "ambientCG (Lennart Demes)",
   "candidates": [
    "Metal064",
@@ -341,15 +341,15 @@
    "normal",
    "rough"
   ],
-  "page": "https://ambientcg.com/view?id=Metal055A",
+  "page": "https://ambientcg.com/view?id=Metal049A",
   "query": [
    "metal",
    "brushed"
   ],
-  "title": "Metal 055 A"
+  "title": "Metal 049 A"
  },
  "metal-painted": {
-  "asset": "Metal061B",
+  "asset": "Metal027",
   "author": "ambientCG (Lennart Demes)",
   "candidates": [
    "Metal027",
@@ -367,12 +367,12 @@
    "normal",
    "rough"
   ],
-  "page": "https://ambientcg.com/view?id=Metal061B",
+  "page": "https://ambientcg.com/view?id=Metal027",
   "query": [
    "painted metal",
    "metal"
   ],
-  "title": "Metal 061 B"
+  "title": "Metal 027"
  },
  "paving": {
   "asset": "PavingStones146",
@@ -477,7 +477,7 @@
   "title": "Plaster 004"
  },
  "roof-clay": {
-  "asset": "RoofingTiles006",
+  "asset": "RoofingTiles012A",
   "author": "ambientCG (Lennart Demes)",
   "candidates": [
    "RoofingTiles013A",
@@ -496,9 +496,9 @@
    "normal",
    "rough"
   ],
-  "page": "https://ambientcg.com/view?id=RoofingTiles006",
+  "page": "https://ambientcg.com/view?id=RoofingTiles012A",
   "query": "roofing tiles",
-  "title": "Roofing Tiles 006"
+  "title": "Roofing Tiles 012 A"
  },
  "roof-metal": {
   "asset": "CorrugatedSteel005",
@@ -525,7 +525,7 @@
   "title": "Corrugated Steel 005"
  },
  "roof-tiles": {
-  "asset": "RoofingTiles015A",
+  "asset": "RoofingTiles013A",
   "author": "ambientCG (Lennart Demes)",
   "candidates": [
    "RoofingTiles013A",
@@ -544,9 +544,9 @@
    "normal",
    "rough"
   ],
-  "page": "https://ambientcg.com/view?id=RoofingTiles015A",
+  "page": "https://ambientcg.com/view?id=RoofingTiles013A",
   "query": "roofing tiles",
-  "title": "Roofing Tiles 015 A"
+  "title": "Roofing Tiles 013 A"
  },
  "sandstone": {
   "asset": "Bricks084",
