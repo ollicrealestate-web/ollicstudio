@@ -10,6 +10,7 @@ Everything the browser loads is served from our own server (no CDN at runtime). 
 | `web-ifc/` | IFC reader in the browser | see `web-ifc/VERSION.txt` | MPL-2.0 (`web-ifc/LICENSE.md`) |
 | `mp4-muxer/` | Writes MP4 videos in the browser | | MIT (`mp4-muxer/LICENSE`) |
 | `archivo/` | Typeface | | SIL Open Font Licence |
+| `heic2any/` | Opens iPhone (HEIC) photos in browsers that cannot, loaded only then | 0.0.4 | MIT; it contains libheif, LGPL-3.0, kept as this separate, replaceable file |
 
 Material textures (`web/assets/materials/tex/`) are from ambientCG, CC0 1.0 (public domain). The source page, author
 and licence of every texture set are recorded in `web/assets/materials/tex/sources.json`. They are fetched by

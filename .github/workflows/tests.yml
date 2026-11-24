@@ -8,6 +8,7 @@ jobs:
   sketch:
     name: Sketch (geometry and browser)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,13 +17,14 @@ jobs:
         with:
           node-version: 22
       - name: Geometry and model unit tests
-        run: node --test tests/sketch/*.test.mjs
+        run: node --test tests/sketch/*.test.mjs tests/studio/*.test.mjs
       - name: Browser tests (real Chromium)
         run: |
           npm i --no-save --no-package-lock playwright@1.48.2
           npx playwright install --with-deps chromium > /dev/null
-          for f in tests/sketch/e2e_*.mjs; do node "$f" out/sketch || exit 1; done
-          for f in tests/studio/e2e_*.mjs; do node "$f" out/studio || exit 1; done
+          # each test file has 15 minutes, so one that hangs fails with its name instead of holding up the run
+          for f in tests/sketch/e2e_*.mjs; do echo "== $f"; timeout 900 node "$f" out/sketch || { echo "FAILED or timed out: $f"; exit 1; }; done
+          for f in tests/studio/e2e_*.mjs; do echo "== $f"; timeout 900 node "$f" out/studio || { echo "FAILED or timed out: $f"; exit 1; }; done
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

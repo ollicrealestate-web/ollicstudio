@@ -27,11 +27,22 @@ export function loadSources() {
 }
 export const setSources = s => { sources = s; };
 
+// My materials (made from the user's photos): registered with the links to their pictures
+const USER = new Map();
+/** def: { id ("my-<uuid>"), name, category, cls, size, sizeV, color, rough, metal, urls: { color, normal, rough, ao }, swatch }. */
+export function registerMaterial(def) { USER.set(def.id, { category: "My materials", color: "#ffffff", rough: 0.6, size: 1, ...def, set: def.id, photo: true }); }
+export const forgetMaterial = id => USER.delete(id);
+export const userMaterials = () => [...USER.values()];
+/** A material by id: one of mine, or the library's. */
+export const findMaterial = id => USER.get(id) || materialById(id);
+
 function base(set, map) {
   const key = `${set}/${map}`;
   if (!baseTex.has(key)) {
     const rec = { tex: null, loaded: false, clones: new Set() };
-    rec.tex = loader.load(`${BASE}${set}/${map}.jpg`, t => {
+    const url = USER.get(set)?.urls?.[map] || `${BASE}${set}/${map}.jpg`;
+    loader.setCrossOrigin("anonymous");
+    rec.tex = loader.load(url, t => {
       rec.loaded = true;
       if (map === "rough") MEAN_ROUGH.set(set, meanOf(t.image));
       if (map === "color") MEAN_LUM.set(set, meanOf(t.image, true));
@@ -58,16 +69,16 @@ function meanOf(img, lum = false) {
  * A copy of a set's map with its own size, rotation and offset (the picture itself is shared), put on the material
  * only once the picture has arrived: until then the surface shows its plain colour (never black).
  */
-function attachMap(mat, slot, set, map, { repeat, rotation, offset }, onReady) {
+function attachMap(mat, slot, set, map, { repeat, repeatV = repeat, rotation, offset }, onReady) {
   const rec = base(set, map), t = rec.tex.clone();
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = anisotropy;
-  t.repeat.set(repeat, repeat); t.rotation = rotation; t.offset.set(offset[0] * repeat, offset[1] * repeat);
+  t.repeat.set(repeat, repeatV); t.rotation = rotation; t.offset.set(offset[0] * repeat, offset[1] * repeatV);
   const put = () => { mat[slot] = t; t.needsUpdate = true; mat.needsUpdate = true; onReady?.(); };
   t.userData.onReady = put;
   if (rec.loaded) put(); else rec.clones.add(t);
   return t;
 }
-const has = (set, map) => !sources || !sources[set] || (sources[set].maps || MAPS).includes(map);
+const has = (set, map) => (USER.has(set) ? !!USER.get(set).urls?.[map] : !sources || !sources[set] || (sources[set].maps || MAPS).includes(map));
 let white = null;
 const whiteTex = () => { if (!white) { white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); white.wrapS = white.wrapT = THREE.RepeatWrapping; white.needsUpdate = true; } return white; };
 
@@ -76,13 +87,13 @@ const whiteTex = () => { if (!white) { white = new THREE.DataTexture(new Uint8Ar
  * rough (0-1), offset ([u, v] metres), opacity (glass from the IFC), quality ("fast" | "high" | "best") }.
  */
 export function materialLook(id, o = {}) {
-  const m = materialById(id);
+  const m = findMaterial(id);
   if (!m) return null;
   const quality = o.quality || "high";
   const key = JSON.stringify([id, o.tint || null, o.scale || 1, o.rotation || 0, o.rough ?? null, o.offset || null, o.opacity ?? null, quality]);
   if (looks.has(key)) return looks.get(key);
   const colour = new THREE.Color(o.tint || m.color);
-  const size = (m.size || 1) * (o.scale || 1), repeat = 1 / size, rotation = ((o.rotation || 0) * Math.PI) / 180, offset = o.offset || [0, 0];
+  const size = (m.size || 1) * (o.scale || 1), repeat = 1 / size, repeatV = 1 / ((m.sizeV || m.size || 1) * (o.scale || 1)), rotation = ((o.rotation || 0) * Math.PI) / 180, offset = o.offset || [0, 0];
   let mat;
   if (m.cls === "glass") {
     const op = m.opacity ?? 0.35;
@@ -92,10 +103,10 @@ export function materialLook(id, o = {}) {
     // a coloured material (a paint colour, red stone-coated tiles, bronze aluminium) takes its exact colour from the
     // library or the IFC and only the relief and grain from the photo; a photographed one (travertine) is the photo
     const detail = !!m.set && (!!o.tint || (m.color.toLowerCase() !== "#ffffff" && !m.photo));
-    mat = new THREE.MeshPhysicalMaterial({ color: m.set && !detail ? new THREE.Color(PLAIN[m.cls] || "#cccccc") : colour, metalness: m.metal ?? 0, roughness: o.rough ?? m.rough,
+    mat = new THREE.MeshPhysicalMaterial({ color: m.set && !detail ? new THREE.Color(m.plain || PLAIN[m.cls] || "#cccccc") : colour, metalness: m.metal ?? 0, roughness: o.rough ?? m.rough,
       envMapIntensity: m.cls === "metal" ? 1.1 : 0.7, side: THREE.DoubleSide, emissive: m.emissive ? new THREE.Color(m.emissive) : new THREE.Color(0), emissiveIntensity: m.emissive ? 1.2 : 0 });
     if (m.cls === "tile" || m.cls === "stone") { mat.clearcoat = m.rough < 0.3 ? 0.6 : 0; mat.clearcoatRoughness = 0.08; }
-    const tr = { repeat, rotation, offset };
+    const tr = { repeat, repeatV, rotation, offset };
     const breakup = !!m.set && !m.tile && quality !== "fast" && (m.size || 1) >= 1;
     if (m.tile || detail || breakup) addShaderTouches(mat, m, size, { breakup });
     if (m.set) {

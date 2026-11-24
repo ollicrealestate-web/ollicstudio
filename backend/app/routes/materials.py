@@ -6,8 +6,12 @@ from __future__ import annotations
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+import io
+import json
+import logging
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..auth import CurrentUser, get_current_user
 from .projects import _repo
@@ -103,3 +107,145 @@ def put_prefs(body: PrefsIn, request: Request, user: CurrentUser = Depends(get_c
     if not row:
         raise HTTPException(503, "Could not save.")
     return {"favourites": row.get("favourites") or [], "recent": row.get("recent") or []}
+
+
+# ---------------------------------------------------------------- My materials: made from the user's photos
+BUCKET = "user-materials"
+MAPS = ("color", "normal", "rough", "ao", "original")
+CLASSES = ("paint", "plaster", "concrete", "stone", "brick", "tile", "wood", "metal", "glass", "roof", "grass", "paving", "asphalt", "furniture", "ceramic")
+MAX_BYTES = 8 * 1024 * 1024
+log = logging.getLogger("ollic.materials")
+
+
+class MyMaterialIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    cls: str = "stone"
+    size: float = Field(1, gt=0.01, le=50)          # metres one picture covers, across
+    sizeV: float | None = Field(None, gt=0.01, le=50)   # and up (if not square)
+    rough: float = Field(0.6, ge=0, le=1)
+    metal: float = Field(0, ge=0, le=1)
+    plain: str = "#cccccc"                          # its average colour, shown while the pictures load
+    tiles: list[int] | None = None                  # whole tiles in one picture, across and up
+    tile_mm: list[float] | None = None              # one tile, mm
+    checks: dict = Field(default_factory=dict)      # how faithful the copy is (colour difference, join)
+
+    @field_validator("cls")
+    @classmethod
+    def _cls(cls, v):
+        if v not in CLASSES:
+            raise ValueError("unknown kind of material")
+        return v
+
+    @field_validator("plain")
+    @classmethod
+    def _plain(cls, v):
+        if not _HEX.match(v):
+            raise ValueError("colour must be like #a1b2c3")
+        return v
+
+
+def _picture(f: UploadFile | None, what: str) -> tuple[bytes, str] | None:
+    """An uploaded picture, checked: a real JPEG, PNG or WebP image, at most 8 MB."""
+    if f is None:
+        return None
+    data = f.file.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise HTTPException(413, f"The {what} picture is larger than 8 MB.")
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(data)); im.verify()
+        kind = (im.format or "").upper()
+    except Exception:
+        raise HTTPException(422, f"The {what} picture could not be read.")
+    if kind not in ("JPEG", "PNG", "WEBP"):
+        raise HTTPException(422, f"The {what} picture must be JPEG, PNG or WebP.")
+    return data, {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}[kind]
+
+
+def _public(request: Request, user: CurrentUser, row: dict) -> dict:
+    """A material of mine as the browser uses it: like a library entry, with links to its pictures (an hour)."""
+    paths = {k: v for k, v in (row.get("maps") or {}).items() if k in MAPS}
+    links = request.app.state.storage.signed_urls(user, list(paths.values()), bucket=BUCKET, expires_in=3600) if paths else {}
+    st = row.get("settings") or {}
+    return {"id": f"my-{row['id']}", "name": row["name"], "category": "My materials", "cls": row["cls"], "size": st.get("size", 1), "sizeV": st.get("sizeV"),
+            "rough": st.get("rough", 0.6), "metal": st.get("metal", 0), "plain": st.get("plain", "#cccccc"), "checks": st.get("checks", {}),
+            "urls": {k: links.get(p) for k, p in paths.items() if links.get(p)}, "created_at": row.get("created_at")}
+
+
+@router.get("/my-materials")
+def list_my_materials(request: Request, user: CurrentUser = Depends(get_current_user)):
+    return [_public(request, user, r) for r in _repo(request).list_user_materials(user)]
+
+
+@router.post("/my-materials", status_code=status.HTTP_201_CREATED)
+def create_my_material(request: Request, user: CurrentUser = Depends(get_current_user), meta: str = Form(...),
+                       color: UploadFile = File(...), normal: UploadFile | None = File(None), rough: UploadFile | None = File(None),
+                       ao: UploadFile | None = File(None), original: UploadFile | None = File(None)):
+    try:
+        m = MyMaterialIn.model_validate(json.loads(meta))
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(422, f"The material's details are not right: {str(exc)[:200]}")
+    pics = {k: _picture(f, k) for k, f in (("color", color), ("normal", normal), ("rough", rough), ("ao", ao), ("original", original))}
+    mid = str(uuid.uuid4())
+    storage, paths = request.app.state.storage, {}
+    for k, v in pics.items():
+        if v is None:
+            continue
+        ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[v[1]]
+        path = f"{user.id}/{mid}/{k}.{ext}"
+        storage.upload(user, path, v[0], v[1], bucket=BUCKET)
+        paths[k] = path
+    settings = m.model_dump(exclude={"name", "cls"}, exclude_none=True)
+    row = _repo(request).create_user_material(user, {"id": mid, "name": m.name, "cls": m.cls, "settings": settings, "maps": paths})
+    return _public(request, user, row)
+
+
+@router.delete("/my-materials/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_my_material(material_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user)):
+    repo = _repo(request)
+    row = repo.get_user_material(user, str(material_id))
+    if not row:
+        raise HTTPException(404, "Material not found.")
+    paths = list((row.get("maps") or {}).values())
+    if paths:
+        request.app.state.storage.remove(user, paths, bucket=BUCKET)
+    repo.delete_user_material(user, str(material_id))
+
+
+SUGGEST_SYSTEM = """You look at a photo of a building material (a tile, a stone sample, a wall, a catalogue picture) for an
+architect in Nigeria and say what it is, so it can be used as a material in a 3D model. Answer with one JSON object:
+{"name": short material name as a builder would say it (e.g. "Travertine, honed", "Porcelain tile, beige marble look"),
+ "cls": one of paint, plaster, concrete, stone, brick, tile, wood, metal, glass, roof, grass, paving, asphalt, furniture,
+ "rough": 0 (mirror-polished) to 1 (matt), "metal": 0 or 1, "size_mm": your best guess of how wide the photo shows in
+ millimetres (one tile, one brick course, a sample board), "tile_mm": [width, height] of one tile or brick if it is tiled,
+ else null, "notes": one short sentence on what you see}. Use plain words; never mention brands."""
+
+
+@router.post("/my-materials/suggest")
+def suggest_my_material(request: Request, user: CurrentUser = Depends(get_current_user), image: UploadFile = File(...)):
+    """Ollic AI looks at the photo and suggests a name, kind, shine and likely size. Without the AI, a 503 (the
+    browser then keeps its own guesses)."""
+    writer = getattr(request.app.state, "prompt_writer", None)
+    if writer is None or not hasattr(writer, "ask_json"):
+        raise HTTPException(503, {"code": "not_configured", "reason": "Ollic AI suggestions are not set up. Fill in the details yourself."})
+    pic = _picture(image, "photo")
+    from ..prompt_writer import PromptWriterFailed, _image_block
+    try:
+        out = writer.ask_json(SUGGEST_SYSTEM, [_image_block(pic[0]), {"type": "text", "text": "What material is this?"}], max_tokens=800, timeout=90)
+    except PromptWriterFailed as exc:
+        log.warning("material suggestion failed: %s", exc)
+        raise HTTPException(502, {"code": "ai_failed", "reason": "Ollic AI could not look at the photo just now. Fill in the details yourself."})
+    a = out.get("answer") or {}
+    try:
+        _repo(request).create_usage_event(user, {"project_id": None, "provider": "anthropic", "model": out.get("model") or "claude", "operation": "vision_read",
+                                                 "cost_usd": str(out["cost_usd"]) if out.get("cost_usd") is not None else None,
+                                                 "price_source": "platform.claude.com price list", "raw_usage": out.get("usage")})
+    except Exception:
+        pass
+    num = lambda v, lo, hi, d: max(lo, min(hi, float(v))) if isinstance(v, (int, float)) else d
+    tile = a.get("tile_mm")
+    return {"name": str(a.get("name") or "My material")[:80], "cls": a.get("cls") if a.get("cls") in CLASSES else "stone",
+            "rough": num(a.get("rough"), 0, 1, 0.6), "metal": 1 if a.get("metal") in (1, True, "1") else 0,
+            "size_mm": num(a.get("size_mm"), 20, 20000, None),
+            "tile_mm": [num(tile[0], 10, 3000, None), num(tile[1], 10, 3000, None)] if isinstance(tile, list) and len(tile) == 2 else None,
+            "notes": str(a.get("notes") or "")[:200]}

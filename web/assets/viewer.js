@@ -21,7 +21,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
 import { matchMaterial } from "./materials/match.js";
 import { materialById } from "./materials/library.js";
-import { materialLook, addMetricUVs, setupLooks, loadSources } from "./materials/look.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources, findMaterial } from "./materials/look.js";
 import { PLACES, PRESETS, sunAngles, momentAt, afternoonAt, sunVector, sunLight } from "./materials/light.js";
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
@@ -688,7 +688,7 @@ export function createViewer(host, { onSelect } = {}) {
     if (!m) return;
     if (!o.geometry.attributes.uv || o.geometry.userData.metric !== true) { addMetricUVs(o.geometry); o.geometry.userData.metric = true; }
     setLook(o, m);
-    const seen = materialById(a?.id || base?.id)?.cls || o.userData.cls;
+    const seen = findMaterial(a?.id || base?.id)?.cls || o.userData.cls;
     o.userData.shadowReal = seen !== "glass" && o.userData.cls !== "space";
     if (!classicOn) o.castShadow = o.userData.shadowReal;
   }
@@ -1212,6 +1212,16 @@ export function createViewer(host, { onSelect } = {}) {
     assignments,
     onAssign(fn) { onAssign = fn; },
     select(key) { const o = key ? findPart(key) : null; select(o); return !!o; },
+    /** Photo mode: the current view path-traced (see materials/photomode.js); the view waits while it renders. */
+    async photo(opts = {}) {
+      if (owner) throw new Error("The view is busy.");
+      if (mode === "walk") keys.clear();
+      select(null);
+      const { renderPhoto } = await import("./materials/photomode.js");
+      owner = "photo"; controls.enabled = false;
+      try { return await renderPhoto(this.engine(), opts); }
+      finally { owner = null; controls.enabled = mode !== "walk"; resize(); redraw(); }
+    },
     guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
     /** Every part with its library material (for tests and the Materials panel): type, name, material, how, mean normal. */
     debugParts() {
@@ -1226,6 +1236,6 @@ export function createViewer(host, { onSelect } = {}) {
       const b = frameBox, size = b.getSize(new THREE.Vector3());
       return { storeys: storeys.slice(), rooms: rooms().map(r => r.name), width_m: +size.x.toFixed(1), depth_m: +size.z.toFixed(1), height_m: +size.y.toFixed(1) };
     },
-    engine() { return { THREE, scene, camera, renderer, elements, storeys, sun, hemi, ground, groundY, frame: frameBox.clone(), host, render: () => renderer.render(scene, camera), resize }; },
+    engine() { return { THREE, scene, camera, renderer, elements, storeys, sun, hemi, ground, groundY, frame: frameBox.clone(), host, render: () => renderer.render(scene, camera), resize, sky, site, light: lightNow(), env: () => cubeRT.texture, classic: () => classicOn, quality }; },
   };
 }

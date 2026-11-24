@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#070707">
 <link rel="stylesheet" href="assets/styles.css">
 <script src="assets/config.js"></script>
-<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/"}}</script>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/", "three/examples/jsm/": "./vendor/three/addons/", "three-mesh-bvh": "./vendor/three-mesh-bvh/index.module.js"}}</script>
 </head>
 <body>
 <div class="blueprint" aria-hidden="true"></div>
@@ -143,6 +143,7 @@
           <button type="button" class="btn" id="viewReset">Reset view</button>
           <button type="button" class="btn" id="lightBtn" aria-expanded="false" aria-controls="lightPanel">Light</button>
           <button type="button" class="btn" id="matBtn" aria-expanded="false" aria-controls="matPanel">Materials</button>
+          <button type="button" class="btn" id="photoBtn" aria-expanded="false" aria-controls="photoPanel">Photo</button>
           <button type="button" class="btn primary" id="useView">Capture view</button>
           <button type="button" class="btn primary" id="addShotView">Add a shot from this view</button>
           <span class="spacer"></span>
@@ -150,6 +151,19 @@
         </div>
         <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
         <div class="card mat-panel" id="matPanel" hidden></div>
+        <div class="card photo-panel" id="photoPanel" hidden>
+          <p class="hint">A still of this view with light bouncing as it really does: soft shadows, light between walls, real reflections. It sharpens for a few moments; save it whenever it looks right.</p>
+          <div class="row">
+            <label>Size <select id="photoSize"><option value="1920">Full HD (1920 wide)</option><option value="2560">2K (2560 wide)</option><option value="3840">4K (3840 wide)</option><option value="1280">Quick (1280 wide)</option></select></label>
+            <label>Shape <select id="photoShape"><option value="view">Like the view</option><option value="1.7778">16:9</option><option value="1.5">3:2</option><option value="1">Square</option><option value="0.8">4:5 (portrait)</option></select></label>
+            <label>Refine <select id="photoSamples"><option value="96">Quick</option><option value="300" selected>Good</option><option value="1000">Best (slow)</option></select></label>
+            <button type="button" class="btn primary" id="photoGo">Make the photo</button>
+            <button type="button" class="btn" id="photoStop" hidden>Stop here</button>
+            <a class="btn" id="photoSave" download hidden>Save PNG</a>
+          </div>
+          <progress id="photoProgress" max="1" value="0" hidden></progress> <span class="hint" id="photoMsg" role="status"></span>
+          <img id="photoImg" alt="The photo of your model" hidden>
+        </div>
         <div class="card light-panel" id="lightPanel" hidden>
           <div class="seg" role="group" aria-label="Sky" id="lightPresets">
             <button type="button" class="seg-btn" data-preset="sunny" aria-pressed="true">Sunny day</button>

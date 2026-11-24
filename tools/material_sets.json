@@ -245,6 +245,10 @@
   "three-gpu-pathtracer@0.0.23": [
    "build/index.module.js",
    "LICENSE"
+  ],
+  "heic2any@0.0.4": [
+   "dist/heic2any.min.js",
+   "LICENSE"
   ]
  }
 }

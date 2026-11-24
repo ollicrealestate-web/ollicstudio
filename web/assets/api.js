@@ -33,6 +33,10 @@ export const api = {
   putModelMaterials: (modelId, assignments) => request("PUT", `/models/${modelId}/materials`, { assignments }),
   getMaterialPrefs: () => request("GET", "/material-prefs"),
   putMaterialPrefs: prefs => request("PUT", "/material-prefs", prefs),
+  listMyMaterials: () => request("GET", "/my-materials"),
+  deleteMyMaterial: id => request("DELETE", `/my-materials/${id.replace(/^my-/, "")}`),
+  createMyMaterial: (form, onProgress) => postForm("/my-materials", form, onProgress, "The material could not be saved"),
+  suggestMaterial: blob => { const f = new FormData(); f.append("image", blob, "photo.jpg"); return postForm("/my-materials/suggest", f, null, "Ollic AI could not look at the photo"); },
   // Sketch (the plan and 3D modeller): one JSON document per sketch, owned by the user
   listSketches: () => request("GET", "/sketches"),
   createSketch: body => request("POST", "/sketches", body),
