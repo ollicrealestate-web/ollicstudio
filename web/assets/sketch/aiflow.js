@@ -7,6 +7,7 @@
 //  5. Up to 3 check rounds with fresh pictures; it fixes what it finds.
 //  6. The honest report; then review in the AI proposal list (accept, reject, change one item in words).
 import { readiness, modelSummary } from "./summary.js";
+import { prepareModel } from "./autofix.js";
 import { captureViews } from "./capture.js";
 import { runStage, pictureBlocks, checkPictures, serverTransport, addUser } from "./aiclient.js";
 import { proposalItems, OPTION, hasProposal } from "./options.js";
@@ -44,8 +45,11 @@ async function start(app) {
   Object.assign(F, { step: "setup", chat: [], questions: [], answers: {}, own: {}, plan: [], progress: {}, log: [], cost: 0, round: 0, report: null, error: "", session: null, refs: [], description: "" });
   const sel = [...app.selection].filter(id => app.lookup(id));
   F.selection = sel; F.scopeKind = sel.length ? "selected" : "all"; F.levels = app.doc.levels.map(l => l.id);
-  const issues = readiness(app.doc);
-  if (issues.length) { F.step = "notready"; F.issues = issues; }
+  // the model is made ready by itself (walls joined into loops, missing floors added); only an empty model stops here
+  const prep = readiness(app.doc).length ? prepareModel(app.history) : { done: [], issues: [] };
+  F.prepared = prep.done;
+  if (prep.done.length) app.redraw?.(true);
+  if (prep.issues.length) { F.step = "notready"; F.issues = prep.issues; }
   app.aiPanel.show();
   try { const t = await transport(app); const c = await t.config(); F.available = c.available !== false; } catch (e) { F.available = false; F.error = e.message; }
   render(app);
@@ -223,8 +227,8 @@ function flowHtml(app) {
   const err = F.error ? `<div class="err">${esc(F.error)}</div>` : "";
   const cost = F.session ? `<div class="ai-cost">Cost so far: ${usd(F.cost)}${F.estimate ? ` (estimate ${usd(F.estimate.low_usd)}–${usd(F.estimate.high_usd)})` : ""}</div>` : "";
   let body = "";
-  if (F.step === "notready") body = `<p><b>Before Ollic AI can complete the design:</b></p><ul class="ai-issues">${F.issues.map(i => `<li>${esc(i)}</li>`).join("")}</ul><button class="btn" type="button" id="aiRecheck">Check again</button>`;
-  else if (F.step === "setup") body = setupHtml(app);
+  if (F.step === "notready") body = `<p><b>Ollic AI needs a little more to start from:</b></p><ul class="ai-issues">${F.issues.map(i => `<li>${esc(i)}</li>`).join("")}</ul><button class="btn" type="button" id="aiRecheck">Check again</button>`;
+  else if (F.step === "setup") body = (F.prepared?.length ? `<div class="ai-prepared"><p><b>Ollic AI first made the model ready</b> (one step: Undo takes it back):</p><ul class="ai-issues">${F.prepared.map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>` : "") + setupHtml(app);
   else if (F.step === "past") body = pastHtml(app);
   else if (F.step === "questions") body = questionsHtml(app);
   else if (F.step === "plan") body = planHtml(app);
