@@ -16,10 +16,13 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { TAARenderPass } from "three/addons/postprocessing/TAARenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
 import { matchMaterial } from "./materials/match.js";
 import { materialById } from "./materials/library.js";
 import { materialLook, addMetricUVs, setupLooks, loadSources } from "./materials/look.js";
+import { PLACES, PRESETS, sunAngles, momentAt, afternoonAt, sunVector, sunLight } from "./materials/light.js";
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
 const SOLID_FOR_WALKING = new Set(["IfcWall", "IfcWallStandardCase", "IfcColumn", "IfcCurtainWall", "IfcRailing", "IfcWindow", "IfcPlate", "IfcMember", "IfcBuildingElementProxy", "IfcStair", "IfcStairFlight", "IfcFurnishingElement", "IfcFurniture"]);
@@ -54,12 +57,15 @@ export function createViewer(host, { onSelect } = {}) {
   sky.material.uniforms.turbidity.value = 2.2; sky.material.uniforms.rayleigh.value = 3.2;
   sky.material.uniforms.mieCoefficient.value = 0.004; sky.material.uniforms.mieDirectionalG.value = 0.82;
   scene.add(sky);
-  const SUN_AZ = 0.65, SUN_EL = 0.72;   // afternoon sun from the south-west
-  const sunDir = new THREE.Vector3(Math.cos(SUN_EL) * Math.cos(SUN_AZ), Math.sin(SUN_EL), Math.cos(SUN_EL) * Math.sin(SUN_AZ));
+  // the classic light: kept exactly for the guides the AI renders are checked against (clay) and the construction film
+  const SUN_AZ = 0.65, SUN_EL = 0.72;
+  const classicDir = new THREE.Vector3(Math.cos(SUN_EL) * Math.cos(SUN_AZ), Math.sin(SUN_EL), Math.cos(SUN_EL) * Math.sin(SUN_AZ));
+  const sunDir = classicDir.clone();
   sky.material.uniforms.sunPosition.value.copy(sunDir);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const skyScene = new THREE.Scene(); const skyCopy = new Sky(); skyCopy.scale.setScalar(4500); skyCopy.material = sky.material; skyScene.add(skyCopy);
-  const env = pmrem.fromScene(skyScene, 0.02).texture;
+  const classicEnv = pmrem.fromScene(skyScene, 0.02).texture;
+  let env = classicEnv;
   scene.environment = env;
   scene.environmentIntensity = 0.55;
 
@@ -77,13 +83,20 @@ export function createViewer(host, { onSelect } = {}) {
   ground.receiveShadow = true;
   scene.add(ground);
   const groundLook = ground.material;
+  addMetricUVs(ground.geometry);
+  // the site around the building (paving, from the library), shown in the realistic view only
+  const site = new THREE.Group(); scene.add(site);
 
   // ambient occlusion, drawn when the view has been still for a moment
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
-  composer.addPass(new RenderPass(scene, camera));
+  const plainPass = new RenderPass(scene, camera), taa = new TAARenderPass(scene, camera);
+  taa.sampleLevel = 0; taa.accumulate = true; taa.enabled = false;   // Best: the still view refines, 32 jittered samples
+  composer.addPass(plainPass); composer.addPass(taa);
   const ao = new GTAOPass(scene, camera, 1, 1);
   ao.output = GTAOPass.OUTPUT.Default; ao.blendIntensity = 0.9;
   composer.addPass(ao);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.4, 0.92); bloom.enabled = false;   // lights at dusk
+  composer.addPass(bloom);
   composer.addPass(new OutputPass());
   let stillTimer = 0, finalDone = false;
 
@@ -103,6 +116,114 @@ export function createViewer(host, { onSelect } = {}) {
   let fly = null;          // a camera move in progress
   const redraw = () => { dirty = true; finalDone = false; };
   setupLooks({ redraw });   // a texture that arrives redraws the view
+
+  // ---------------------------------------------------------------- light: sky, sun, place, date and time
+  const today = new Date(Date.now() + 3600000).toISOString().slice(0, 10);   // the date in Lagos
+  const light = { preset: "sunny", place: "lagos", day: today, minutes: null, exposure: 0, ground: "mt-grass", apron: "mt-paving-interlock", apronWidth: 2.5 };
+  let classicOn = false, envTimer = 0, probe = null;
+  const cubeRT = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
+  const cubeCam = new THREE.CubeCamera(0.3, 3000, cubeRT);
+  const lightDir = new THREE.Vector3();
+  /** The light now: the sky, and where the sun is for the place, date and time (a sky's own time if none is set). */
+  function lightNow() {
+    const P = PRESETS[light.preset] || PRESETS.sunny, place = PLACES[light.place] || PLACES.lagos;
+    const minutes = light.minutes ?? (P.elevation != null ? afternoonAt(place, light.day, P.elevation) : P.time);
+    return { P, place, minutes, ...sunAngles(place.lat, place.lon, momentAt(place, light.day, minutes)) };
+  }
+  function applyHemi() {
+    if (classicOn) { hemi.intensity = mode === "walk" ? 0.75 : 0.3; return; }
+    const P = PRESETS[light.preset] || PRESETS.sunny;
+    hemi.intensity = P.hemi.intensity * (mode === "walk" ? 2.2 : 1);
+  }
+  function applyLight({ envNow = false } = {}) {
+    if (classicOn) return;
+    const { P, el, az } = lightNow();
+    const u = sky.material.uniforms;
+    u.turbidity.value = P.sky.turbidity; u.rayleigh.value = P.sky.rayleigh; u.mieCoefficient.value = P.sky.mie; u.mieDirectionalG.value = P.sky.g;
+    u.sunPosition.value.set(...sunVector(el, az));
+    // the sun's light comes from at least 3 degrees up (below that it no longer lights the walls)
+    sunDir.set(...sunVector(Math.max(el, 3 * Math.PI / 180), az)).normalize();
+    const sl = sunLight(P, el);
+    sun.color.set(P.sun.color).lerp(new THREE.Color("#ff9450"), sl.warm * 0.45);
+    sun.intensity = sl.intensity; sun.castShadow = sl.intensity > 0.05;
+    hemi.color.set(P.hemi.sky); hemi.groundColor.set(P.hemi.ground); applyHemi();
+    scene.environmentIntensity = P.env;
+    renderer.toneMappingExposure = P.exposure * 2 ** light.exposure;
+    sun.shadow.radius = P.shadow;
+    if (P.flatSky) { sky.visible = false; scene.background = new THREE.Color(P.flatSky); } else { sky.visible = true; scene.background = new THREE.Color("#c9d3dc"); }
+    bloom.enabled = !!P.lightsOn && quality !== "fast";
+    for (const e of elements) if (e.material?.userData?.lib && e.material.emissiveIntensity) e.material.emissiveIntensity = P.lightsOn ? 3 : 1.2;
+    if (sunAt) placeSun(sunAt.c, sunAt.r);
+    clearTimeout(envTimer);
+    if (envNow) refreshEnv(); else envTimer = setTimeout(refreshEnv, 150);
+    redraw();
+  }
+  /**
+   * Reflections: the site as seen from beside the building (sky, ground, paving; the building itself left out),
+   * captured once for the light and used by glass, metal and polished surfaces.
+   */
+  function refreshEnv() {
+    if (classicOn) return;
+    const c = frameBox.isEmpty() ? new THREE.Vector3() : frameBox.getCenter(new THREE.Vector3());
+    const wasModel = model?.visible, wasEnv = scene.environment, clip = renderer.clippingPlanes;
+    if (model) model.visible = false;
+    if (edgesGroup) edgesGroup.visible = false;
+    scene.environment = null; renderer.clippingPlanes = [];
+    cubeCam.position.set(c.x, groundY + 1.6, c.z);
+    cubeCam.update(renderer, scene);
+    if (model) model.visible = wasModel;
+    renderer.clippingPlanes = clip;
+    const next = pmrem.fromCubemap(cubeRT.texture);
+    if (probe) probe.dispose();
+    probe = next; env = next.texture;
+    scene.environment = classicOn ? wasEnv : env;
+    redraw();
+  }
+  /** The classic light on (guides, construction film) or back to the chosen light. */
+  function classicLight(on) {
+    if (on === classicOn) return;
+    classicOn = on;
+    if (on) {
+      sunDir.copy(classicDir);
+      const u = sky.material.uniforms;
+      u.turbidity.value = 2.2; u.rayleigh.value = 3.2; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.82; u.sunPosition.value.copy(classicDir);
+      sun.color.set("#ffeacc"); sun.intensity = 3.4; sun.castShadow = true; sun.shadow.radius = 3;
+      hemi.color.set("#dfe9ff"); hemi.groundColor.set("#4a4436"); applyHemi();
+      scene.environmentIntensity = 0.55; renderer.toneMappingExposure = 0.72;
+      env = classicEnv; scene.environment = classicEnv; sky.visible = true; scene.background = new THREE.Color("#c9d3dc");
+      setShadowSize(lowPower ? 2048 : 4096);
+      site.visible = false; ground.material = groundLook;
+      for (const e of elements) e.castShadow = e.userData.shadowClassic;
+      if (sunAt) placeSun(sunAt.c, sunAt.r);
+    } else {
+      setShadowSize(shadowSizeFor(quality));
+      site.visible = true; ground.material = realGround();
+      for (const e of elements) e.castShadow = e.userData.shadowReal;
+      applyLight({ envNow: true });
+    }
+  }
+  function setShadowSize(n) {
+    if (sun.shadow.mapSize.x === n) return;
+    sun.shadow.mapSize.set(n, n); sun.shadow.map?.dispose(); sun.shadow.map = null;
+  }
+  const shadowSizeFor = q => (q === "fast" ? 1024 : q === "best" ? 4096 : lowPower ? 2048 : 4096);
+  let groundMat = null;
+  function realGround() {
+    groundMat = materialLook(light.ground, { quality }) || groundLook;
+    return groundMat;
+  }
+  /** The paving around the building: a band of the chosen material, under the building's footprint and around it. */
+  function buildSite() {
+    site.children.forEach(c => c.geometry.dispose()); site.clear();
+    if (frameBox.isEmpty() || !light.apron || !(light.apronWidth > 0)) return;
+    const w = light.apronWidth, b = frameBox;
+    const g = new THREE.PlaneGeometry(b.max.x - b.min.x + 2 * w, b.max.z - b.min.z + 2 * w);
+    g.rotateX(-Math.PI / 2); g.translate((b.min.x + b.max.x) / 2, groundY - 0.008, (b.min.z + b.max.z) / 2);
+    addMetricUVs(g);
+    const m = new THREE.Mesh(g, materialLook(light.apron, { quality }));
+    m.receiveShadow = true; m.userData.site = true;
+    site.add(m); site.visible = !classicOn;
+  }
   controls.addEventListener("change", redraw);
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
 
@@ -140,14 +261,17 @@ export function createViewer(host, { onSelect } = {}) {
       o.userData.mat = mat;
       // the realistic look: the library material at its real size (texture coordinates in metres on every face)
       const lib = cls === "space" ? null : materialById(mat.id);
-      let look = lib && materialLook(mat.id, { tint: mat.tint, opacity: opacity < 0.99 ? opacity : null, quality });
+      o.userData.lookOpts = { tint: mat.tint, opacity: opacity < 0.99 ? opacity : null };
+      let look = lib && materialLook(mat.id, { ...o.userData.lookOpts, quality });
       if (look) addMetricUVs(o.geometry);
       else { look = lookFor(cls, srcColor, opacity); if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres); }
       o.material = look;
       o.userData.cls = cls;
       o.userData.srcHex = "#" + (src?.color || new THREE.Color("#cccccc")).getHexString();   // the colour the architect gave it
       const seen = lib?.cls || cls;
-      o.castShadow = seen !== "glass" && cls !== "space";
+      o.userData.shadowClassic = cls !== "glass" && cls !== "space";
+      o.userData.shadowReal = seen !== "glass" && cls !== "space";
+      o.castShadow = classicOn ? o.userData.shadowClassic : o.userData.shadowReal;
       o.receiveShadow = cls !== "space";
       o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
       elements.push(o);
@@ -167,6 +291,8 @@ export function createViewer(host, { onSelect } = {}) {
     ground.position.y = groundY - 0.02;
     frameBox = buildingBox(elements);
     frameAll();
+    buildSite();
+    if (!classicOn) { ground.material = realGround(); applyLight({ envNow: true }); }
     apply();
     redraw();
     return { storeys, count: elements.length };
@@ -201,7 +327,9 @@ export function createViewer(host, { onSelect } = {}) {
     const vfov = THREE.MathUtils.degToRad(fov), hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
     return radius / Math.sin(Math.min(vfov, hfov) / 2) * 0.92;
   }
+  let sunAt = null;
   function placeSun(c, r) {
+    sunAt = { c: c.clone(), r };
     sun.position.copy(c).addScaledVector(sunDir, r * 2.4);
     sun.target.position.copy(c);
     const s = r * 0.85;
@@ -359,7 +487,7 @@ export function createViewer(host, { onSelect } = {}) {
   }
 
   function enterWalk() {
-    mode = "walk"; controls.enabled = false; fly = null; hemi.intensity = 0.75;
+    mode = "walk"; controls.enabled = false; fly = null; applyHemi();
     camera.fov = 70; camera.near = 0.05; camera.far = 3000; camera.updateProjectionMatrix();
     renderer.clippingPlanes = [];
   }
@@ -466,7 +594,7 @@ export function createViewer(host, { onSelect } = {}) {
   }
 
   function leaveWalk() {
-    mode = "exterior"; room = null; keys.clear(); controls.enabled = true; hemi.intensity = 0.3;
+    mode = "exterior"; room = null; keys.clear(); controls.enabled = true; applyHemi();
     camera.fov = 45; camera.updateProjectionMatrix(); frameAll(); apply();
   }
 
@@ -534,8 +662,12 @@ export function createViewer(host, { onSelect } = {}) {
   }
 
   function draw(final) {
-    if (final && !lowPower && !owner) composer.render();
-    else renderer.render(scene, camera);
+    if (final && quality !== "fast" && !owner && (!lowPower || quality === "best")) {
+      plainPass.enabled = quality !== "best"; taa.enabled = quality === "best";
+      composer.render();
+      // Best: the still view keeps refining (anti-aliasing builds up over 32 jittered frames)
+      if (quality === "best" && taa.accumulateIndex >= 0 && taa.accumulateIndex < 32) return;
+    } else renderer.render(scene, camera);
     if (final) finalDone = true;
   }
   // Draw only when something changed (camera moved, mode, selection, resize): saves battery on phones.
@@ -547,7 +679,7 @@ export function createViewer(host, { onSelect } = {}) {
     stepFly(now);
     if (mode === "walk") stepWalk(dt, now); else controls.update();
     if (dirty) {
-      dirty = false; stillTimer = now;
+      dirty = false; stillTimer = now; taa.accumulateIndex = -1;
       if (labels.children.length) placeLabels();
       draw(false);
     } else if (!finalDone && now - stillTimer > 220) {
@@ -665,6 +797,7 @@ export function createViewer(host, { onSelect } = {}) {
   /** Starts guide output of one kind ("view", "clay", "lines", "materials" or "depth") at w x h pixels. */
   function beginGuide(kind, w, h) {
     if (guide) endGuide();
+    if (kind !== "view") classicLight(true);   // the guides keep the light they always had
     if (mode === "walk") { keys.clear(); }
     select(null);
     guide = { kind, owner, cam: { p: camera.position.clone(), q: camera.quaternion.clone(), fov: camera.fov, t: controls.target.clone() }, size: renderer.getSize(new THREE.Vector2()), pr: renderer.getPixelRatio(), aspect: camera.aspect, near: camera.near, far: camera.far,
@@ -735,6 +868,7 @@ export function createViewer(host, { onSelect } = {}) {
     camera.position.copy(guide.cam.p); camera.quaternion.copy(guide.cam.q); camera.fov = guide.cam.fov; controls.target.copy(guide.cam.t);
     owner = guide.owner; controls.enabled = !owner && mode !== "walk";
     guide = null;
+    if (classicOn && !owner) classicLight(false);
     resize();
   }
   /** Stills of the current view, every kind, as data URLs. */
@@ -889,15 +1023,42 @@ export function createViewer(host, { onSelect } = {}) {
     takeOver(on) {
       if (on) {
         if (mode === "walk") leaveWalk();
+        classicLight(true);
         owner = true; controls.enabled = false; labels.replaceChildren(); select(null); fly = null;
         renderer.clippingPlanes = []; sky.visible = false; scene.environment = null; hemi.intensity = 1.25;
         for (const e of elements) e.visible = e.userData.ifcType !== "IfcSpace";
       } else {
         owner = null; controls.enabled = true; mode = "exterior";
         sky.visible = true; scene.environment = env; hemi.intensity = 0.3; ground.material = groundLook; ground.material.opacity = 1;
+        classicLight(false);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
         camera.fov = 45; resize(); frameAll(); apply();
       }
+    },
+    /** The light: { preset: sunny|overcast|golden|dusk, place, day "YYYY-MM-DD", minutes (local clock, null = the sky's
+     * own time), exposure (stops), ground, apron, apronWidth }. Returns the light now, with the sun's position. */
+    setLight(opts = {}) {
+      const siteChanged = ["ground", "apron", "apronWidth"].some(k => k in opts && opts[k] !== light[k]);
+      if ("preset" in opts && !("minutes" in opts)) light.minutes = null;
+      Object.assign(light, opts);
+      if (siteChanged) { buildSite(); if (!classicOn) ground.material = realGround(); }
+      applyLight({ envNow: siteChanged });
+      return this.light;
+    },
+    get light() {
+      const n = lightNow();
+      return { ...light, minutes: n.minutes, sunElevation: +(n.el * 180 / Math.PI).toFixed(1), sunAzimuth: +(n.az * 180 / Math.PI).toFixed(1), quality };
+    },
+    /** Fast (phones, while moving: colours only, no extra passes), High (default), Best (the still view refines). */
+    setQuality(q) {
+      if (!["fast", "high", "best"].includes(q) || q === quality) return;
+      quality = q;
+      renderer.setPixelRatio(q === "fast" ? 1 : Math.min(window.devicePixelRatio || 1, q === "best" ? 2 : 1.75));
+      if (!classicOn) setShadowSize(shadowSizeFor(q));
+      for (const e of elements) if (e.material?.userData?.lib && !e._look) e.material = materialLook(e.material.userData.lib, { ...e.userData.lookOpts, quality }) || e.material;
+      buildSite(); if (!classicOn) ground.material = realGround();
+      bloom.enabled = !!PRESETS[light.preset]?.lightsOn && q !== "fast";
+      resize(); redraw();
     },
     guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
     /** Every part with its library material (for tests and the Materials panel): type, name, material, how, mean normal. */

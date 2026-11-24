@@ -89,7 +89,7 @@ export function materialLook(id, o = {}) {
   } else {
     // a coloured material (a paint colour, red stone-coated tiles, bronze aluminium) takes its exact colour from the
     // library or the IFC and only the relief and grain from the photo; a photographed one (travertine) is the photo
-    const detail = !!m.set && (!!o.tint || m.color.toLowerCase() !== "#ffffff");
+    const detail = !!m.set && (!!o.tint || (m.color.toLowerCase() !== "#ffffff" && !m.photo));
     mat = new THREE.MeshPhysicalMaterial({ color: m.set && !detail ? new THREE.Color(PLAIN[m.cls] || "#cccccc") : colour, metalness: m.metal ?? 0, roughness: o.rough ?? m.rough,
       envMapIntensity: m.cls === "metal" ? 1.1 : 0.7, side: THREE.DoubleSide, emissive: m.emissive ? new THREE.Color(m.emissive) : new THREE.Color(0), emissiveIntensity: m.emissive ? 1.2 : 0 });
     if (m.cls === "tile" || m.cls === "stone") { mat.clearcoat = m.rough < 0.3 ? 0.6 : 0; mat.clearcoatRoughness = 0.08; }
@@ -98,7 +98,7 @@ export function materialLook(id, o = {}) {
     if (m.tile || detail || breakup) addShaderTouches(mat, m, size, { breakup });
     if (m.set) {
       const ready = () => {
-        mat.color.copy(colour);
+        mat.color.copy(o.tint || !m.photo ? colour : new THREE.Color(m.color));
         if (detail) mat.userData.uniforms.uMean.value = MEAN_LUM.get(m.set) || 0.3;
         const mr = MEAN_ROUGH.get(m.set); if (mr && o.rough == null && mat.roughnessMap) mat.roughness = Math.min(1, m.rough / Math.max(0.15, mr));
       };

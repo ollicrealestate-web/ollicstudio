@@ -141,12 +141,30 @@
             <option value="">Choose…</option><option value="corner">Corner (3D)</option><option value="front">Front</option><option value="back">Back</option>
             <option value="left">Left</option><option value="right">Right</option><option value="top">Top (plan)</option></select></label>
           <button type="button" class="btn" id="viewReset">Reset view</button>
+          <button type="button" class="btn" id="lightBtn" aria-expanded="false" aria-controls="lightPanel">Light</button>
           <button type="button" class="btn primary" id="useView">Capture view</button>
           <button type="button" class="btn primary" id="addShotView">Add a shot from this view</button>
           <span class="spacer"></span>
           <button type="button" class="btn model-badge" id="modelBadge" aria-expanded="false" aria-controls="modelDetails" hidden></button>
         </div>
         <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
+        <div class="card light-panel" id="lightPanel" hidden>
+          <div class="seg" role="group" aria-label="Sky" id="lightPresets">
+            <button type="button" class="seg-btn" data-preset="sunny" aria-pressed="true">Sunny day</button>
+            <button type="button" class="seg-btn" data-preset="overcast" aria-pressed="false">Overcast</button>
+            <button type="button" class="seg-btn" data-preset="golden" aria-pressed="false">Golden hour</button>
+            <button type="button" class="seg-btn" data-preset="dusk" aria-pressed="false">Dusk</button>
+          </div>
+          <label class="light-time">Time <output id="lightTimeOut">10:30</output>
+            <input type="range" id="lightTime" min="360" max="1140" step="5" value="630" aria-describedby="lightSun"></label>
+          <span class="hint" id="lightSun" role="status"></span>
+          <label>Date <input type="date" id="lightDay"></label>
+          <label>Place <select id="lightPlace"></select></label>
+          <label>Exposure <input type="range" id="lightExposure" min="-2" max="2" step="0.1" value="0"></label>
+          <label>Quality <select id="lightQuality"><option value="fast">Fast (phones, smooth)</option><option value="high">High</option><option value="best">Best (refines when still)</option></select></label>
+          <label>Ground <select id="lightGround"></select></label>
+          <label>Around the building <select id="lightApron"></select></label>
+        </div>
         <div class="walk-panel" id="walkPanel" hidden>
           <div class="room-list" id="roomList" role="group" aria-label="Rooms"></div>
           <div class="walk-pad" role="group" aria-label="Move">

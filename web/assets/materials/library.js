@@ -3,6 +3,7 @@
 // or a plain surface, with a tint, its real-world size and how shiny or metallic it is. Tiles are drawn over their
 // base surface at their exact size, so a 600 x 600 tile is 600 mm on the wall. Ids match Ollic Sketch's.
 //
+// photo: the photo keeps its own colours, only darkened or lightened by color.
 // size: metres one repeat of the texture covers. tile: { w, h, grout (mm), groutColor, offset (0.5 = running bond) }.
 // words: what IFC material names it answers to (Revit and ArchiCAD names), as a regular expression.
 
@@ -84,7 +85,7 @@ export const MATERIALS = [
   { id: "mt-glass-frosted", name: "Frosted glass", category: "Glass", cls: "glass", set: null, size: 1, color: "#e3edf1", rough: 0.35, opacity: 0.75, words: "frost|obscur|sandblast|satin glass|privacy glass|translucent" },
   // ---- landscape
   { id: "mt-grass", name: "Grass lawn", category: "Landscape", cls: "grass", set: "grass", size: 2.0, color: "#ffffff", rough: 1, words: "grass|lawn|turf|landscap" },
-  { id: "mt-paving-interlock", name: "Interlocking paving stones", category: "Landscape", cls: "paving", set: "paving", size: 1.5, color: "#ffffff", rough: 0.85, words: "interlock|paving|paver|cobble|driveway|walkway" },
+  { id: "mt-paving-interlock", name: "Interlocking paving stones", category: "Landscape", cls: "paving", set: "paving", size: 1.5, color: "#a8a196", photo: true, rough: 0.85, words: "interlock|paving|paver|cobble|driveway|walkway" },
   { id: "mt-gravel", name: "Gravel", category: "Landscape", cls: "paving", set: "gravel", size: 1.5, color: "#ffffff", rough: 0.95, words: "gravel|chippings|pebble|aggregate" },
   { id: "mt-asphalt", name: "Asphalt", category: "Landscape", cls: "asphalt", set: "asphalt", size: 2.5, color: "#ffffff", rough: 0.95, words: "asphalt|tarmac|road" },
   { id: "mt-soil", name: "Planting soil and plants", category: "Landscape", cls: "grass", set: "soil", size: 2.0, color: "#ffffff", rough: 1, words: "soil|earth|planting|planter|topsoil|garden" },
