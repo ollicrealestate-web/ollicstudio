@@ -150,8 +150,10 @@
           <span class="spacer"></span>
           <button type="button" class="btn model-badge" id="modelBadge" aria-expanded="false" aria-controls="modelDetails" hidden></button>
         </div>
-        <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
-        <div class="card cam-panel" id="camPanel" hidden></div>
+        <div class="viewer-stage" id="viewerStage">
+          <div class="viewer" id="viewer"><div class="viewer-msg" id="viewerMsg">Loading the 3D model…</div></div>
+          <div class="card cam-panel" id="camPanel" hidden aria-label="Camera settings"></div>
+        </div>
         <div class="card mat-panel" id="matPanel" hidden></div>
         <div class="card photo-panel" id="photoPanel" hidden>
           <p class="hint">A still of this view with light bouncing as it really does: soft shadows, light between walls, real reflections. It sharpens for a few moments; save it whenever it looks right.</p>

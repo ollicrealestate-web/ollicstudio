@@ -29,6 +29,29 @@ export class View3D {
     this.renderer.domElement.addEventListener("pointerdown", e => {
       this.controls.mouseButtons.MIDDLE = e.button === 1 && e.shiftKey ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
     }, true);
+    // free navigation (as in the Studio): the orbit turns round what is under the pointer, and zooming in keeps going
+    this.controls.minDistance = 0.05;
+    this.renderer.domElement.addEventListener("pointerdown", e => {
+      if (e.button !== 0 || !this.root) return;
+      const r = this.renderer.domElement.getBoundingClientRect(), ray = new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+      const hit = ray.intersectObjects(this.root.children, true).find(h => h.object.isMesh);
+      if (!hit) return;
+      const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
+      const depth = hit.point.clone().sub(this.camera.position).dot(fwd);
+      if (depth > 0.1) this.controls.target.copy(this.camera.position).addScaledVector(fwd, depth);
+    }, true);
+    this.renderer.domElement.addEventListener("wheel", e => {
+      if (e.deltaY >= 0) return;
+      const d = this.camera.position.distanceTo(this.controls.target), near = 0.8;
+      if (d > near) return;
+      const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
+      this.camera.position.addScaledVector(fwd, near * 0.6); this.controls.target.addScaledVector(fwd, near * 0.6); this.needsRender = true;
+    }, { capture: true, passive: true });
+    this.controls.addEventListener("change", () => {
+      const d = this.camera.position.distanceTo(this.controls.target), n = Math.min(0.5, Math.max(0.02, d / 500)), f = Math.max(2000, d * 60);
+      if (Math.abs(n - this.camera.near) > 1e-4 || f !== this.camera.far) { this.camera.near = n; this.camera.far = f; this.camera.updateProjectionMatrix(); }
+    });
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a30, 1.1));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.position.set(20, 30, 10);
