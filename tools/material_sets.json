@@ -138,12 +138,8 @@
    ],
    "cls": "brick",
    "prefer": [
-    "Bricks076C",
-    "Bricks076A",
-    "Bricks059",
     "Bricks101",
-    "Bricks074",
-    "Bricks066"
+    "Bricks059"
    ]
   },
   "brick-buff": {
@@ -163,7 +159,9 @@
   "roof-tiles": {
    "q": "roofing tiles",
    "cls": "roof",
-   "prefer": "RoofingTiles015A"
+   "prefer": [
+    "RoofingTiles013A"
+   ]
   },
   "roof-metal": {
    "q": "corrugated steel",
@@ -176,7 +174,9 @@
     "brushed"
    ],
    "cls": "metal",
-   "prefer": "Metal055A"
+   "prefer": [
+    "Metal049A"
+   ]
   },
   "metal-painted": {
    "q": [
@@ -184,7 +184,9 @@
     "metal"
    ],
    "cls": "metal",
-   "prefer": "Metal061B"
+   "prefer": [
+    "Metal027"
+   ]
   },
   "grass": {
    "q": "grass",
@@ -219,7 +221,9 @@
   "roof-clay": {
    "q": "roofing tiles",
    "cls": "roof",
-   "prefer": "RoofingTiles006"
+   "prefer": [
+    "RoofingTiles012A"
+   ]
   }
  },
  "vendor": {
