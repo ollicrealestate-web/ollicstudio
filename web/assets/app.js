@@ -507,6 +507,7 @@ async function loadModels() {
     }
     modelLoading = viewer.load(m.glb_url);
     const info = await modelLoading.finally(() => { modelLoading = null; });
+    await initLight().catch(() => {}); restoreLight();
     const pick = $("#storeySelect");
     pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
     $("#storeyPick").hidden = info.storeys.length < 2;
@@ -554,6 +555,55 @@ document.querySelectorAll("[data-hold]").forEach(b => {
 });
 
 $("#viewReset").onclick = () => viewer?.reset();
+
+/* light: sky, time, date, place, exposure, quality and the site; remembered on this device for each model */
+const LIGHT_KEY = () => `ollic.light.${viewerModelId || "model"}`;
+const hhmm = m => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
+async function initLight() {
+  const [{ PLACES, PRESETS }, { MATERIALS }] = await Promise.all([import("./materials/light.js"), import("./materials/library.js")]);
+  $("#lightPlace").replaceChildren(...Object.entries(PLACES).map(([k, p]) => el("option", { value: k }, p.name)));
+  const land = MATERIALS.filter(m => m.category === "Landscape" && m.id !== "mt-water");
+  $("#lightGround").replaceChildren(...land.map(m => el("option", { value: m.id }, m.name)));
+  $("#lightApron").replaceChildren(el("option", { value: "" }, "Nothing (ground only)"), ...land.map(m => el("option", { value: m.id }, m.name)));
+  void PRESETS;
+}
+function drawLight() {
+  if (!viewer?.light) return;
+  const l = viewer.light;
+  document.querySelectorAll("#lightPresets [data-preset]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.preset === l.preset)));
+  $("#lightTime").value = l.minutes; $("#lightTimeOut").textContent = hhmm(l.minutes);
+  $("#lightDay").value = l.day; $("#lightPlace").value = l.place; $("#lightExposure").value = l.exposure;
+  $("#lightQuality").value = l.quality; $("#lightGround").value = l.ground; $("#lightApron").value = l.apron || "";
+  $("#lightSun").textContent = l.sunElevation > 0 ? `Sun ${Math.round(l.sunElevation)}° above the horizon, from the ${compass(l.sunAzimuth)}` : "The sun has set";
+}
+const compass = a => ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"][Math.round(a / 45) % 8];
+function setLight(opts, remember = true) {
+  if (!viewer?.setLight) return;
+  if ("quality" in opts) { viewer.setQuality(opts.quality); delete opts.quality; }
+  viewer.setLight(opts);
+  drawLight();
+  if (remember) try { const l = viewer.light; localStorage.setItem(LIGHT_KEY(), JSON.stringify({ preset: l.preset, place: l.place, minutes: l.minutes, exposure: l.exposure, quality: l.quality, ground: l.ground, apron: l.apron })); } catch { /* storage off */ }
+}
+function restoreLight() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(LIGHT_KEY()) || "null"); } catch { /* storage off */ }
+  if (saved) setLight(saved, false); else drawLight();
+}
+$("#lightBtn").onclick = async () => {
+  const p = $("#lightPanel"), open = p.hidden;
+  if (open && !$("#lightPlace").options.length) await initLight();
+  p.hidden = !open; $("#lightBtn").setAttribute("aria-expanded", String(open));
+  if (open) drawLight();
+};
+document.querySelectorAll("#lightPresets [data-preset]").forEach(b => { b.onclick = () => setLight({ preset: b.dataset.preset }); });
+$("#lightTime").oninput = e => { $("#lightTimeOut").textContent = hhmm(+e.target.value); viewer?.setLight({ minutes: +e.target.value }); const l = viewer?.light; if (l) $("#lightSun").textContent = l.sunElevation > 0 ? `Sun ${Math.round(l.sunElevation)}° above the horizon, from the ${compass(l.sunAzimuth)}` : "The sun has set"; };
+$("#lightTime").onchange = e => setLight({ minutes: +e.target.value });
+$("#lightDay").onchange = e => { if (e.target.value) setLight({ day: e.target.value }); };
+$("#lightPlace").onchange = e => setLight({ place: e.target.value });
+$("#lightExposure").oninput = e => setLight({ exposure: +e.target.value });
+$("#lightQuality").onchange = e => setLight({ quality: e.target.value });
+$("#lightGround").onchange = e => setLight({ ground: e.target.value });
+$("#lightApron").onchange = e => setLight({ apron: e.target.value || null });
 $("#storeySelect").onchange = e => { viewer?.setStorey(e.target.value); if (e.target.value) setViewMode("interior"); };
 
 const TYPE_NAME = { IfcWall: "Wall", IfcWallStandardCase: "Wall", IfcSlab: "Floor slab", IfcRoof: "Roof", IfcDoor: "Door", IfcWindow: "Window", IfcSpace: "Room", IfcColumn: "Column", IfcBeam: "Beam", IfcStair: "Stair", IfcCovering: "Covering", IfcRailing: "Railing" };

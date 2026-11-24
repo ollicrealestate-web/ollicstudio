@@ -95,6 +95,16 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         assert page.locator(".viewer-labels span").count() == 5
         page.click("#viewOutside"); page.wait_for_timeout(500)
         page.screenshot(path=str(shots / "e2e-3d-outside.png"), clip=(page.locator("#viewer").scroll_into_view_if_needed() or page.locator("#viewer").bounding_box()), timeout=120000)
+        # the light panel: golden hour moves the sun to late afternoon; the time slider moves it; quality and paving change
+        page.click("#lightBtn"); page.wait_for_selector("#lightPanel:not([hidden])")
+        page.click("#lightPresets [data-preset=golden]")
+        page.wait_for_function("document.querySelector('#lightTimeOut').textContent.startsWith('17:') || document.querySelector('#lightTimeOut').textContent.startsWith('18:')")
+        assert "west" in page.text_content("#lightSun")
+        page.fill("#lightTime", "480"); page.dispatch_event("#lightTime", "change")
+        page.wait_for_function("document.querySelector('#lightSun').textContent.includes('east')")
+        page.select_option("#lightQuality", "fast"); page.select_option("#lightApron", "mt-gravel")
+        assert page.evaluate("JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('ollic.light.')))).apron") == "mt-gravel"
+        page.click("#lightPresets [data-preset=sunny]"); page.select_option("#lightQuality", "high"); page.click("#lightBtn")
 
         # 2. "Capture view": the view goes into the render box; the AI reads it (and the model) and writes the prompt
         page.click("#useView")

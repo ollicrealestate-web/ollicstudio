@@ -641,3 +641,10 @@ tr:last-child td { border-bottom: 0; }
 
 /* a cinematic chosen in the image animation: the walkthrough's own controls step aside */
 #filmSection.cine-mode .walk-only, #projectView.cine-mode #addShotView { display: none !important; }
+
+/* light and quality for the realistic 3D preview */
+.light-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 18px; align-items: end; margin-top: 10px; }
+.light-panel .seg, .light-panel .light-time, .light-panel #lightSun { grid-column: 1 / -1; }
+.light-panel label { display: grid; gap: 6px; font-size: 0.9rem; }
+.light-panel .light-time { grid-template-columns: auto auto 1fr; align-items: center; gap: 10px; }
+.light-panel input[type=range] { width: 100%; }

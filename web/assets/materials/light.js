@@ -57,17 +57,17 @@ export function sunVector(el, az, northOffset = 0) {
  */
 export const PRESETS = {
   sunny: { name: "Sunny day", sky: { turbidity: 2.2, rayleigh: 1.6, mie: 0.004, g: 0.82 }, sun: { color: "#fff1dc", intensity: 3.6 }, hemi: { sky: "#dfe9ff", ground: "#5a5140", intensity: 0.35 },
-    env: 0.6, exposure: 0.74, shadow: 2.5, time: 14 * 60 + 30 },
+    env: 0.6, exposure: 0.7, shadow: 2.5, time: 10 * 60 + 30 },
   overcast: { name: "Overcast", sky: { turbidity: 12, rayleigh: 0.6, mie: 0.02, g: 0.6 }, sun: { color: "#eef1f5", intensity: 0.55 }, hemi: { sky: "#e6ebf0", ground: "#6b665c", intensity: 1.05 },
     env: 1.1, exposure: 0.95, shadow: 14, time: 13 * 60, flatSky: "#c3c9cf" },
   golden: { name: "Golden hour", sky: { turbidity: 4.5, rayleigh: 2.4, mie: 0.006, g: 0.86 }, sun: { color: "#ffb36b", intensity: 3.0 }, hemi: { sky: "#c9d4ee", ground: "#5c4a36", intensity: 0.3 },
     env: 0.55, exposure: 0.82, shadow: 3, elevation: 9 },
-  dusk: { name: "Dusk", sky: { turbidity: 3, rayleigh: 3.2, mie: 0.005, g: 0.8 }, sun: { color: "#ff9a5c", intensity: 0.25 }, hemi: { sky: "#6f7fa8", ground: "#2e2a2a", intensity: 0.55 },
-    env: 0.9, exposure: 1.35, shadow: 8, elevation: -2.5, lightsOn: true },
+  dusk: { name: "Dusk", sky: { turbidity: 6, rayleigh: 3.5, mie: 0.01, g: 0.9 }, sun: { color: "#ff8a4c", intensity: 0.6 }, hemi: { sky: "#7d8db8", ground: "#3a3230", intensity: 0.6 },
+    env: 0.9, exposure: 1.15, shadow: 8, elevation: 0.6, lightsOn: true },
 };
 /** The sun's light colour and strength fade and warm as it nears the horizon. */
 export function sunLight(preset, el) {
   const h = el / D;
   const k = h <= -1 ? 0 : h >= 15 ? 1 : (h + 1) / 16;
-  return { intensity: preset.sun.intensity * (preset === PRESETS.dusk ? 1 : Math.pow(k, 0.7)), warm: h < 20 ? 1 - Math.max(0, h) / 20 : 0 };
+  return { intensity: preset.sun.intensity * (preset.lightsOn ? 1 : Math.pow(k, 0.7)), warm: h < 20 ? 1 - Math.max(0, h) / 20 : 0 };
 }
