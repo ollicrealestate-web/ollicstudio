@@ -1010,9 +1010,12 @@ export function createViewer(host, { onSelect } = {}) {
   // near and far follow the distance, so nothing is cut off close up or far away
   controls.addEventListener("change", () => {
     if (mode === "walk" || guide) return;
+    // only when the camera comes very close or goes very far: the usual views (and the guides) keep their own
     const d = camera.position.distanceTo(controls.target);
-    const n = Math.min(0.5, Math.max(0.02, d / 500)), f = Math.max(5000, d * 60);
-    if (Math.abs(n - camera.near) > 1e-4 || f !== camera.far) { camera.near = n; camera.far = f; camera.updateProjectionMatrix(); sky.scale.setScalar(Math.min(4500, f * 0.8)); }
+    let changed = false;
+    if (d < camera.near * 30) { camera.near = Math.max(0.02, d / 300); changed = true; }
+    if (d * 40 > camera.far) { camera.far = d * 60; changed = true; }
+    if (changed) { camera.updateProjectionMatrix(); sky.scale.setScalar(Math.min(4500, camera.far * 0.8)); }
   });
   const clayMat = new THREE.MeshStandardMaterial({ color: "#d9d7d2", roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
   const clayGlass = new THREE.MeshStandardMaterial({ color: "#9fb4c4", roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });

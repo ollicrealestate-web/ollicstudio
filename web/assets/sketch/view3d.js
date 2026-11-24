@@ -49,8 +49,10 @@ export class View3D {
       this.camera.position.addScaledVector(fwd, near * 0.6); this.controls.target.addScaledVector(fwd, near * 0.6); this.needsRender = true;
     }, { capture: true, passive: true });
     this.controls.addEventListener("change", () => {
-      const d = this.camera.position.distanceTo(this.controls.target), n = Math.min(0.5, Math.max(0.02, d / 500)), f = Math.max(2000, d * 60);
-      if (Math.abs(n - this.camera.near) > 1e-4 || f !== this.camera.far) { this.camera.near = n; this.camera.far = f; this.camera.updateProjectionMatrix(); }
+      const d = this.camera.position.distanceTo(this.controls.target); let changed = false;
+      if (d < this.camera.near * 30) { this.camera.near = Math.max(0.02, d / 200); changed = true; }
+      if (d * 40 > this.camera.far) { this.camera.far = d * 60; changed = true; }
+      if (changed) this.camera.updateProjectionMatrix();
     });
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x2a2a30, 1.1));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
