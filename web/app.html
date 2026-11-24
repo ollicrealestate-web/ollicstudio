@@ -160,6 +160,7 @@
             <button type="button" class="btn primary" id="photoGo">Make the photo</button>
             <button type="button" class="btn" id="photoStop" hidden>Stop here</button>
             <a class="btn" id="photoSave" download hidden>Save PNG</a>
+            <button type="button" class="btn" id="photoRender" hidden>Render from this photo</button>
           </div>
           <progress id="photoProgress" max="1" value="0" hidden></progress> <span class="hint" id="photoMsg" role="status"></span>
           <img id="photoImg" alt="The photo of your model" hidden>
@@ -199,19 +200,22 @@
         </div>
         <div class="card model-details" id="modelDetails" hidden>
           <div id="reportCard"></div>
-          <div class="row"><a class="btn" id="dlGlb" download>Download 3D (GLB)</a><a class="btn" id="dlIfc" hidden>Download IFC</a></div>
+          <div class="row"><a class="btn" id="dlGlb" download>Download 3D (GLB)</a><a class="btn" id="dlIfc" hidden>Download IFC</a>
+            <button type="button" class="btn" id="dlGlbMat">Download 3D with materials (GLB)</button>
+            <button type="button" class="btn" id="dlIfcMat">Download IFC with my materials</button>
+            <span class="hint" id="dlMsg" role="status"></span></div>
         </div>
       </div>
       <div class="empty" id="modelEmpty" hidden>Your model is being read into 3D. Small models take under a minute; large ones a few minutes.</div>
       <details class="card look" id="lookCard">
         <summary><span><b>Project look</b> <span class="hint" id="lookSummary">Approve the materials once; every view, shot and stage uses them.</span></span></summary>
-        <p class="hint">When you capture a view, Claude studies your model and lists its materials: name, finish and colour, plus anything a render needs that the model does not show. Check them, change what is not right, add what is missing, and press Confirm all. Every render is sent with a material map of the view and checked material by material.</p>
+        <p class="hint">When you capture a view, Ollic AI studies your model and lists its materials: name, finish and colour, plus anything a render needs that the model does not show. Check them, change what is not right, add what is missing, and press Confirm all. Every render is sent with a material map of the view and checked material by material.</p>
         <ul class="look-mats" id="lookMats"></ul>
         <label class="span2">Setting for every view <span class="hint">Surroundings, light and mood, e.g. “Lekki street, palm trees, late afternoon sun”</span>
           <textarea id="lookSetting" rows="2" maxlength="500"></textarea></label>
         <div class="look-hero" id="lookHero"></div>
         <div class="row look-tools"><button type="button" class="btn sm" id="lookAdd">+ Add a material</button>
-          <button type="button" class="btn sm" id="lookAsk">Ask Claude to read the materials again</button></div>
+          <button type="button" class="btn sm" id="lookAsk">Ask Ollic AI to read the materials again</button></div>
         <div class="row"><button type="button" class="btn primary" id="lookConfirm">Confirm all</button>
           <button type="button" class="btn" id="lookSave">Save changes</button><span class="hint" id="lookMsg" role="status"></span></div>
       </details>
@@ -219,7 +223,7 @@
     <section class="film" id="filmSection" aria-labelledby="filmTitle">
       <div class="studio-head">
         <div><span class="eyebrow" id="filmEyebrow">AI walkthrough</span><h2 id="filmTitle" class="studio-title">Film your model</h2>
-          <p class="muted" id="filmLead">Let Claude plan the shots, or frame them yourself in the model. Ollic records each camera move exactly from your model, the AI films it photoreal, and every shot is checked against the model.</p></div>
+          <p class="muted" id="filmLead">Let Ollic AI plan the shots, or frame them yourself in the model. Ollic records each camera move exactly from your model, the AI films it photoreal, and every shot is checked against the model.</p></div>
       </div>
       <div class="card film-card">
         <div class="tier-slot" id="tierSlotFilm"></div>
@@ -228,9 +232,9 @@
           <label class="field">Format <select id="filmFormat"><option value="16:9">Landscape 16:9</option><option value="9:16">Portrait 9:16 (Reels, Status, TikTok)</option><option value="1:1">Square 1:1</option></select></label>
         </div>
         <div class="scene-slot" id="sceneSlotFilm"></div>
-        <label class="field">Describe the look <span class="hint">Materials, light, time of day, setting. Claude uses it for every shot.</span>
+        <label class="field">Describe the look <span class="hint">Materials, light, time of day, setting. Ollic AI uses it for every shot.</span>
           <textarea id="filmDesc" rows="3" maxlength="1500" placeholder="e.g. White render and bronze glass, warm evening light, palm trees, interlocking paving"></textarea></label>
-        <div class="rwrite"><button type="button" class="btn" id="filmLookBtn">Read the model and write the look</button><span class="hint" id="filmLookNote">Claude studies the view on screen, your scene and your notes.</span></div>
+        <div class="rwrite"><button type="button" class="btn" id="filmLookBtn">Read the model and write the look</button><span class="hint" id="filmLookNote">Ollic AI studies the view on screen, your scene and your notes.</span></div>
         <div class="cine-panel" id="cinePanel" hidden>
           <div class="rbox-head"><b id="cineTitle">Cinematic video</b> <span class="hint" id="cineLook"></span></div>
           <p class="hint" id="cineSteps"></p>
@@ -238,7 +242,7 @@
             <span class="hint" id="cineEst"></span></div>
         </div>
         <label class="check walk-only"><input type="checkbox" id="filmLife"> Add life: people walking and cars passing</label>
-        <div class="rwrite walk-only"><button type="button" class="btn primary" id="planFullBtn">Plan the full property film</button><button type="button" class="btn" id="planBtn">Plan a short film</button><span class="hint" id="planNoteFilm">Claude plans the whole film from your model: the site from above, around the building, the street with cars, through the front door and the rooms. Or add shots yourself.</span></div>
+        <div class="rwrite walk-only"><button type="button" class="btn primary" id="planFullBtn">Plan the full property film</button><button type="button" class="btn" id="planBtn">Plan a short film</button><span class="hint" id="planNoteFilm">Ollic AI plans the whole film from your model: the site from above, around the building, the street with cars, through the front door and the rooms. Or add shots yourself.</span></div>
         <div class="shot-add walk-only">
           <label class="storey-pick"><span>Add</span><select id="shotKind" aria-label="Camera move">
             <option value="approach">Approach from the street</option><option value="orbit">Orbit around the building</option><option value="aerial">Aerial over the site</option>
@@ -298,7 +302,7 @@
           <div class="scene-slot" id="sceneSlotIA"></div>
           <label class="field">Look of the finished building <span class="hint">Materials, colours, landscaping, mood</span>
             <input type="text" id="iaLook" maxlength="400" placeholder="e.g. white render, dark bronze glass, palm trees, warm uplights"></label>
-          <div class="rwrite"><button type="button" class="btn" id="iaWriteBtn">Read images and write prompts</button><span class="hint" id="iaWriteNote">Claude studies each ticked image, your scene and your notes. You can edit each prompt.</span></div>
+          <div class="rwrite"><button type="button" class="btn" id="iaWriteBtn">Read images and write prompts</button><span class="hint" id="iaWriteNote">Ollic AI studies each ticked image, your scene and your notes. You can edit each prompt.</span></div>
           <div class="ia-prompts" id="iaPrompts"></div>
           <div class="clip-opts" id="iaClipOpts"></div>
         </div>
@@ -349,7 +353,7 @@
             <label><input type="radio" name="rtype" value="estate"><span>Estate layout</span></label></div>
           <div class="scene-row"><label class="field">Scene <span class="hint">Light, sky, setting and mood. Saved to the project, so every view matches.</span>
             <select id="rScene"><option value="">No scene (the prompt decides)</option></select></label>
-            <label class="btn sm" style="cursor:pointer" title="Upload a render you like: Claude copies its scene (never its building)">Copy a scene from a picture<input type="file" id="rSceneUpload" accept=".png,.jpg,.jpeg" hidden></label></div>
+            <label class="btn sm" style="cursor:pointer" title="Upload a render you like: Ollic AI copies its scene (never its building)">Copy a scene from a picture<input type="file" id="rSceneUpload" accept=".png,.jpg,.jpeg" hidden></label></div>
           <p class="hint" id="rSceneText"></p>
         </div></div>
         <div class="span2 rbox">

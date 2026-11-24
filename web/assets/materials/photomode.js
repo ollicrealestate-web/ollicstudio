@@ -44,8 +44,15 @@ function tilesOf(srcCanvasOrImage, m, size, T) {
   for (let j = 0; j < n; j++) for (let i = 0; i <= n; i++) { const x = (i + (T.offset ? (j * T.offset) % 1 : 0)) * px; for (const dx of [0, -W, W]) g.fillRect(x + dx - gw / 2, j * th, gw, th); }
   return c;
 }
-/** A copy of a 3D-view material the path tracer can read (no shader touches; glass that light passes through). */
-function forPathTracing(mat, cache) {
+/** A picture that can be drawn on a canvas (a data texture's pixels become a canvas). */
+function drawable(img) {
+  if (!img || img instanceof HTMLImageElement || img instanceof HTMLCanvasElement || (typeof ImageBitmap !== "undefined" && img instanceof ImageBitmap)) return img;
+  const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+  const d = new ImageData(img.width, img.height); d.data.set(img.data.length === d.data.length ? img.data : new Uint8ClampedArray(d.data.length).fill(255)); c.getContext("2d").putImageData(d, 0, 0);
+  return c;
+}
+/** A copy of a 3D-view material the path tracer (and a GLB file) can read (no shader touches; glass that light passes through). */
+export function forPathTracing(mat, cache) {
   if (cache.has(mat)) return cache.get(mat);
   let out = mat;
   const lib = mat.userData?.lib && findMaterial(mat.userData.lib), u = mat.userData?.uniforms;
@@ -56,7 +63,7 @@ function forPathTracing(mat, cache) {
     if (lib.id === "mt-water") { out.transmission = 0.8; out.color = new THREE.Color("#5aa7bf"); }
   } else if (u && mat.map?.image) {
     out = mat.clone(); out.onBeforeCompile = () => {}; out.customProgramCacheKey = () => "pt";
-    let src = mat.map.image;
+    let src = drawable(mat.map.image);
     if (u.uMean.value > 0) src = grainOf(mat.map);                  // coloured: the exact colour times the grain
     const T = lib?.tile;
     if (T) {

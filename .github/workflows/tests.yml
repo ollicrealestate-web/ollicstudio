@@ -33,6 +33,7 @@ jobs:
           python tests/sketch/check_ifc.py out/sketch
           npm i --no-save --no-package-lock gltf-validator@2.0.0-dev.3.10
           node tests/sketch/check_glb.mjs out/sketch
+          node tests/sketch/check_glb.mjs out/studio
       - uses: actions/upload-artifact@v4
         if: always()
         with:

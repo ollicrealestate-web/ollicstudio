@@ -13,7 +13,7 @@ const onLoaded = () => listeners.forEach(f => f());
 const loader = new THREE.TextureLoader();
 const baseTex = new Map();   // "set/map" -> { tex, loaded, clones: Set }
 const looks = new Map();     // key -> material
-const MEAN_ROUGH = new Map(), MEAN_LUM = new Map();
+const MEAN_ROUGH = new Map(), MEAN_LUM = new Map(), MEAN_RGB = new Map();
 // a plain colour close to each set's photo, shown until it has loaded
 const PLAIN = { stone: "#cfc4b0", brick: "#a0563f", wood: "#9b7350", concrete: "#a4a29d", plaster: "#dcd8cf", paint: "#e8e5de", tile: "#e6e2da", roof: "#8a5a48",
   metal: "#9aa0a6", grass: "#5f7a3a", paving: "#a59b8c", asphalt: "#55555a", furniture: "#b9b2a8", glass: "#bcd9e6" };
@@ -45,7 +45,7 @@ function base(set, map) {
     rec.tex = loader.load(url, t => {
       rec.loaded = true;
       if (map === "rough") MEAN_ROUGH.set(set, meanOf(t.image));
-      if (map === "color") MEAN_LUM.set(set, meanOf(t.image, true));
+      if (map === "color") { MEAN_LUM.set(set, meanOf(t.image, true)); MEAN_RGB.set(set, meanRgb(t.image)); }
       for (const c of rec.clones) c.userData.onReady?.();
       rec.clones.clear();
       onLoaded();
@@ -54,6 +54,20 @@ function base(set, map) {
     baseTex.set(key, rec);
   }
   return baseTex.get(key);
+}
+function meanRgb(img) {
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 16; const g = c.getContext("2d"); g.drawImage(img, 0, 0, 16, 16);
+    const d = g.getImageData(0, 0, 16, 16).data, s = [0, 0, 0]; for (let i = 0; i < d.length; i += 4) { s[0] += d[i]; s[1] += d[i + 1]; s[2] += d[i + 2]; }
+    return "#" + s.map(v => Math.round(v / 256).toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+}
+/** A material's colour as it looks: its own colour, or the average of its photo (once loaded), or a plain stand-in. */
+export function averageColour(id) {
+  const m = findMaterial(id);
+  if (!m) return "#cccccc";
+  if (!m.set || (m.color && m.color.toLowerCase() !== "#ffffff" && !m.photo)) return m.color || "#cccccc";
+  return MEAN_RGB.get(m.set) || m.plain || PLAIN[m.cls] || "#cccccc";
 }
 /** The average of a picture: its first channel (roughness), or its light in linear terms (colour). */
 function meanOf(img, lum = false) {

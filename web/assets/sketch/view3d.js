@@ -3,6 +3,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as G from "./geom.js";
+import { Sky } from "three/addons/objects/Sky.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources } from "../materials/look.js";
 
 export const toThree = (p, zMm = 0) => new THREE.Vector3(p.x / 1000, zMm / 1000, -p.y / 1000);
 
@@ -116,7 +118,7 @@ export class View3D {
   clear() {
     for (const o of [...this.root.children]) {
       this.root.remove(o);
-      o.traverse(n => { n.geometry?.dispose?.(); if (n.material) [].concat(n.material).forEach(m => m.dispose()); });
+      o.traverse(n => { n.geometry?.dispose?.(); if (n.material) [].concat(n.material).forEach(m => { if (!m.userData?.lib) m.dispose(); }); });   // library looks are shared
     }
   }
 
@@ -146,8 +148,35 @@ export class View3D {
     addLines(pts, 0xe8e8ec);
     addLines(selPts, 0x3b82f6);
     this.app.build3D?.(this, THREE);
+    if ((this.app.prefs?.visual || "shaded") === "realistic") this.realistic();
+    else if (this.scene.environment && this._env) this.scene.environment = null;
     // frame the model the first time there is something to see
     if (!this.fitted && this.root.children.length) { this.fitted = true; this.fit(); }
+  }
+
+  /**
+   * The Realistic style: every surface with a library material shows the Studio's photographed texture at its real
+   * size (the same library and pictures as the Studio's 3D preview), lit by a sunny sky that also gives reflections.
+   */
+  realistic() {
+    if (!this._env) {
+      const sky = new Sky(); sky.scale.setScalar(100);
+      const u = sky.material.uniforms; u.turbidity.value = 2.2; u.rayleigh.value = 1.6; u.sunPosition.value.set(0.6, 0.75, 0.3);
+      const sk = new THREE.Scene(); sk.add(sky);
+      this._env = new THREE.PMREMGenerator(this.renderer).fromScene(sk, 0.02).texture;
+      setupLooks({ redraw: () => { this.needsRender = true; } });
+      loadSources().then(() => { this.needsRender = true; });
+    }
+    this.scene.environment = this._env; this.scene.environmentIntensity = 0.6;
+    this.root.traverse(o => {
+      const id = o.userData?.mat;
+      if (!o.isMesh || typeof id !== "string" || !id.startsWith("mt-") || this.app.selection?.has(o.userData.id)) return;
+      const look = materialLook(id, { quality: "high" });
+      if (!look) return;
+      if (!o.geometry.attributes.uv || !o.geometry.userData.metric) { addMetricUVs(o.geometry); o.geometry.userData.metric = true; }
+      [].concat(o.material).forEach(m => m.dispose());
+      o.material = look;
+    });
   }
 
   /** The model edge (from the 3D outlines) under the mouse: { a, b } in model mm (x east, y north, z up), or null. */

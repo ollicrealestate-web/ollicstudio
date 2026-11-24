@@ -402,7 +402,7 @@ def fix_rule(check: dict) -> tuple[str, str]:
     """(what went wrong, in a few words; the rule put first in the prompt for the second try)."""
     issues = [i for i in (check.get("claude") or {}).get("issues") or [] if i][:6]
     if issues:
-        return ("Claude found differences", "Most important: the previous attempt differed from the architect's model. Fix exactly these, and keep "
+        return ("Ollic AI found differences", "Most important: the previous attempt differed from the architect's model. Fix exactly these, and keep "
                 "everything else as in Image 1:\n" + "\n".join(f"- {i}" for i in issues) + "\n" + GEOMETRY_FIRST)
     if check["score"] >= GOOD_MATCH:
         return ("materials", MATERIALS_FIRST)

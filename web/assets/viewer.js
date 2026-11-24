@@ -21,7 +21,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
 import { matchMaterial } from "./materials/match.js";
 import { materialById } from "./materials/library.js";
-import { materialLook, addMetricUVs, setupLooks, loadSources, findMaterial } from "./materials/look.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources, findMaterial, averageColour } from "./materials/look.js";
 import { PLACES, PRESETS, sunAngles, momentAt, afternoonAt, sunVector, sunLight } from "./materials/light.js";
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
@@ -264,6 +264,7 @@ export function createViewer(host, { onSelect } = {}) {
       const lib = cls === "space" ? null : materialById(mat.id);
       o.userData.lookOpts = { tint: mat.tint, opacity: opacity < 0.99 ? opacity : null };
       o.userData.part = single ? 0 : (o.parent?.children || [o]).filter(c => c.isMesh).indexOf(o);
+      o.userData.parts = single ? 1 : (o.parent?.children || [o]).filter(c => c.isMesh).length;
       let look = lib && materialLook(mat.id, { ...o.userData.lookOpts, quality });
       if (look) addMetricUVs(o.geometry);
       else { look = lookFor(cls, srcColor, opacity); if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres); }
@@ -878,23 +879,38 @@ export function createViewer(host, { onSelect } = {}) {
   // near-identical colours (Revit models carry many) count as one material: each channel to steps of 24
   const q = hex => "#" + [1, 3, 5].map(i => Math.min(255, Math.round(parseInt(hex.slice(i, i + 2), 16) / 24) * 24).toString(16).padStart(2, "0")).join("");
   function materialKey(e) {
+    // a material the user set is its own material in the map (its class, colour and library id); everything else is
+    // keyed exactly as it always was (the reader's class and the model's colour), so those maps do not change
+    const a = e.userData.assigned, lib = a && findMaterial(a.id);
+    if (lib) return `${lib.cls}|${q(a.tint || averageColour(a.id))}|${a.id}`.slice(0, 80);
     return `${e.userData.cls || "paint"}|${q(e.userData.srcHex || "#cccccc")}`;
   }
   const MAX_MATERIALS = 24;
   /** The model's materials, largest first: key, class, the model's colour and its map colour. */
   function materialGroups() {
-    const area = new Map(), types = new Map();
+    const area = new Map(), types = new Map(), libs = new Map();
     for (const e of elements) {
       if (e.userData.ifcType === "IfcSpace" || e.userData.cls === "space") continue;
-      const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3();
-      area.set(k, (area.get(k) || 0) + sz.x * sz.y + sz.y * sz.z + sz.x * sz.z);
+      const k = materialKey(e), b = e.geometry.boundingBox, sz = b ? b.getSize(new THREE.Vector3()) : new THREE.Vector3(), A = sz.x * sz.y + sz.y * sz.z + sz.x * sz.z;
+      area.set(k, (area.get(k) || 0) + A);
+      const id = e.userData.assigned?.id || e.userData.mat?.id;   // which library material shows there, by area
+      if (id) { const l = libs.get(k) || new Map(); l.set(id, (l.get(id) || 0) + A); libs.set(k, l); }
       const t = types.get(k) || new Map(); t.set(e.userData.ifcType || "Element", (t.get(e.userData.ifcType || "Element") || 0) + 1); types.set(k, t);
     }
     const usedOn = k => [...(types.get(k) || new Map()).entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t]) => t);
     // the main materials by size get their own map colour (chosen in key order, so it is the same in every view);
     // small ones are drawn grey and left out of the look
     const main = [...area.keys()].sort((a, b) => area.get(b) - area.get(a)).slice(0, MAX_MATERIALS).sort();
-    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k), types: usedOn(k) }));
+    // the library material each shows (when one covers most of it), so the AI is told "Travertine stone", not "stone"
+    const named = k => {
+      const l = [...(libs.get(k) || new Map()).entries()].sort((a, b) => b[1] - a[1])[0];
+      if (!l || l[1] < 0.6 * area.get(k)) return {};
+      const m = findMaterial(l[0]), user = k.split("|")[2] === l[0];
+      if (!m) return {};
+      const size = m.tile ? `${m.tile.w} x ${m.tile.h} mm ${m.cls === "tile" ? "tiles" : "units"}` : "";
+      return { lib: l[0], name: m.name, finish: [user ? "chosen in the 3D preview" : "", size].filter(Boolean).join("; ") };
+    };
+    const groups = main.map((k, i) => ({ key: k, cls: k.split("|")[0], hex: k.split("|")[1], map: MAP_COLOURS[i], area: area.get(k), types: usedOn(k), ...named(k) }));
     return groups.sort((a, b) => b.area - a.area);
   }
   function mapMatFor(colour) {
@@ -1006,7 +1022,7 @@ export function createViewer(host, { onSelect } = {}) {
         out.coverage = on / (s.width * s.height);
       }
     }
-    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map, types }) => ({ key, cls, hex, map, types }));
+    if (kinds.includes("materials")) out.legend = materialGroups().map(({ key, cls, hex, map, types, name, finish, lib }) => ({ key, cls, hex, map, types, name, finish, lib }));
     endGuide();
     return out;
   }
@@ -1212,6 +1228,47 @@ export function createViewer(host, { onSelect } = {}) {
     assignments,
     onAssign(fn) { onAssign = fn; },
     select(key) { const o = key ? findPart(key) : null; select(o); return !!o; },
+    /** What the server needs to write the chosen materials into the IFC: each changed part and the materials. */
+    writeBackData() {
+      const parts = [], materials = {};
+      for (const e of elements) {
+        const a = e.userData.assigned;
+        if (!a) continue;
+        const m = findMaterial(a.id);
+        if (!m) continue;
+        parts.push({ key: partKey(e), id: a.id, tint: a.tint || null, scale: a.scale || 1, rotation: a.rotation || 0, parts_in_element: e.userData.parts || 1,
+          orig_name: e.userData.mat?.ifcName || null, orig_hex: e.userData.srcHex || null });
+        materials[a.id] = { name: m.name, cls: m.cls === "furniture" ? "stone" : m.cls, hex: averageColour(a.id), size_m: m.size || 1, tile_mm: m.tile ? [m.tile.w, m.tile.h] : null,
+          transparency: m.cls === "glass" ? +(1 - (m.opacity ?? 0.35)).toFixed(2) : 0 };
+      }
+      return { parts, materials };
+    },
+    /** The model as a GLB file with its materials and textures (what is shown: hidden storeys and the section cut out). */
+    async exportGlb() {
+      const [{ GLTFExporter }, { forPathTracing }] = await Promise.all([import("three/addons/exporters/GLTFExporter.js"), import("./materials/photomode.js")]);
+      const root = new THREE.Group(), cache = new Map();
+      root.name = "Ollic model";
+      for (const e of elements) {
+        if (!e.visible || e.userData.ifcType === "IfcSpace" || e.userData.cls === "space") continue;
+        let shown = true; for (let p = e.parent; p; p = p.parent) if (!p.visible) shown = false;
+        if (!shown) continue;
+        e.updateWorldMatrix(true, false);
+        const g = e.geometry.clone().applyMatrix4(e.matrixWorld);
+        for (const k of Object.keys(g.attributes)) if (!["position", "normal", "uv"].includes(k)) g.deleteAttribute(k);
+        const m = new THREE.Mesh(g, forPathTracing(e._look || e.material, cache));
+        const lib = findMaterial(e.userData.assigned?.id || e.userData.mat?.id);
+        m.name = [e.userData.ifcType, e.userData.name].filter(Boolean).join(" ") || "Element";
+        m.userData = { globalId: e.userData.globalId || null, ifcType: e.userData.ifcType || null, storey: e.userData.storey || null, part: e.userData.part ?? 0,
+          face: e.userData.faceName || null, material: lib?.name || null, materialId: lib?.id || null, materialFrom: e.userData.assigned ? "Set by you" : ({ ifc: "From your IFC", name: "Matched from its name", guess: "Guessed" }[e.userData.mat?.how] || null) };
+        if (m.material.name?.startsWith("ollic:")) { m.material = m.material.clone(); m.material.name = lib?.name || m.material.name; }
+        root.add(m);
+      }
+      // photos as JPEG (a tenth of the size of PNG)
+      root.traverse(o => { for (const k of ["map", "normalMap", "roughnessMap", "aoMap"]) if (o.material?.[k]) o.material[k].userData.mimeType = "image/jpeg"; });
+      const glb = await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: 2048, onlyVisible: true });
+      root.traverse(o => o.geometry?.dispose());
+      return new Blob([glb], { type: "model/gltf-binary" });
+    },
     /** Photo mode: the current view path-traced (see materials/photomode.js); the view waits while it renders. */
     async photo(opts = {}) {
       if (owner) throw new Error("The view is busy.");

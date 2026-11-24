@@ -236,7 +236,8 @@
    "examples/jsm/exporters/GLTFExporter.js",
    "examples/jsm/postprocessing/TAARenderPass.js",
    "examples/jsm/postprocessing/SSAARenderPass.js",
-   "examples/jsm/loaders/RGBELoader.js"
+   "examples/jsm/loaders/RGBELoader.js",
+   "examples/jsm/utils/TextureUtils.js"
   ],
   "three-mesh-bvh@0.8.3": [
    "build/index.module.js",
