@@ -62,6 +62,10 @@ class Repository(Protocol):
     def list_rendered_images(self, user: CurrentUser, project_id: str) -> list[dict]: ...
     def create_usage_event(self, user: CurrentUser, record: dict) -> dict: ...
     # Sketch (plan and 3D modeller)
+    def get_model_materials(self, user: CurrentUser, model_id: str) -> dict | None: ...
+    def put_model_materials(self, user: CurrentUser, model_id: str, assignments: dict) -> dict: ...
+    def get_material_prefs(self, user: CurrentUser) -> dict | None: ...
+    def put_material_prefs(self, user: CurrentUser, prefs: dict) -> dict: ...
     def create_sketch(self, user: CurrentUser, record: dict) -> dict: ...
     def list_sketches(self, user: CurrentUser) -> list[dict]: ...
     def get_sketch(self, user: CurrentUser, sketch_id: str) -> dict | None: ...
@@ -138,6 +142,26 @@ class SupabaseRepository:
     def get_source_file(self, user, file_id):
         rows = self._call("GET", "/source_files", user, params={"select": "*", "id": _eq(file_id), "owner_id": _eq(user.id)})
         return rows[0] if rows else None
+
+    # ------------------------------------------------------------ realistic materials: what each part shows, favourites
+    def get_model_materials(self, user, model_id):
+        rows = self._call("GET", "/model_materials", user, params={"select": "*", "model_id": _eq(model_id), "owner_id": _eq(user.id)})
+        return rows[0] if rows else None
+
+    def put_model_materials(self, user, model_id, assignments):
+        rows = self._call("POST", "/model_materials", user, params={"on_conflict": "model_id"},
+                          json={"model_id": model_id, "owner_id": user.id, "assignments": assignments},
+                          prefer="resolution=merge-duplicates,return=representation")
+        return rows[0]
+
+    def get_material_prefs(self, user):
+        rows = self._call("GET", "/material_prefs", user, params={"select": "*", "owner_id": _eq(user.id)})
+        return rows[0] if rows else None
+
+    def put_material_prefs(self, user, prefs):
+        rows = self._call("POST", "/material_prefs", user, params={"on_conflict": "owner_id"}, json={**prefs, "owner_id": user.id},
+                          prefer="resolution=merge-duplicates,return=representation")
+        return rows[0]
 
     # ------------------------------------------------------------ Sketch (plan and 3D modeller)
     def create_sketch(self, user, record):

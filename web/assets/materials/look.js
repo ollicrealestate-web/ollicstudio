@@ -7,7 +7,9 @@ import { materialById } from "./library.js";
 
 const BASE = new URL("./tex/", import.meta.url).href;
 const MAPS = ["color", "normal", "rough", "ao"];
-let sources = null, sourcesWait = null, onLoaded = () => {}, anisotropy = 8;
+let sources = null, sourcesWait = null, anisotropy = 8;
+const listeners = new Set();
+const onLoaded = () => listeners.forEach(f => f());
 const loader = new THREE.TextureLoader();
 const baseTex = new Map();   // "set/map" -> { tex, loaded, clones: Set }
 const looks = new Map();     // key -> material
@@ -17,7 +19,7 @@ const PLAIN = { stone: "#cfc4b0", brick: "#a0563f", wood: "#9b7350", concrete: "
   metal: "#9aa0a6", grass: "#5f7a3a", paving: "#a59b8c", asphalt: "#55555a", furniture: "#b9b2a8", glass: "#bcd9e6" };
 
 /** Called once by the viewer: what to do when a texture arrives (redraw), and how sharp textures may be. */
-export function setupLooks({ redraw, maxAnisotropy } = {}) { if (redraw) onLoaded = redraw; if (maxAnisotropy) anisotropy = Math.min(16, maxAnisotropy); }
+export function setupLooks({ redraw, maxAnisotropy } = {}) { if (redraw) listeners.add(redraw); if (maxAnisotropy) anisotropy = Math.min(16, maxAnisotropy); return () => listeners.delete(redraw); }
 /** Which maps each texture set has (tex/sources.json, written when the textures were fetched). */
 export function loadSources() {
   if (!sourcesWait) sourcesWait = fetch(BASE + "sources.json").then(r => (r.ok ? r.json() : {})).catch(() => ({})).then(s => (sources = s));

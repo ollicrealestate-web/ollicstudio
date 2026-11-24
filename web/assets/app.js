@@ -502,12 +502,22 @@ async function loadModels() {
     if (!viewer) {
       const { createViewer } = await import("./viewer.js");
       $("#viewer").querySelector(".viewer-msg")?.remove();
-      viewer = createViewer($("#viewer"), { onSelect: showElement });
+      viewer = createViewer($("#viewer"), { onSelect: (x, info) => { showElement(x); matPanel?.selected(x, info); } });
+      const { createMaterialsPanel } = await import("./materials/panel.js");
+      matPanel = createMaterialsPanel({ root: $("#matPanel"), viewer, toast,
+        store: {
+          load: async () => (viewerModelId ? (await api.getModelMaterials(viewerModelId)).assignments : {}),
+          save: a => (viewerModelId ? api.putModelMaterials(viewerModelId, a) : Promise.resolve()),
+          prefs: () => api.getMaterialPrefs(),
+          savePrefs: p => { clearTimeout(prefsTimer); prefsTimer = setTimeout(() => api.putMaterialPrefs({ favourites: p.favourites, recent: p.recent }).catch(() => {}), 800); },
+        } });
       setViewMode("exterior");
     }
     modelLoading = viewer.load(m.glb_url);
     const info = await modelLoading.finally(() => { modelLoading = null; });
     await initLight().catch(() => {}); restoreLight();
+    await matPanel?.load();
+    window.__ollic = { viewer, modelId: viewerModelId };   // for the browser tests
     const pick = $("#storeySelect");
     pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
     $("#storeyPick").hidden = info.storeys.length < 2;
@@ -554,6 +564,8 @@ document.querySelectorAll("[data-hold]").forEach(b => {
   b.addEventListener("contextmenu", e => e.preventDefault());
 });
 
+let matPanel = null, prefsTimer = 0;
+$("#matBtn").onclick = () => { const p = $("#matPanel"), open = p.hidden; p.hidden = !open; $("#matBtn").setAttribute("aria-expanded", String(open)); };
 $("#viewReset").onclick = () => viewer?.reset();
 
 /* light: sky, time, date, place, exposure, quality and the site; remembered on this device for each model */
@@ -613,10 +625,10 @@ function showElement(x) {
   let tip = host.querySelector(".el-tip");
   if (!x) { tip?.remove(); return; }
   if (!tip) { tip = el("div", { class: "el-tip", role: "status", id: "elementCard" }); host.append(tip); }
-  const m = x.mat && materialById(x.mat.id), HOW = { ifc: "From your IFC", name: "Matched from its name", guess: "Guessed", user: "Set by you" };
+  const how = x.assigned ? "user" : x.mat?.how, m = materialById(x.assigned?.id || x.mat?.id), HOW = { ifc: "From your IFC", name: "Matched from its name", guess: "Guessed", user: "Set by you" };
   tip.replaceChildren(el("b", {}, TYPE_NAME[x.ifcType] || (x.ifcType || "Element").replace(/^Ifc/, "")),
-    el("span", {}, [x.name, x.storey].filter(Boolean).join(" · ") || "No name"),
-    ...(x.mat ? [el("span", { class: "el-mat" }, `${m ? m.name : "Plain colour"} · ${HOW[x.mat.how] || ""}`)] : []),
+    el("span", {}, [x.name, x.storey, x.faceName ? `${x.faceName} face` : ""].filter(Boolean).join(" · ") || "No name"),
+    ...(x.mat || x.assigned ? [el("span", { class: "el-mat" }, `${m ? m.name : x.assigned ? "My material" : "Plain colour"} · ${HOW[how] || ""}`)] : []),
     el("button", { type: "button", class: "el-close", "aria-label": "Close", onclick: () => tip.remove() }, "×"));
 }
 

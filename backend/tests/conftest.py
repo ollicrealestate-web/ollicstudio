@@ -43,6 +43,8 @@ class FakeRepo:
         self.sketches: dict[str, dict] = {}
         self.ai_sessions: dict[str, dict] = {}
         self.ai_calls: list[dict] = []
+        self.model_materials: dict[str, dict] = {}
+        self.material_prefs: dict[str, dict] = {}
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
@@ -74,6 +76,27 @@ class FakeRepo:
         row = {"id": str(uuid.uuid4()), **record, "owner_id": user.id, "created_at": self._now()}
         self.ai_calls.append(row)
         return copy.deepcopy(row)
+
+    # realistic materials
+    def get_model_materials(self, user, model_id):
+        r = self.model_materials.get(model_id)
+        return copy.deepcopy(r) if r and r["owner_id"] == user.id else None
+
+    def put_model_materials(self, user, model_id, assignments):
+        m = self.models.get(model_id)
+        assert m and m["owner_id"] == user.id, "the database would refuse materials for another user's model"
+        r = self.model_materials.get(model_id)
+        assert not r or r["owner_id"] == user.id
+        self.model_materials[model_id] = {"model_id": model_id, "owner_id": user.id, "assignments": copy.deepcopy(assignments), "updated_at": self._now()}
+        return copy.deepcopy(self.model_materials[model_id])
+
+    def get_material_prefs(self, user):
+        r = self.material_prefs.get(user.id)
+        return copy.deepcopy(r) if r else None
+
+    def put_material_prefs(self, user, prefs):
+        self.material_prefs[user.id] = {"owner_id": user.id, **copy.deepcopy(prefs), "updated_at": self._now()}
+        return copy.deepcopy(self.material_prefs[user.id])
 
     # Sketch (plan and 3D modeller)
     def create_sketch(self, user, record):

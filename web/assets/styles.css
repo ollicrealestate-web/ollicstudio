@@ -648,3 +648,26 @@ tr:last-child td { border-bottom: 0; }
 .light-panel label { display: grid; gap: 6px; font-size: 0.9rem; }
 .light-panel .light-time { grid-template-columns: auto auto 1fr; align-items: center; gap: 10px; }
 .light-panel input[type=range] { width: 100%; }
+
+/* the Materials panel: click a part, choose, apply */
+.mat-panel { display: grid; gap: 14px; margin-top: 10px; }
+.mp-now { display: flex; gap: 12px; align-items: center; }
+.mp-thumb { width: 56px; height: 56px; border-radius: 8px; flex: none; display: block; border: 1px solid rgba(0,0,0,.12); }
+.mp-apply { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.mp-preview { width: 100%; height: auto; aspect-ratio: 2 / 1; background: #e9edf1; border-radius: 10px; }
+.mp-settings { display: grid; gap: 8px; }
+.mp-settings label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 0.9rem; }
+.mp-settings input[type=number] { width: 90px; }
+.mp-chosen { font-weight: 600; margin: 0; }
+.mp-scope { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.mp-scope legend { font-weight: 600; margin-bottom: 4px; }
+.mp-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 10px; max-height: 420px; overflow: auto; }
+.mp-grid li { position: relative; }
+.mp-swatch { display: grid; gap: 4px; width: 100%; padding: 4px; border: 2px solid transparent; border-radius: 10px; background: none; cursor: pointer; text-align: left; font: inherit; }
+.mp-swatch .mp-thumb { width: 100%; height: 72px; }
+.mp-swatch[aria-pressed=true] { border-color: var(--accent, #b3261e); }
+.mp-name { font-size: 0.78rem; line-height: 1.2; }
+.mp-fav { position: absolute; top: 8px; right: 8px; border: 0; background: rgba(255,255,255,.85); border-radius: 50%; width: 26px; height: 26px; cursor: pointer; line-height: 1; }
+.mp-how { margin-left: 4px; }
+.mp-actions { flex-wrap: wrap; gap: 8px; }
+@media (max-width: 640px) { .mp-apply { grid-template-columns: 1fr; } }

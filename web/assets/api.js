@@ -28,6 +28,11 @@ async function request(method, path, body, retry = true, extra = {}) {
 }
 
 export const api = {
+  // realistic materials: what each part of a model shows (what the user changed), favourites and recently used
+  getModelMaterials: modelId => request("GET", `/models/${modelId}/materials`),
+  putModelMaterials: (modelId, assignments) => request("PUT", `/models/${modelId}/materials`, { assignments }),
+  getMaterialPrefs: () => request("GET", "/material-prefs"),
+  putMaterialPrefs: prefs => request("PUT", "/material-prefs", prefs),
   // Sketch (the plan and 3D modeller): one JSON document per sketch, owned by the user
   listSketches: () => request("GET", "/sketches"),
   createSketch: body => request("POST", "/sketches", body),
