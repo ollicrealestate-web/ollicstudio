@@ -157,7 +157,9 @@ def test_the_ifc_gets_the_materials_written_back_and_keeps_its_geometry(client, 
     r = client.post(f"/api/models/{mid}/ifc-with-materials", json=body, headers=alice["headers"])
     assert r.status_code == 200, r.text
     assert "with materials.ifc" in r.headers["content-disposition"] and r.headers["x-ollic-elements"] == "3"
-    assert validate(r.content) == []
+    # IfcOpenShell's validation finds nothing new (anything it says about the original file is not ours to fix)
+    new = [e for e in validate(r.content) if e not in validate(FIXTURE.read_bytes())]
+    assert new == [], new
 
     def opened(data):
         t = tempfile.NamedTemporaryFile(suffix=".ifc", delete=False); t.write(data); t.close()
