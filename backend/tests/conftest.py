@@ -46,6 +46,7 @@ class FakeRepo:
         self.model_materials: dict[str, dict] = {}
         self.material_prefs: dict[str, dict] = {}
         self.user_materials: dict[str, dict] = {}
+        self.model_cameras: dict[str, dict] = {}
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
@@ -98,6 +99,16 @@ class FakeRepo:
     def put_material_prefs(self, user, prefs):
         self.material_prefs[user.id] = {"owner_id": user.id, **copy.deepcopy(prefs), "updated_at": self._now()}
         return copy.deepcopy(self.material_prefs[user.id])
+
+    def get_model_cameras(self, user, model_id):
+        r = self.model_cameras.get(model_id)
+        return copy.deepcopy(r) if r and r["owner_id"] == user.id else None
+
+    def put_model_cameras(self, user, model_id, record):
+        m = self.models.get(model_id)
+        assert m and m["owner_id"] == user.id, "the database would refuse views for another user's model"
+        self.model_cameras[model_id] = {"model_id": model_id, "owner_id": user.id, **copy.deepcopy(record), "updated_at": self._now()}
+        return copy.deepcopy(self.model_cameras[model_id])
 
     def create_user_material(self, user, record):
         row = {"id": str(uuid.uuid4()), **copy.deepcopy(record), "owner_id": user.id, "created_at": self._now(), "updated_at": self._now()}

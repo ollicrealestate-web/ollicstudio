@@ -1,0 +1,174 @@
+// The Camera panel over the 3D view: ready-made angles, the architect's own numbers (lens, height, distance, angle
+// from the front, straight vertical lines, shift, picture shape), "say it in words", framing guides, the front of the
+// building, and saved views (kept for the model on the server).
+import { PRESETS, SHAPES, anglesOf, fromWords, presetSettings } from "./camera.js";
+
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v); }
+  kids.flat().forEach(k => k != null && e.append(k instanceof Node ? k : document.createTextNode(String(k))));
+  return e;
+};
+const GROUPS = [["Outside", ["front-eye", "front-raised", "corner-eye-left", "corner-eye-right", "drone-corner-left", "drone-corner-right", "aerial", "hero-low"]],
+  ["Sides and rear", ["side-left", "side", "rear-left", "rear", "rear-right"]], ["Details", ["entrance", "plan"]], ["Inside", ["interior-one", "interior-two"]]];
+const FROM = { entrance: "found from the main entrance", guessed: "guessed (the model's own front)", you: "set by you" };
+
+/** root: the panel. viewer: the Studio viewer. store: { load() -> { front, views }, save({ front, views }), words(text, height) -> { settings, understood } }. */
+export function createCameraPanel({ root, viewer, store, toast = () => {} }) {
+  let views = [], frontSaved = null, saveTimer = 0, now = null;
+  root.replaceChildren(
+    el("div", { class: "cp-presets", id: "cpPresets" }),
+    el("div", { class: "cp-words" },
+      el("label", { for: "cpWords" }, "Say it in words"),
+      el("textarea", { id: "cpWords", rows: "2", maxlength: "600", placeholder: "e.g. elevated three-quarter corner view, low drone height, two-point perspective with vertical lines kept straight, 24 mm wide-angle lens, street intersection in foreground" }),
+      el("div", { class: "row" }, el("button", { type: "button", class: "btn", id: "cpWordsGo" }, "Set the camera"), el("span", { class: "hint", id: "cpWordsMsg", role: "status" }))),
+    el("fieldset", { class: "cp-settings", id: "cpSettings" }, el("legend", {}, "Camera"),
+      el("label", {}, "Lens ", el("input", { type: "range", id: "cpLensR", min: "14", max: "135", step: "1" }), el("input", { type: "number", id: "cpLens", min: "14", max: "135", step: "1", "aria-label": "Lens (mm)" }), " mm ", el("span", { class: "hint", id: "cpAngle" })),
+      el("label", {}, "Camera height ", el("input", { type: "number", id: "cpHeight", min: "0.1", max: "500", step: "0.1", "aria-label": "Camera height (m)" }), " m above the ground"),
+      el("label", {}, "Distance ", el("label", { class: "check" }, el("input", { type: "checkbox", id: "cpFit", checked: true }), " fit the building"), el("input", { type: "number", id: "cpDist", min: "1", max: "5000", step: "1", "aria-label": "Distance (m)" }), " m"),
+      el("label", {}, "Building fills ", el("input", { type: "range", id: "cpFill", min: "40", max: "100", step: "1" }), el("output", { id: "cpFillOut" })),
+      el("label", {}, "Angle from the front ", el("input", { type: "range", id: "cpAz", min: "-180", max: "180", step: "1" }), el("input", { type: "number", id: "cpAzN", min: "-180", max: "180", step: "1", "aria-label": "Angle from the front (degrees)" }), "°"),
+      el("label", { class: "check" }, el("input", { type: "checkbox", id: "cpStraight" }), " Vertical lines straight (two-point perspective)"),
+      el("label", {}, "Look up or down ", el("input", { type: "range", id: "cpPitch", min: "-45", max: "89", step: "1" }), el("output", { id: "cpPitchOut" })),
+      el("label", {}, "Frame shift up / down ", el("input", { type: "range", id: "cpShiftY", min: "-0.5", max: "0.5", step: "0.01", value: "0" })),
+      el("label", {}, "Frame shift left / right ", el("input", { type: "range", id: "cpShiftX", min: "-0.5", max: "0.5", step: "0.01", value: "0" })),
+      el("label", {}, "Picture shape ", el("select", { id: "cpShape" }, ...Object.keys(SHAPES).map(k => el("option", { value: k }, { "3:2": "3:2 (photo)", "16:9": "16:9 (widescreen)", "4:5": "4:5 (portrait)", "1:1": "1:1 (square)", "9:16": "9:16 (phone reels)" }[k]))))),
+    el("fieldset", { class: "cp-guides" }, el("legend", {}, "Framing guides"),
+      ...[["thirds", "Thirds"], ["centre", "Centre line"], ["horizon", "Horizon"], ["safe", "Safe margin"]].map(([k, t]) => el("label", { class: "check" }, el("input", { type: "checkbox", "data-guide": k }), " ", t))),
+    el("div", { class: "cp-front row" },
+      el("span", { id: "cpFrontMsg" }),
+      el("label", { class: "check" }, el("input", { type: "checkbox", id: "cpShowFront" }), " Show the front"),
+      el("button", { type: "button", class: "btn sm", id: "cpPickFront" }, "Make this side the front")),
+    el("div", { class: "cp-views" },
+      el("div", { class: "row" }, el("input", { type: "text", id: "cpViewName", maxlength: "80", placeholder: "Name this view (e.g. Front eye level)", "aria-label": "Name of the view" }),
+        el("button", { type: "button", class: "btn primary", id: "cpSave" }, "Save this view"), el("button", { type: "button", class: "btn", id: "cpFree" }, "Free camera"), el("span", { class: "hint", id: "cpMsg", role: "status" })),
+      el("ul", { class: "cp-list", id: "cpList" })));
+  const $ = s => root.querySelector(s);
+  $("#cpPresets").append(...GROUPS.map(([g, keys]) => el("div", { class: "cp-group" }, el("span", { class: "cp-gname" }, g),
+    ...keys.map(k => el("button", { type: "button", class: "chip", "data-preset": k, "aria-pressed": "false", title: PRESETS[k].words, onclick: () => setPreset(k) }, PRESETS[k].name)))));
+
+  const msg = t => { $("#cpMsg").textContent = t; };
+  function draw(info = viewer.camera) {
+    now = info?.settings || null;
+    root.querySelectorAll("[data-preset]").forEach(b => b.setAttribute("aria-pressed", String(!!now && b.dataset.preset === now.preset && !now.custom)));
+    const s = now || { lens: 35, height: 1.6, azimuth: 0, straight: true, pitch: 0, shiftX: 0, shiftY: 0, aspect: "3:2", fill: 0.85, distance: "fit" };
+    $("#cpLens").value = $("#cpLensR").value = Math.round(s.lens);
+    const a = anglesOf(s.lens, SHAPES[s.aspect] || 1.5);
+    $("#cpAngle").textContent = `${a.h.toFixed(1)}° across, ${a.v.toFixed(1)}° up and down`;
+    $("#cpHeight").value = info?.height ?? s.height ?? 1.6;
+    $("#cpFit").checked = s.distance === "fit" || s.distance == null; $("#cpDist").disabled = $("#cpFit").checked;
+    $("#cpDist").value = info?.distance ? Math.round(info.distance) : (typeof s.distance === "number" ? s.distance : "");
+    $("#cpFill").value = Math.round((s.fill ?? 0.85) * 100); $("#cpFillOut").textContent = `${$("#cpFill").value}%`;
+    $("#cpAz").value = $("#cpAzN").value = Math.round(s.azimuth || 0);
+    $("#cpStraight").checked = s.straight !== false; $("#cpPitch").disabled = s.straight !== false;
+    $("#cpPitch").value = Math.round(s.pitch || 0); $("#cpPitchOut").textContent = `${Math.round(s.pitch || 0)}°`;
+    $("#cpShiftX").value = s.shiftX || 0; $("#cpShiftY").value = s.shiftY || 0;
+    $("#cpShape").value = s.aspect || "3:2";
+    const f = viewer.front;
+    $("#cpFrontMsg").textContent = `Front: ${FROM[f.from] || f.from}.`;
+  }
+  function setPreset(key) {
+    const info = viewer.setCamera({ preset: key, aspect: $("#cpShape").value || "3:2" });
+    if (info?.error) { msg(info.error); return; }
+    msg(""); draw(info);
+  }
+  /** Any number changed: the camera keeps the angle it came from, with the change. */
+  function tweak(change) {
+    const base = now ? { ...now } : presetSettings("front-eye", viewer.camera.buildingHeight);
+    const info = viewer.setCamera({ ...base, ...change, custom: true });
+    if (info?.error) { msg(info.error); return; }
+    draw(info);
+  }
+  $("#cpLensR").oninput = e => tweak({ lens: +e.target.value });
+  $("#cpLens").onchange = e => tweak({ lens: Math.min(135, Math.max(14, +e.target.value || 35)) });
+  $("#cpHeight").onchange = e => tweak({ height: Math.max(0.1, +e.target.value || 1.6) });
+  $("#cpFit").onchange = e => tweak({ distance: e.target.checked ? "fit" : (+$("#cpDist").value || viewer.camera.distance || 30) });
+  $("#cpDist").onchange = e => tweak({ distance: Math.max(1, +e.target.value || 30) });
+  $("#cpFill").oninput = e => { $("#cpFillOut").textContent = `${e.target.value}%`; tweak({ fill: +e.target.value / 100 }); };
+  $("#cpAz").oninput = e => tweak({ azimuth: +e.target.value });
+  $("#cpAzN").onchange = e => tweak({ azimuth: Math.max(-180, Math.min(180, +e.target.value || 0)) });
+  $("#cpStraight").onchange = e => tweak({ straight: e.target.checked, pitch: e.target.checked ? 0 : (now?.pitch || 15) });
+  $("#cpPitch").oninput = e => { $("#cpPitchOut").textContent = `${e.target.value}°`; tweak({ pitch: +e.target.value }); };
+  $("#cpShiftX").oninput = e => tweak({ shiftX: +e.target.value });
+  $("#cpShiftY").oninput = e => tweak({ shiftY: +e.target.value });
+  $("#cpShape").onchange = e => tweak({ aspect: e.target.value });
+  root.querySelectorAll("[data-guide]").forEach(c => { c.onchange = () => viewer.setFrameGuides({ [c.dataset.guide]: c.checked }); });
+
+  // words: Ollic AI when connected, else the app's own table of the words architects use
+  $("#cpWordsGo").onclick = async () => {
+    const text = $("#cpWords").value.trim();
+    if (!text) return;
+    const H = viewer.camera.buildingHeight;
+    $("#cpWordsMsg").textContent = "Reading…";
+    let r = null, by = "Ollic AI";
+    try { r = await store.words?.(text, H); } catch { r = null; }
+    if (!r?.settings) { r = fromWords(text, H); by = "the app"; }
+    const info = viewer.setCamera({ ...presetSettings(r.settings.preset, H), ...r.settings, custom: true, preset: r.settings.preset });
+    if (info?.error) { $("#cpWordsMsg").textContent = info.error; return; }
+    draw(info);
+    $("#cpWordsMsg").textContent = `Read by ${by}: ${(r.understood || []).join(", ") || PRESETS[r.settings.preset]?.name}. Check the numbers and adjust.`;
+  };
+
+  // the front
+  $("#cpShowFront").onchange = e => viewer.showFront(e.target.checked);
+  $("#cpPickFront").onclick = async () => {
+    msg("Click a wall on the side that is the front.");
+    viewer.showFront(true); $("#cpShowFront").checked = true;
+    const f = await viewer.pickFront();
+    if (f) { msg("Front set. Every angle now follows it."); draw(); }
+  };
+  viewer.onFront(f => { frontSaved = { dir: f.front, from: f.from }; save(); draw(); });
+
+  // saved views
+  function drawViews() {
+    $("#cpList").replaceChildren(...views.map(v => el("li", { class: "cp-view" },
+      el("button", { type: "button", class: "cp-go", title: v.words || v.name, onclick: () => goTo(v) },
+        v.thumb ? el("img", { src: v.thumb, alt: "" }) : el("span", { class: "cp-nothumb" }), el("span", {}, v.name)),
+      el("div", { class: "cp-acts" },
+        el("button", { type: "button", class: "btn sm", "aria-label": `Rename ${v.name}`, onclick: e => {
+          const li = e.target.closest("li"), input = el("input", { type: "text", value: v.name, maxlength: "80", "aria-label": "New name", class: "cp-rename" });
+          const done = () => { const n = input.value.trim(); if (n) { v.name = n.slice(0, 80); save(); } drawViews(); };
+          input.addEventListener("keydown", k => { if (k.key === "Enter") done(); if (k.key === "Escape") drawViews(); });
+          input.addEventListener("blur", done, { once: true });
+          li.querySelector(".cp-go span:last-child").replaceWith(input); input.focus(); input.select();
+        } }, "Rename"),
+        el("button", { type: "button", class: "btn sm", "aria-label": `Duplicate ${v.name}`, onclick: () => { views.splice(views.indexOf(v) + 1, 0, { ...structuredClone(v), id: `v${Date.now().toString(36)}`, name: `${v.name} (copy)`.slice(0, 80) }); drawViews(); save(); } }, "Duplicate"),
+        el("button", { type: "button", class: "btn sm", "aria-label": `Delete ${v.name}`, onclick: () => { views = views.filter(x => x !== v); drawViews(); save(); msg(`${v.name} deleted.`); } }, "Delete")))));
+    if (!views.length) $("#cpList").append(el("li", { class: "hint" }, "No saved views yet. Set an angle you like and press Save this view."));
+  }
+  function goTo(v) {
+    viewer.showPose(v.pose);
+    draw({ ...viewer.camera, settings: v.settings || null });
+    now = v.settings || null;
+    msg(`${v.name}.`);
+  }
+  $("#cpSave").onclick = () => {
+    const pose = viewer.currentPose();
+    if (!pose.aspect) { msg("Pick an angle first (or press one of the ready-made angles), then save it."); return; }
+    const name = $("#cpViewName").value.trim() || `${PRESETS[now?.preset]?.name || "View"} ${views.length + 1}`;
+    let thumb = null;
+    try { const W = 240, H = Math.round(240 / pose.aspect); thumb = viewer.guides(W, H, ["view"], pose).view; } catch { /* no picture */ }
+    const v = { id: `v${Date.now().toString(36)}`, name: name.slice(0, 80), settings: now ? { ...now } : null, pose, thumb, words: viewer.camera.words || null };
+    views.push(v); $("#cpViewName").value = ""; drawViews(); save(); msg(`Saved “${v.name}”.`);
+  };
+  $("#cpFree").onclick = () => { viewer.freeCamera(); draw(); msg("Free camera: orbit as you like."); };
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => { try { await store.save({ front: frontSaved, views }); } catch (err) { msg("Not saved: " + (err.message || "try again")); } }, 500);
+  }
+
+  draw(); drawViews();
+  return {
+    async load() {
+      views = []; frontSaved = null; drawViews();
+      try {
+        const r = (await store.load()) || {};
+        views = r.views || [];
+        if (r.front?.dir) { frontSaved = r.front; viewer.onFront(null); viewer.setFront(r.front.dir, r.front.from || "you"); viewer.onFront(f => { frontSaved = { dir: f.front, from: f.from }; save(); draw(); }); }
+      } catch (err) { toast("Your saved views could not be loaded: " + err.message); }
+      drawViews(); draw();
+    },
+    refresh: () => draw(),
+    get views() { return views; },
+  };
+}

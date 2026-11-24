@@ -324,7 +324,7 @@ export function createViewer(host, { onSelect } = {}) {
 
   /** The building itself, for placing the camera: models often include the whole plot (paving,
    * ground slabs, boundary walls), many times larger than the building. Parts much bigger than the
-   * building's core are left out of the pic (they are still shown). */
+   * building's core are left out of the frame (they are still shown). */
   function buildingBox(list) {
     let boxes = list.filter(e => e.userData.ifcType !== "IfcSpace").map(e => new THREE.Box3().setFromObject(e)).filter(b => !b.isEmpty());
     const all = new THREE.Box3(); boxes.forEach(b => all.union(b));
@@ -807,7 +807,7 @@ export function createViewer(host, { onSelect } = {}) {
 
   // the set picture's outline over the view, and the framing guides (thirds, centre, horizon, safe margin)
   const frameEl = document.createElement("div");
-  frameEl.className = "cam-pic"; frameEl.setAttribute("aria-hidden", "true");
+  frameEl.className = "cam-frame"; frameEl.setAttribute("aria-hidden", "true");
   frameEl.style.cssText = "position:absolute;pointer-events:none;box-shadow:0 0 0 9999px rgba(10,12,16,.45);outline:1px solid rgba(255,255,255,.7);display:none;z-index:2";
   host.style.overflow = "hidden"; if (getComputedStyle(host).position === "static") host.style.position = "relative";
   host.append(frameEl);
@@ -981,7 +981,7 @@ export function createViewer(host, { onSelect } = {}) {
   const lineMat = new THREE.LineBasicMaterial({ color: "#ffffff" });
   const goldMat = new THREE.LineBasicMaterial({ color: "#ffd47e" });
   // ---------------------------------------------------------------- the build (4D): when each part of the model is built, 0 to 1
-  // Foundations first; then floor by floor the pic (columns, beams, slabs, stairs) with the walls one floor behind;
+  // Foundations first; then floor by floor the frame (columns, beams, slabs, stairs) with the walls one floor behind;
   // then the roof, the windows and doors, and last the fittings. Within a stage, from the bottom up.
   let schedule = null;
   const PHASE = [[/^Ifc(Footing|Pile|Foundation)/, 0], [/^Ifc(Column|Beam|Slab|Stair|StairFlight|Ramp|RampFlight|Member|Structural)/, 1],
@@ -1005,7 +1005,7 @@ export function createViewer(host, { onSelect } = {}) {
     const S = Math.max(1, storeys.length), groups = new Map(), add = (key, it) => { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(it); };
     for (const it of items) {
       if (it.phase === 0) add(0, it);
-      else if (it.phase === 1) add(1 + it.s * 2, it);              // the pic of floor s
+      else if (it.phase === 1) add(1 + it.s * 2, it);              // the frame of floor s
       else if (it.phase === 2) add(1 + Math.min(it.s + 1, S) * 2 + 1, it);   // its walls, once the floor above is framed
       else add(1000 + it.phase, it);                                 // roof, openings, fittings
     }
@@ -1123,7 +1123,7 @@ export function createViewer(host, { onSelect } = {}) {
       scene.overrideMaterial = depthMat; sky.visible = false; scene.background = new THREE.Color("#000000"); renderer.toneMapping = THREE.NoToneMapping;
     }
   }
-  /** Draws one guide pic (optionally from a pose) and returns the canvas holding it. */
+  /** Draws one guide frame (optionally from a pose) and returns the canvas holding it. */
   function guideFrame(pose) {
     if (pose) {
       // a pose with a set picture (lens, shape, shift) is drawn exactly as it shows in the view; others as before

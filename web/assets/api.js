@@ -33,6 +33,9 @@ export const api = {
   putModelMaterials: (modelId, assignments) => request("PUT", `/models/${modelId}/materials`, { assignments }),
   getMaterialPrefs: () => request("GET", "/material-prefs"),
   putMaterialPrefs: prefs => request("PUT", "/material-prefs", prefs),
+  getCameras: modelId => request("GET", `/models/${modelId}/cameras`),
+  putCameras: (modelId, body) => request("PUT", `/models/${modelId}/cameras`, body),
+  cameraWords: (text, buildingHeight) => request("POST", "/camera/words", { text, building_height: buildingHeight }),
   listMyMaterials: () => request("GET", "/my-materials"),
   /** The model's IFC with the materials chosen in the 3D preview written into it, as a file. */
   ifcWithMaterials: async (modelId, body) => {

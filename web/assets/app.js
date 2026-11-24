@@ -503,6 +503,12 @@ async function loadModels() {
       const { createViewer } = await import("./viewer.js");
       $("#viewer").querySelector(".viewer-msg")?.remove();
       viewer = createViewer($("#viewer"), { onSelect: (x, info) => { showElement(x); matPanel?.selected(x, info); } });
+      const { createCameraPanel } = await import("./camerapanel.js");
+      camPanel = createCameraPanel({ root: $("#camPanel"), viewer, toast, store: {
+        load: () => (viewerModelId ? api.getCameras(viewerModelId) : Promise.resolve({})),
+        save: body => (viewerModelId ? api.putCameras(viewerModelId, body) : Promise.resolve()),
+        words: (text, h) => api.cameraWords(text, h).catch(() => null),
+      } });
       const { createMaterialsPanel } = await import("./materials/panel.js");
       matPanel = createMaterialsPanel({ root: $("#matPanel"), viewer, toast,
         store: {
@@ -521,6 +527,7 @@ async function loadModels() {
     const info = await modelLoading.finally(() => { modelLoading = null; });
     await initLight().catch(() => {}); restoreLight();
     await matPanel?.load();
+    await camPanel?.load();
     window.__ollic = { viewer, modelId: viewerModelId };   // for the browser tests
     const pick = $("#storeySelect");
     pick.replaceChildren(el("option", { value: "" }, "All floors"), ...info.storeys.map(s => el("option", { value: s }, s)));
@@ -568,6 +575,8 @@ document.querySelectorAll("[data-hold]").forEach(b => {
   b.addEventListener("contextmenu", e => e.preventDefault());
 });
 
+let camPanel = null;
+$("#camBtn").onclick = () => { const p = $("#camPanel"), open = p.hidden; p.hidden = !open; $("#camBtn").setAttribute("aria-expanded", String(open)); if (open) camPanel?.refresh(); };
 let matPanel = null, prefsTimer = 0;
 /* downloads with the materials of the 3D preview: a GLB with its textures; the IFC with the chosen materials written in */
 const saveBlob = (blob, name) => { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); };
