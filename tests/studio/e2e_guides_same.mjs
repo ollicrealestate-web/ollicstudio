@@ -71,6 +71,7 @@ const s0 = await serve();
 await p0.goto(`http://127.0.0.1:${s0.address().port}/sketch.html`);
 await p0.waitForFunction(() => window.__sketch?.ready);
 const ifcs = { sketch: await sketchIfc(p0, testBox()), revit: readFileSync(new URL("./fixtures/revit_style.ifc", import.meta.url), "utf8") };
+writeFileSync(join(OUT, "guides-test-model.ifc"), ifcs.sketch);
 await p0.close(); s0.close();
 
 const before = await guides(join(old, "web"), ifcs), after = await guides(new URL("../../web/", import.meta.url).pathname, ifcs);

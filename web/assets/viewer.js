@@ -19,6 +19,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
 import { matchMaterial } from "./materials/match.js";
 import { materialById } from "./materials/library.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources } from "./materials/look.js";
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
 const SOLID_FOR_WALKING = new Set(["IfcWall", "IfcWallStandardCase", "IfcColumn", "IfcCurtainWall", "IfcRailing", "IfcWindow", "IfcPlate", "IfcMember", "IfcBuildingElementProxy", "IfcStair", "IfcStairFlight", "IfcFurnishingElement", "IfcFurniture"]);
@@ -28,6 +29,9 @@ export function createViewer(host, { onSelect } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // how fine the materials are: phones start at Fast (colour only), laptops at High (relief, roughness, shade)
+  let quality = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || "") ? "fast" : "high";
+  setupLooks({ maxAnisotropy: renderer.capabilities.getMaxAnisotropy() });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.72;
   renderer.shadowMap.enabled = true;
@@ -98,6 +102,7 @@ export function createViewer(host, { onSelect } = {}) {
   const keys = new Set(), hold = { fwd: 0, turn: 0, up: 0 };
   let fly = null;          // a camera move in progress
   const redraw = () => { dirty = true; finalDone = false; };
+  setupLooks({ redraw });   // a texture that arrives redraws the view
   controls.addEventListener("change", redraw);
   const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
 
@@ -112,6 +117,7 @@ export function createViewer(host, { onSelect } = {}) {
   new ResizeObserver(resize).observe(host);
 
   async function load(url) {
+    await loadSources();
     const gltf = await new GLTFLoader().loadAsync(url);
     if (model) scene.remove(model);
     if (edgesGroup) { scene.remove(edgesGroup); edgesGroup.children.forEach(l => l.geometry.dispose()); edgesGroup = null; }
@@ -132,12 +138,16 @@ export function createViewer(host, { onSelect } = {}) {
       // the class stays the reader's own: the guides for AI renders (material map) are drawn from it and must not change
       const cls = named ? named[1] : guessClass(x.ifcType, opacity);
       o.userData.mat = mat;
-      const look = lookFor(cls, srcColor, opacity);
-      if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres);
+      // the realistic look: the library material at its real size (texture coordinates in metres on every face)
+      const lib = cls === "space" ? null : materialById(mat.id);
+      let look = lib && materialLook(mat.id, { tint: mat.tint, opacity: opacity < 0.99 ? opacity : null, quality });
+      if (look) addMetricUVs(o.geometry);
+      else { look = lookFor(cls, srcColor, opacity); if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres); }
       o.material = look;
       o.userData.cls = cls;
       o.userData.srcHex = "#" + (src?.color || new THREE.Color("#cccccc")).getHexString();   // the colour the architect gave it
-      o.castShadow = cls !== "glass" && cls !== "space";
+      const seen = lib?.cls || cls;
+      o.castShadow = seen !== "glass" && cls !== "space";
       o.receiveShadow = cls !== "space";
       o.geometry.computeBoundingBox(); o.geometry.computeBoundingSphere();
       elements.push(o);
