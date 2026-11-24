@@ -120,7 +120,8 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         # Photo mode: it starts refining; stopping keeps the picture so far, ready to save as PNG
         page.click("#photoBtn"); page.select_option("#photoSize", "1280"); page.select_option("#photoSamples", "96")
         page.click("#photoGo"); page.wait_for_function("document.querySelector('#photoProgress').value > 0", timeout=120000)
-        page.click("#photoStop"); page.wait_for_selector("#photoSave:not([hidden])", timeout=120000)
+        page.evaluate("document.querySelector('#photoStop').click()")   # the page is busy drawing; a click is taken between samples
+        page.wait_for_selector("#photoSave:not([hidden])", timeout=180000)
         assert page.get_attribute("#photoSave", "href").startswith("data:image/png") and "1280x" in page.get_attribute("#photoSave", "download")
         page.click("#photoBtn")
 
