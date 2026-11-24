@@ -50,7 +50,9 @@ async function openStudio() {
   }, ifc);
 }
 // a point on screen where the element itself is what a click hits (not a door or window in it)
-const screenOf = tag => page.evaluate(async tag => {
+// (tried again for a few seconds: the camera may still be flying to a new view)
+const screenOf = async tag => { for (let i = 0; ; i++) { try { return await screenNow(tag); } catch (err) { if (i > 30) throw err; await page.waitForTimeout(400); } } };
+const screenNow = tag => page.evaluate(async tag => {
   document.getElementById("studioTest").scrollTop = 0; window.scrollTo(0, 0);
   const T = await import("three"), v = window.__studio, E = v.engine(), o = E.elements.find(e => e.userData.tag === tag && !e.userData.face);
   const box = new T.Box3().setFromObject(o), r = E.renderer.domElement.getBoundingClientRect(), keys = new Set(v.debugParts().filter(p => p.tag === tag).map(p => p.key));
