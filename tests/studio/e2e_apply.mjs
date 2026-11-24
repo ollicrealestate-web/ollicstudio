@@ -148,7 +148,7 @@ await page.mouse.click(x, y);
 await page.waitForFunction(() => window.__panel.state.eyedrop === null);
 parts = await partsOf();
 check(parts.some(p => p.tag === "S1" && p.userMat === "mt-timber-teak"), "the eyedropper copies teak from one wall to another");
-await page.waitForTimeout(900);
+await page.waitForFunction(() => Object.values(JSON.parse(localStorage.getItem("model-materials") || "{}")).filter(a => a.id === "mt-timber-teak").length >= 2, null, { timeout: 8000 });
 const savedBeforeReload = await savedNow();
 await page.screenshot({ path: join(OUT, "apply-before-reload.png"), clip: { x: 0, y: 0, width: 800, height: 560 } });
 
@@ -165,8 +165,8 @@ check(Object.keys(kept).length >= 1, "saved while working");
 await page.click("#mpResetAll");
 parts = await partsOf();
 check(!parts.some(p => p.userMat), "Reset everything returns every part to the IFC's materials");
-await page.waitForTimeout(900);
-check(Object.keys(await savedNow()).length === 0, "and the reset is saved");
+const cleared = await page.waitForFunction(() => Object.keys(JSON.parse(localStorage.getItem("model-materials") || "{}")).length === 0, null, { timeout: 8000 }).then(() => true, () => false);
+check(cleared, "and the reset is saved");
 check(!errors.length, `no page errors ${errors.join(" | ")}`);
 await browser.close(); srv.close();
 if (fails.length) { console.log(`\n${fails.length} failed`); process.exit(1); }
