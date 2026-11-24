@@ -65,7 +65,7 @@ export function buildDetails3D(group, THREE, app, visible) {
   const doc = app.doc, style = app.prefs.visual || "shaded", failed = [];
   const edgeCol = style === "hidden" ? 0x111111 : style === "wire" ? 0xe8e8ec : style === "clay" ? 0x8a8a90 : 0x1b1b20;
   const add = (geo, id, m, sel, edges = true) => {
-    if (style !== "wire") { const mesh = new THREE.Mesh(geo, threeMaterial(THREE, style, m, sel)); mesh.userData.id = id; mesh.castShadow = mesh.receiveShadow = style === "realistic" || style === "clay"; group.add(mesh); }
+    if (style !== "wire") { const mesh = new THREE.Mesh(geo, threeMaterial(THREE, style, m, sel)); mesh.userData.id = id; mesh.userData.mat = m; mesh.castShadow = mesh.receiveShadow = style === "realistic" || style === "clay"; group.add(mesh); }
     if (edges) group.add(Object.assign(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), new THREE.LineBasicMaterial({ color: sel && style === "wire" ? 0x3b82f6 : edgeCol, transparent: style === "clay", opacity: style === "clay" ? 0.5 : 1 })), { userData: { id } }));
   };
   for (const d of doc.details) {

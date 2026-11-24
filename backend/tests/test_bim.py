@@ -198,3 +198,30 @@ def test_a_model_read_in_the_browser_is_saved(bim, alice, bob, sample_ifc, impor
     meta = json.loads(_browser_meta(imported, f["id"])); meta["components"][0]["family"] = "anything"
     assert c.post(f"/api/projects/{pid}/models/from-browser", files=files, data={"meta": json.dumps(meta)}, headers=alice["headers"]).status_code == 422
     assert len(repo.models) == 1
+
+
+# ---------------------------------------------------------------- materials (realistic preview)
+def _glb_json(glb: bytes) -> dict:
+    n = int.from_bytes(glb[12:16], "little")
+    return json.loads(glb[20:20 + n])
+
+
+def test_each_face_keeps_its_material_name_and_colour():
+    """A Revit-style file: styles named after materials, a window with an aluminium frame and a glass pane,
+    a layered wall and a slab. Every part keeps its own colour and material name (not only the first)."""
+    from pathlib import Path
+    data = (Path(__file__).resolve().parents[2] / "tests/studio/fixtures/revit_style.ifc").read_bytes()
+    res = import_ifc(data)
+    js = _glb_json(res.glb)
+    by_type = {n["extras"]["ifcType"]: n for n in js["nodes"]}
+    def parts(t):
+        return [js["materials"][p["material"]] for p in js["meshes"][by_type[t]["mesh"]]["primitives"]]
+    win = parts("IfcWindow")
+    names = {m.get("extras", {}).get("ifcName"): m for m in win}
+    assert set(names) == {"Aluminium", "Glass"}, win
+    assert names["Glass"]["pbrMetallicRoughness"]["baseColorFactor"][3] < 0.5 and names["Aluminium"]["pbrMetallicRoughness"]["baseColorFactor"][3] == 1
+    assert [m.get("extras", {}).get("ifcName") for m in parts("IfcSlab")] == ["Concrete - Cast In Situ"]
+    assert by_type["IfcWall"]["extras"]["materials"] == ["Brick, Common", "Plaster"]
+    wall = next(c for c in res.components if c["ifc_type"] == "IfcWall")
+    assert wall["properties"]["Ollic.Materials"] == "Brick, Common; Plaster"
+    assert "_materials" not in wall

@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the guides test compares against the viewer as it was
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -20,6 +22,7 @@ jobs:
           npm i --no-save --no-package-lock playwright@1.48.2
           npx playwright install --with-deps chromium > /dev/null
           for f in tests/sketch/e2e_*.mjs; do node "$f" out/sketch || exit 1; done
+          for f in tests/studio/e2e_*.mjs; do node "$f" out/studio || exit 1; done
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -37,9 +40,11 @@ jobs:
           path: |
             out/sketch/*.png
             out/sketch/*.pdf
+            out/studio/*.png
             out/sketch/*.dxf
             out/sketch/*.glb
             out/sketch/*.ifc
+            out/studio/*.png
 
   backend:
     name: API and studio browser tests

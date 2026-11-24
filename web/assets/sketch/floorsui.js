@@ -189,7 +189,7 @@ export function buildFloors3D(group, THREE, app, visible) {
         const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
           : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
           : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-        const m = new THREE.Mesh(geo, mat); m.userData.id = f.id; m.castShadow = m.receiveShadow = style === "realistic"; group.add(m);
+        const m = new THREE.Mesh(geo, mat); m.userData.id = f.id; m.userData.mat = app.matOf?.(f) ?? f.material; m.castShadow = m.receiveShadow = style === "realistic"; group.add(m);
       }
       group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: style === "wire" ? (sel ? 0x3b82f6 : 0xe8e8ec) : style === "hidden" ? 0x111111 : 0x1b1b20 })));
     }

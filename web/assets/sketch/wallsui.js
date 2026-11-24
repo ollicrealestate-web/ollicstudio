@@ -297,7 +297,7 @@ export function buildWalls3D(v3, THREE, app) {
         : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
         : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.userData.id = w.id;
+      mesh.userData.id = w.id; mesh.userData.mat = app.matOf?.(w) ?? w.material;
       mesh.castShadow = mesh.receiveShadow = style === "realistic";
       group.add(mesh);
     }

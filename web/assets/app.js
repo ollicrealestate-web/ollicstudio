@@ -1,4 +1,5 @@
 import { api, uploadFile, uploadAnimation, saveBrowserModel, sendShot, sendGold, ApiError, newKey } from "./api.js";
+import { materialById } from "./materials/library.js";
 import * as session from "./session.js";
 
 const $ = s => document.querySelector(s);
@@ -562,8 +563,10 @@ function showElement(x) {
   let tip = host.querySelector(".el-tip");
   if (!x) { tip?.remove(); return; }
   if (!tip) { tip = el("div", { class: "el-tip", role: "status", id: "elementCard" }); host.append(tip); }
+  const m = x.mat && materialById(x.mat.id), HOW = { ifc: "From your IFC", name: "Matched from its name", guess: "Guessed", user: "Set by you" };
   tip.replaceChildren(el("b", {}, TYPE_NAME[x.ifcType] || (x.ifcType || "Element").replace(/^Ifc/, "")),
     el("span", {}, [x.name, x.storey].filter(Boolean).join(" · ") || "No name"),
+    ...(x.mat ? [el("span", { class: "el-mat" }, `${m ? m.name : "Plain colour"} · ${HOW[x.mat.how] || ""}`)] : []),
     el("button", { type: "button", class: "el-close", "aria-label": "Close", onclick: () => tip.remove() }, "×"));
 }
 
