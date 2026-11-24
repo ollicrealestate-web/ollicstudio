@@ -16,7 +16,20 @@ export function defaultProfiles() {
     { id: "pf-sillband", name: "Window sill/head band 50 x 100", pts: [[0, 0], [50, 0], [50, 100], [0, 100]] },
     { id: "pf-railtop", name: "Railing top 60 x 40", centred: true, pts: [[-30, 0], [30, 0], [30, 40], [-30, 40]] },
     { id: "pf-rect", name: "Rectangle (set size)", rect: true, pts: [[0, 0], [100, 0], [100, 100], [0, 100]] },
+    { id: "pf-fascia", name: "Flat fascia 30 x 300", pts: [[0, 0], [30, 0], [30, 300], [0, 300]] },
+    { id: "pf-fascia-curved", name: "Curved fascia 200 x 450", pts: curvedFascia(200, 450, 30) },
+    { id: "pf-band", name: "Band 50 x 150", pts: [[0, 0], [50, 0], [50, 150], [0, 150]] },
+    { id: "pf-window-surround", name: "Window surround 100 x 60", pts: [[0, 0], [60, 0], [60, 100], [0, 100]] },
+    { id: "pf-light-line", name: "Light line 25 x 20", pts: [[0, 0], [25, 0], [25, 20], [0, 20]] },
   ].map(p => ({ ...p, pts: p.pts.map(([x, y]) => ({ x, y })) }));
+}
+
+/** A rounded nose fascia: a half ellipse out from the face, `t` thick. */
+function curvedFascia(depth, height, t) {
+  const n = 14, h = height / 2, out = [], inn = [];
+  for (let k = 0; k <= n; k++) { const a = (Math.PI * k) / n; out.push([Math.round(depth * Math.sin(a) * 10) / 10, Math.round((h + h * Math.cos(a)) * 10) / 10]); }
+  for (let k = n; k >= 0; k--) { const a = (Math.PI * k) / n; inn.push([Math.round((depth - t) * Math.sin(a) * 10) / 10, Math.round((h + (h - t) * Math.cos(a)) * 10) / 10]); }
+  return [...out, ...inn];
 }
 
 export function profilePts(doc, c) {
@@ -58,10 +71,10 @@ export function voidCutters(doc) {
   const out = [];
   for (const c of doc.components) {
     if (c.kind !== "extrusion" || !c.isVoid) continue;
-    if (c.plane) { out.push(...planeExtrusionBands(doc, c)); continue; }
+    if (c.plane) { out.push(...planeExtrusionBands(doc, c).map(v => ({ ...v, targets: c.targets }))); continue; }
     const r = checkSketch(c.boundary); if (!r.ok) continue;
     const { z0, z1 } = extrusionRange(doc, c);
-    out.push({ id: c.id, polys: floorParts(r.loops).map(p => p.outer), z0, z1 });
+    out.push({ id: c.id, polys: floorParts(r.loops).map(p => p.outer), z0, z1, targets: c.targets });
   }
   return out;
 }

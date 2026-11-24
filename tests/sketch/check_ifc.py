@@ -20,5 +20,10 @@ for f in files:
     for p in products:
         shape = ifcopenshell.geom.create_shape(settings, p)
         assert len(shape.geometry.faces) > 0, f"{p.is_a()} {p.Name} has no faces"
-    counts = {t: len(model.by_type(t)) for t in ("IfcBuildingStorey", "IfcWall", "IfcSlab", "IfcRoof", "IfcDoor", "IfcWindow", "IfcBuildingElementProxy")}
+    counts = {t: len(model.by_type(t)) for t in ("IfcBuildingStorey", "IfcWall", "IfcSlab", "IfcRoof", "IfcDoor", "IfcWindow", "IfcBuildingElementProxy", "IfcCovering", "IfcRailing", "IfcShadingDevice", "IfcMember", "IfcStair")}
+    if "finishing" in f:
+        for t in ("IfcCovering", "IfcRailing"):
+            assert counts[t] > 0, f"{f}: no {t}"
+        psets = [p for p in model.by_type("IfcPropertySet") if p.Name == "Pset_OllicSource"]
+        assert psets, f"{f}: no Pset_OllicSource"
     print(f"ok   {f}: IFC4 schema valid (IfcOpenShell {ifcopenshell.version}), geometry builds for all {len(products)} objects: {counts}")

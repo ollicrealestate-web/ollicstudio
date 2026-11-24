@@ -22,6 +22,8 @@ export function ifcText(s) {
   }
   return `'${out}'`;
 }
+import { detailIfc } from "./details.js";
+import { matName } from "./library.js";
 const num = v => { const r = Math.round(v * 1000) / 1000; return Number.isInteger(r) ? `${r}.` : String(r); };
 
 /**
@@ -72,7 +74,7 @@ export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = 
   };
 
   // ---- elements
-  const counts = {};
+  const counts = {}, mats = new Map();
   const level = (lid) => storeys.get(lid) || storeys.get(levels[0].id);
   const elementOf = eid => {
     const w = doc.walls.find(x => x.id === eid); if (w) return { cls: "IFCWALL", name: (doc.wallTypes.find(t => t.id === w.typeId)?.name) || "Wall", lid: w.baseLevelId, pre: ".STANDARD." };
@@ -80,7 +82,11 @@ export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = 
     const r = doc.roofs.find(x => x.id === eid); if (r) return { cls: "IFCROOF", name: (doc.roofTypes.find(t => t.id === r.typeId)?.name) || "Roof", lid: r.baseLevelId, pre: ".NOTDEFINED." };
     const o = doc.openings.find(x => x.id === eid);
     if (o) { const host = doc.walls.find(x => x.id === o.hostWallId), t = (o.kind === "door" ? doc.doorTypes : doc.windowTypes).find(x => x.id === o.typeId) || {}; return { cls: o.kind === "door" ? "IFCDOOR" : "IFCWINDOW", name: t.name || (o.kind === "door" ? "Door" : "Window"), lid: host?.baseLevelId, w: t.width, h: t.height, mark: typeMark(o) }; }
-    const c = doc.components.find(x => x.id === eid); if (c) return { cls: "IFCBUILDINGELEMENTPROXY", name: c.name || (c.kind === "wallSweep" ? (c.reveal ? "Reveal" : "Wall sweep") : c.kind === "sweep" ? "Sweep" : "Extrusion"), lid: c.levelId || doc.walls.find(w => w.id === c.wallIds?.[0])?.baseLevelId, pre: ".NOTDEFINED." };
+    const dt = (doc.details || []).find(x => x.id === eid);
+    if (dt) { const [cls, pre, ot] = detailIfc(dt); return { cls, pre, ot, name: dt.name, lid: dt.levelId, src: dt, material: dt.args?.material }; }
+    const c = doc.components.find(x => x.id === eid);
+    if (c?.ifc) return { cls: c.ifc[0], pre: c.ifc[1], ot: c.ifc[2], name: c.name || "Component", lid: c.levelId || doc.walls.find(w => w.id === c.wallIds?.[0])?.baseLevelId, src: c, material: c.material };
+    if (c) return { cls: "IFCBUILDINGELEMENTPROXY", name: c.name || (c.kind === "wallSweep" ? (c.reveal ? "Reveal" : "Wall sweep") : c.kind === "sweep" ? "Sweep" : "Extrusion"), lid: c.levelId || doc.walls.find(w => w.id === c.wallIds?.[0])?.baseLevelId, pre: ".NOTDEFINED." };
     return null;
   };
   for (const [eid, parts] of groups) {
@@ -102,14 +108,24 @@ export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = 
     const rep = add(`IFCSHAPEREPRESENTATION(${body},'Body','Tessellation',(${items.join(",")}))`);
     const pds = add(`IFCPRODUCTDEFINITIONSHAPE($,$,(${rep}))`);
     const pl = add(`IFCLOCALPLACEMENT(${st.pl},${axis})`);
-    const head = `'${ifcGuid()}',$,${ifcText(el.name)},$,$,${pl},${pds},${ifcText(el.mark || eid)}`;
+    const head = `'${ifcGuid()}',$,${ifcText(el.name)},$,${el.ot ? ifcText(el.ot) : "$"},${pl},${pds},${ifcText(el.mark || eid)}`;
     let ref;
     if (el.cls === "IFCDOOR") ref = add(`IFCDOOR(${head},${el.h ? num(el.h) : "$"},${el.w ? num(el.w) : "$"},.DOOR.,$,$)`);
     else if (el.cls === "IFCWINDOW") ref = add(`IFCWINDOW(${head},${el.h ? num(el.h) : "$"},${el.w ? num(el.w) : "$"},.WINDOW.,$,$)`);
     else ref = add(`${el.cls}(${head},${el.pre})`);
     st.items.push(ref);
     counts[el.cls] = (counts[el.cls] || 0) + 1;
+    // finishing details: their material, and where they came from
+    if (el.material && !/^#/.test(el.material)) { if (!mats.has(el.material)) mats.set(el.material, { ref: add(`IFCMATERIAL(${ifcText(matName(el.material))},$,$)`), els: [] }); mats.get(el.material).els.push(ref); }
+    if (el.src) {
+      const src = el.src, P = (n, v) => add(`IFCPROPERTYSINGLEVALUE(${ifcText(n)},$,${v},$)`);
+      const props = [P("Source", `IFCLABEL(${ifcText(src.source === "ai" ? "ai" : "user")})`), P("PlanItem", src.planItem != null ? `IFCLABEL(${ifcText(String(src.planItem))})` : "$"), P("ReferenceImage", src.refImage != null ? `IFCLABEL(${ifcText(String(src.refImage))})` : "$")];
+      if (el.material) props.push(P("Material", `IFCLABEL(${ifcText(matName(el.material))})`));
+      const ps = add(`IFCPROPERTYSET('${ifcGuid()}',$,'Pset_OllicSource',$,(${props.join(",")}))`);
+      add(`IFCRELDEFINESBYPROPERTIES('${ifcGuid()}',$,$,$,(${ref}),${ps})`);
+    }
   }
+  for (const m of mats.values()) add(`IFCRELASSOCIATESMATERIAL('${ifcGuid()}',$,$,$,(${m.els.join(",")}),${m.ref})`);
   for (const st of storeys.values()) if (st.items.length) add(`IFCRELCONTAINEDINSPATIALSTRUCTURE('${ifcGuid()}',$,$,$,(${st.items.join(",")}),${st.ref})`);
 
   const now = new Date().toISOString().slice(0, 19);

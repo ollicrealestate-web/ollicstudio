@@ -1,5 +1,6 @@
 // Walls in the workspace: the Wall tool, plan drawing, 3D, Properties and the type and level dialogs.
 import * as G from "./geom.js";
+import { matColor } from "./library.js";
 import { LineTool } from "./tools.js";
 import { makeWall, wallFootprints, outlineEdges, wallType, wallHeights, checkWall, LOCATION_LINES, centreOffset, extSign, wallLength } from "./walls.js";
 import * as LV from "./levels.js";
@@ -280,7 +281,7 @@ export function buildWalls3D(v3, THREE, app) {
     if (visible && !visible.has(w.baseLevelId)) continue;
     const f = fpAll.get(w.id); if (!f) continue;
     const sel = app.selection.has(w.id);
-    const colour = sel ? 0x3b82f6 : new THREE.Color(f.type.color || STYLE_COLORS[f.type.function] || 0xdddddd).getHex();
+    const colour = sel ? 0x3b82f6 : new THREE.Color(w.material ? matColor(w.material) : f.type.color || STYLE_COLORS[f.type.function] || 0xdddddd).getHex();
     const edgeColor = style === "hidden" ? 0x111111 : style === "wire" ? (sel ? 0x3b82f6 : 0xe8e8ec) : 0x1b1b20;
     const extrude = (poly, z0, z1) => {
       const shape = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000)));
@@ -316,7 +317,7 @@ export function buildWalls3D(v3, THREE, app) {
       geo.dispose();
     }
   } catch (e) { failed.push(`wall: ${e.message}`); } }
-  for (const [name, fn] of [["doors and windows", app.buildOpenings3D], ["floors", app.buildFloors3D], ["components", app.buildComponents3D], ["roofs", app.buildRoofs3D]]) {
+  for (const [name, fn] of [["doors and windows", app.buildOpenings3D], ["floors", app.buildFloors3D], ["components", app.buildComponents3D], ["roofs", app.buildRoofs3D], ["finishing details", app.buildDetails3D]]) {
     try { fn?.(group, THREE, visible); } catch (e) { failed.push(`${name}: ${e.message}`); }
   }
   v3.setShadows?.(style === "realistic");
