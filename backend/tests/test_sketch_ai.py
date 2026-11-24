@@ -13,7 +13,7 @@ from app.auth import TokenVerifier
 from app.config import Settings
 from app.jobs import InlineRunner
 from app.main import create_app
-from app.sketch_ai import RULES, ClaudeSketchAI, estimate_usd, tools_for
+from app.sketch_ai import RULES, ClaudeSketchAI, estimate_usd, tools_for, without_old_thinking
 from tests.conftest import SECRET, jpeg_bytes
 
 
@@ -168,3 +168,30 @@ def test_busy_assistant_is_retried_and_cache_is_priced_right():
     # 1,000 new + 10,000 cached (at a tenth) input at $4/M, 100 output at $20/M
     assert float(out["cost_usd"]) == pytest.approx((1000 + 1000) * 4 / 1e6 + 100 * 20 / 1e6)
     assert float(step_cost("claude-opus-5-5", {"input_tokens": 0, "cache_creation_input_tokens": 1000, "output_tokens": 0})) == pytest.approx(1250 * 4 / 1e6)
+
+
+def test_thinking_from_an_earlier_stage_is_not_sent_again():
+    """The plan stage after the questions: the questions stage's thinking is dropped (the assistant refuses it in a
+    stage with other instructions), while the thinking of the exchange in progress (tool use) is kept."""
+    think = lambda t: {"type": "thinking", "thinking": t, "signature": "sig-" + t}
+    msgs = [
+        {"role": "user", "content": [{"type": "text", "text": "Complete my design"}]},
+        {"role": "assistant", "content": [think("a"), {"type": "tool_use", "id": "t1", "name": "ask_questions", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+        {"role": "assistant", "content": [think("b")]},
+        {"role": "user", "content": [{"type": "text", "text": "My answers: south front, round columns"}]},
+        {"role": "assistant", "content": [think("c"), {"type": "tool_use", "id": "t2", "name": "write_plan", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "ok"}]},
+    ]
+    out = without_old_thinking(msgs)
+    kinds = [[b["type"] for b in m["content"]] for m in out]
+    assert kinds[1] == ["tool_use"] and kinds[3] == ["text"]           # earlier thinking dropped (an emptied turn keeps a word)
+    assert kinds[5] == ["thinking", "tool_use"]                         # the exchange in progress keeps its thinking
+    assert msgs[1]["content"][0]["type"] == "thinking"                  # the caller's messages are not changed
+    sent = []
+    def handler(req):
+        sent.append(json.loads(req.content))
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 5}})
+    ai = ClaudeSketchAI("k", "claude-opus-5-5", client=httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(handler)))
+    ai.step(stage="plan", messages=msgs, tools=[])
+    assert [b["type"] for b in sent[0]["messages"][1]["content"]] == ["tool_use"]

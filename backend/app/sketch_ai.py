@@ -86,6 +86,28 @@ def step_cost(model: str, usage: dict | None) -> Decimal | None:
     return ((tin * pin + Decimal(int(usage.get("output_tokens") or 0)) * pout) / Decimal(1_000_000)).quantize(Decimal("0.000001"))
 
 
+THINKING = ("thinking", "redacted_thinking")
+
+
+def without_old_thinking(messages: list[dict]) -> list[dict]:
+    """The assistant's thinking is kept only for the exchange in progress (since the last thing the person said).
+    Thinking from earlier turns or stages was made with another stage's instructions and tools, and the assistant
+    refuses it there ("bound to a different conversation"); it is not needed to continue."""
+    start = 0
+    for i, m in enumerate(messages):
+        c = m.get("content")
+        if m.get("role") == "user" and not (isinstance(c, list) and c and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)):
+            start = i
+    out = []
+    for i, m in enumerate(messages):
+        c = m.get("content")
+        if i < start and m.get("role") == "assistant" and isinstance(c, list) and any(isinstance(b, dict) and b.get("type") in THINKING for b in c):
+            kept = [b for b in c if not (isinstance(b, dict) and b.get("type") in THINKING)]
+            m = {**m, "content": kept or [{"type": "text", "text": "(thought it over)"}]}
+        out.append(m)
+    return out
+
+
 class ClaudeSketchAI:
     def __init__(self, api_key: str, model: str, client: httpx.Client | None = None, sleep=None):
         import time
@@ -95,7 +117,7 @@ class ClaudeSketchAI:
         self._headers = {"x-api-key": api_key, "anthropic-version": API_VERSION, "content-type": "application/json"}
 
     def step(self, *, stage: str, messages: list[dict], tools: list[dict], max_tokens: int = 8000) -> dict:
-        body = {"model": self.model, "max_tokens": max_tokens, "system": system_for(stage), "messages": messages}
+        body = {"model": self.model, "max_tokens": max_tokens, "system": system_for(stage), "messages": without_old_thinking(messages)}
         if tools:
             tools = [dict(t) for t in tools]
             tools[-1]["cache_control"] = {"type": "ephemeral"}
