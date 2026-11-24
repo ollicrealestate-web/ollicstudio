@@ -37,6 +37,7 @@ export const api = {
   // Ollic AI in Sketch ("Complete my design")
   aiConfig: () => request("GET", "/sketch-ai/config"),
   aiCreateSession: body => request("POST", "/sketch-ai/sessions", body),
+  aiEstimate: q => request("GET", `/sketch-ai/estimate?${new URLSearchParams(q)}`),
   aiSession: id => request("GET", `/sketch-ai/sessions/${id}`),
   aiSessions: sketchId => request("GET", `/sketch-ai/sessions${sketchId ? `?sketch_id=${sketchId}` : ""}`),
   aiUpdateSession: (id, body) => request("PATCH", `/sketch-ai/sessions/${id}`, body),
