@@ -148,11 +148,28 @@ await page.locator("#view3d canvas").screenshot({ path: `${OUT}/complete-3d.png`
 // export IFC
 const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 20000 }), (async () => { await page.locator("#fileExport").click(); await page.locator("#xIfc").click(); })()]);
 const path = `${OUT}/finishing-complete.ifc`; await dl.saveAs(path);
+await page.locator("#xClose").click();
 const ifc = readFileSync(path, "utf8");
 for (const [re, what] of [[/IFCCOVERING\([^;]*\.CLADDING\.\)/, "cladding"], [/IFCRAILING\(/, "railing"], [/IFCCOVERING\([^;]*\.CEILING\.\)/, "soffit"], [/IFCSLAB\([^;]*'CANOPY'[^;]*\.USERDEFINED\.\)/, "canopy"], [/IFCSHADINGDEVICE\(/, "fins"]]) check(re.test(ifc), `IFC has the ${what} with its class`);
 check(!/FASCIA/.test(ifc), "IFC has no rejected fascia");
 check((ifc.match(/IFCPROPERTYSINGLEVALUE\('Source',\$,IFCLABEL\('ai'\)/g) || []).length === 5, "IFC: each added element says source = ai");
 check((ifc.match(/IFCWALL\(/g) || []).length === 8, "IFC still has your 8 walls");
+
+// the session record can be reopened: what was said, planned, built and reported
+await page.locator("#aiRestart").click(); await page.locator("#aiPast").click();
+await page.locator("[data-past]").first().click();
+const past = await page.locator(".ai-flow").innerText();
+check(/accepted/.test(past) && /Travertine cladding, south walls/.test(past) && /stone texture is a flat colour/.test(past) && /commands recorded, 1 refused/.test(past), "a past session reopens with its chat, plan, report and commands");
+await page.locator("#aiPastBack").click();
+
+// deleting a wall trims the cladding on it; undo brings it back
+await S(() => { const a = window.__sketch; a.setTool("select"); a.selection = new Set(["S1"]); a.selectionChanged(); });
+await page.locator("#ribbonTabs button", { hasText: "Modify" }).first().click(); await page.locator(".sk-tool[data-id='delete']").click();
+d = await model();
+check(JSON.stringify(d.details.find(x => x.kind === "cladding").args.wall_ids) === '["S2"]' && !d.details.some(x => x.kind === "canopy"), "deleting wall S1 leaves the cladding on S2 only and removes the canopy over its door");
+await S(() => window.__sketch.history.undo());
+d = await model();
+check(d.details.length === 5 && wallsOf(d) === original, "undo puts the wall and its details back");
 
 check(!errors.length, `no page errors${errors.length ? ": " + errors.slice(0, 3).join(" | ") : ""}`);
 await browser.close(); srv.close();

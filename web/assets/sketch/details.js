@@ -475,3 +475,22 @@ export function buildDetail(doc, kind, args) {
 }
 /** The parts of a stored detail ([] when its hosts are gone). */
 export function detailParts(doc, d) { try { return buildDetail(doc, d.kind, d.args).parts; } catch { return []; } }
+
+/**
+ * When walls, floors, roofs or doors are deleted: details lose those hosts (a cladding over three walls keeps the
+ * other two), and a detail with nothing left to stand on goes too. Returns the kept details.
+ */
+export function dropWithHosts(details, gone) {
+  const out = [];
+  for (const d of details) {
+    const a = d.args || {};
+    if (!(d.hosts || []).some(h => gone.has(h)) && !gone.has(a.opening_id) && !gone.has(a.wall_id) && !gone.has(a.host_id)) { out.push(d); continue; }
+    if (gone.has(a.opening_id) || gone.has(a.wall_id) || gone.has(a.host_id)) continue;
+    const next = { ...a };
+    if (Array.isArray(a.wall_ids)) next.wall_ids = a.wall_ids.filter(id => !gone.has(id));
+    if (Array.isArray(a.edges)) next.edges = a.edges.filter(r => !gone.has(String(r).replace(/:(e\d+|all|exposed)$/, "")));
+    if ((next.wall_ids && !next.wall_ids.length) || (next.edges && !next.edges.length)) continue;
+    out.push({ ...d, args: next, hosts: (d.hosts || []).filter(h => !gone.has(h)) });
+  }
+  return out;
+}

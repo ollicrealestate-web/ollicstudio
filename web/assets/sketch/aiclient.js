@@ -11,6 +11,8 @@ export async function serverTransport() {
   return {
     config: () => api.aiConfig(),
     estimate: q => api.aiEstimate(q),
+    list: sketchId => api.aiSessions(sketchId),
+    get: id => api.aiSession(id),
     createSession: body => api.aiCreateSession(body),
     step: (id, body) => api.aiStep(id, body),
     update: (id, body) => api.aiUpdateSession(id, body),
@@ -88,7 +90,7 @@ export function standInTransport(script, { costPerStep = 0.05 } = {}) {
     calls,
     config: async () => ({ available: true, max_references: 6 }),
     estimate: async () => ({ low_usd: 0.4, high_usd: 1.2, model: "stand-in" }),
-    createSession: async body => ({ id: `standin-${++sessions}`, status: "open", estimate: { low_usd: 0.4, high_usd: 1.2, model: "stand-in" }, ...body }),
+    createSession: async function (body) { const s = { id: `standin-${++sessions}`, status: "open", created_at: new Date().toISOString(), cost_usd: 0, estimate: { low_usd: 0.4, high_usd: 1.2, model: "stand-in" }, ...body }; this.records[s.id] = s; return s; },
     step: async (id, body) => {
       calls.push({ id, stage: body.stage, messages: body.messages, tools: body.tools.map(t => t.name) });
       n[body.stage] = (n[body.stage] || 0) + 1;
@@ -96,7 +98,10 @@ export function standInTransport(script, { costPerStep = 0.05 } = {}) {
       total += costPerStep;
       return { content, stop_reason: content.some(b => b.type === "tool_use") ? "tool_use" : "end_turn", cost_usd: costPerStep, session_cost_usd: total, usage: { input_tokens: 1000, output_tokens: 100 } };
     },
-    update: async (id, body) => ({ id, ...body }),
+    records: {},
+    update: async function (id, body) { this.records[id] = { ...(this.records[id] || { id, created_at: new Date().toISOString(), status: "open", cost_usd: 0 }), ...body, cost_usd: total }; return this.records[id]; },
+    list: async function () { return Object.values(this.records); },
+    get: async function (id) { return this.records[id]; },
     addReference: async (id, body) => ({ n: 1, path: `stand-in/${id}/1.jpg`, name: body.name, data_url: body.data_url }),
   };
 }

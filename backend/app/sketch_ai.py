@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from .prompt_writer import API_VERSION, PRICES, cost_usd
+from .prompt_writer import API_VERSION, PRICES
 
 log = logging.getLogger("ollic.sketch_ai")
 
@@ -76,8 +76,20 @@ def estimate_usd(model: str, *, pictures: int, references: int, summary_kb: floa
 
 
 # ---------------------------------------------------------------- the client
+def step_cost(model: str, usage: dict | None) -> Decimal | None:
+    """Cost of one call: cached instructions are read at a tenth of the input price and written at 1.25 times it."""
+    prices = PRICES.get(model)
+    if not prices or not usage:
+        return None
+    pin, pout = (Decimal(p) for p in prices)
+    tin = Decimal(int(usage.get("input_tokens") or 0)) + Decimal(int(usage.get("cache_creation_input_tokens") or 0)) * Decimal("1.25") + Decimal(int(usage.get("cache_read_input_tokens") or 0)) * Decimal("0.1")
+    return ((tin * pin + Decimal(int(usage.get("output_tokens") or 0)) * pout) / Decimal(1_000_000)).quantize(Decimal("0.000001"))
+
+
 class ClaudeSketchAI:
-    def __init__(self, api_key: str, model: str, client: httpx.Client | None = None):
+    def __init__(self, api_key: str, model: str, client: httpx.Client | None = None, sleep=None):
+        import time
+        self._sleep = sleep or time.sleep
         self.model = model
         self._http = client or httpx.Client(base_url="https://api.anthropic.com", timeout=httpx.Timeout(240, connect=15))
         self._headers = {"x-api-key": api_key, "anthropic-version": API_VERSION, "content-type": "application/json"}
@@ -88,10 +100,14 @@ class ClaudeSketchAI:
             tools = [dict(t) for t in tools]
             tools[-1]["cache_control"] = {"type": "ephemeral"}
             body["tools"] = tools
-        try:
-            res = self._http.post("/v1/messages", json=body, headers=self._headers)
-        except httpx.HTTPError as exc:
-            raise SketchAIFailed(f"could not reach the assistant: {exc.__class__.__name__}") from exc
+        for attempt in range(3):  # busy or rate-limited: wait and try again, twice
+            try:
+                res = self._http.post("/v1/messages", json=body, headers=self._headers)
+            except httpx.HTTPError as exc:
+                raise SketchAIFailed(f"could not reach the assistant: {exc.__class__.__name__}") from exc
+            if res.status_code not in (429, 500, 529) or attempt == 2:
+                break
+            self._sleep(4 * (attempt + 1) ** 2)
         if res.status_code >= 400:
             try:
                 why = (res.json().get("error") or {}).get("message", "")[:200]
@@ -101,4 +117,4 @@ class ClaudeSketchAI:
             raise SketchAIFailed(f"assistant error {res.status_code}: {why}")
         p = res.json()
         usage = p.get("usage") or {}
-        return {"content": p.get("content", []), "stop_reason": p.get("stop_reason"), "usage": usage, "cost_usd": cost_usd(self.model, usage), "model": self.model}
+        return {"content": p.get("content", []), "stop_reason": p.get("stop_reason"), "usage": usage, "cost_usd": step_cost(self.model, usage), "model": self.model}
