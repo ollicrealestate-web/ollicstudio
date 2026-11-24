@@ -137,7 +137,10 @@ def fetch_vendor():
         meta = json.loads(get(f"https://registry.npmjs.org/{name}/{ver}"))
         tgz = tarfile.open(fileobj=io.BytesIO(get(meta["dist"]["tarball"])), mode="r:gz")
         for f in files:
-            m = tgz.extractfile("package/" + f)
+            try:
+                m = tgz.extractfile("package/" + f)
+            except KeyError:
+                m = None
             if m is None:
                 print("MISSING", spec, f); continue
             if name == "three":
