@@ -230,7 +230,7 @@ export function buildComponents3D(group, THREE, app, visible) {
     : new THREE.MeshStandardMaterial({ color: sel ? 0x3b82f6 : new THREE.Color(hex), roughness: 0.85, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   const edgeCol = style === "hidden" ? 0x111111 : style === "wire" ? 0xe8e8ec : 0x1b1b20;
   const add = (geo, c) => {
-    if (style !== "wire") { const m = new THREE.Mesh(geo, mat(matColor(app.matOf?.(c) ?? c.material ?? "#cccccc"), app.selection.has(c.id))); m.userData.id = c.id; m.castShadow = m.receiveShadow = style === "realistic"; group.add(m); }
+    if (style !== "wire") { const m = new THREE.Mesh(geo, mat(matColor(app.matOf?.(c) ?? c.material ?? "#cccccc"), app.selection.has(c.id))); m.userData.id = c.id; m.userData.mat = app.matOf?.(c) ?? c.material; m.castShadow = m.receiveShadow = style === "realistic"; group.add(m); }
     group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), new THREE.LineBasicMaterial({ color: app.selection.has(c.id) && style === "wire" ? 0x3b82f6 : edgeCol })));
   };
   for (const c of doc.components) {

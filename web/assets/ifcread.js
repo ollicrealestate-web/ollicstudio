@@ -12,7 +12,7 @@ import { PRODUCT_FAMILY } from "./ifctypes.js";
 
 const GUID_RE = /^[0-9A-Za-z_$]{22}$/;
 const MAX_ELEMENTS = 20000;
-const PSETS = new Set(["Pset_WallCommon", "Pset_DoorCommon", "Pset_WindowCommon", "Pset_SlabCommon", "Ollic_Layout", "Qto_SpaceBaseQuantities_Ollic"]);
+const PSETS = new Set(["Pset_WallCommon", "Pset_DoorCommon", "Pset_WindowCommon", "Pset_SlabCommon", "Ollic_Layout", "Qto_SpaceBaseQuantities_Ollic", "Pset_OllicSource"]);
 const DEFAULT_COLOURS = {
   IfcWall: [0.93, 0.92, 0.89, 1], IfcWallStandardCase: [0.93, 0.92, 0.89, 1], IfcSlab: [0.62, 0.61, 0.59, 1], IfcRoof: [0.36, 0.33, 0.32, 1],
   IfcDoor: [0.45, 0.3, 0.18, 1], IfcWindow: [0.55, 0.72, 0.85, 0.45], IfcSpace: [0.85, 0.85, 0.95, 0.15], IfcColumn: [0.7, 0.7, 0.7, 1],
@@ -155,13 +155,53 @@ function build(api, id, progress) {
     if (!out.length && v(m.Name)) out.push(String(v(m.Name)));
     return out;
   };
-  const matCache = new Map();
+  const matCache = new Map(), layerUse = new Map();
+  // a wall's layers in order, and which way they run, so each side of the wall gets the layer on that side
+  const layersOf = mid => {
+    const u = line(api, id, mid); if (!u?.ForLayerSet) return null;
+    const set = line(api, id, ref(u.ForLayerSet)), layers = [];
+    for (const x of set?.MaterialLayers || []) { const lay = line(api, id, ref(x)); const m = lay && line(api, id, ref(lay.Material)); layers.push({ name: m ? String(v(m.Name) || "") : "", t: Number(v(lay?.LayerThickness)) || 0 }); }
+    if (layers.length < 2 || layers.every(L => L.name === layers[0].name)) return null;
+    return { layers, positive: v(u.DirectionSense) !== "NEGATIVE", axis: v(u.LayerSetDirection) || "AXIS2" };
+  };
   for (const r of idsOf(api, id, W.IFCRELASSOCIATESMATERIAL)) {
     const l = line(api, id, r); if (!l) continue;
     const mid = ref(l.RelatingMaterial);
     if (!matCache.has(mid)) matCache.set(mid, [...new Set(namesOf(mid))].slice(0, 6));
-    for (const e of l.RelatedObjects || []) matNames.set(ref(e), matCache.get(mid));
+    const lu = layersOf(mid);
+    for (const e of l.RelatedObjects || []) { matNames.set(ref(e), matCache.get(mid)); if (lu) layerUse.set(ref(e), lu); }
   }
+  // surface styles: the name of each shape's style (Revit and Ollic name them after the material), and each material's own colour
+  const styleName = new Map(), matColour = new Map();
+  const surfaceStyles = st => {
+    const out = [];
+    for (const s of st || []) {
+      const x = line(api, id, ref(s)); if (!x) continue;
+      if (x.Styles && !x.Side) { for (const y of x.Styles) { const z = line(api, id, ref(y)); if (z?.Side !== undefined) out.push(z); } }   // IFC2X3 style assignment
+      else if (x.Side !== undefined) out.push(x);
+    }
+    return out;
+  };
+  const colourOf = ss => { for (const el of ss.Styles || []) { const r = line(api, id, ref(el)); const c = r?.SurfaceColour && line(api, id, ref(r.SurfaceColour)); if (c) return [Number(v(c.Red)), Number(v(c.Green)), Number(v(c.Blue)), 1 - (Number(v(r.Transparency)) || 0)]; } return null; };
+  for (const si of idsOf(api, id, W.IFCSTYLEDITEM)) {
+    const l = line(api, id, si); if (!l) continue;
+    const name = surfaceStyles(l.Styles).map(ss => v(ss.Name)).find(Boolean);
+    if (l.Item && name) styleName.set(ref(l.Item), String(name));
+  }
+  for (const r of idsOf(api, id, W.IFCMATERIALDEFINITIONREPRESENTATION)) {
+    const l = line(api, id, r); const m = l && line(api, id, ref(l.RepresentedMaterial)); if (!m || !v(m.Name)) continue;
+    for (const rep of l.Representations || []) for (const it of line(api, id, ref(rep))?.Items || []) {
+      const st = line(api, id, ref(it)); const ss = surfaceStyles(st?.Styles)[0]; const c = ss && colourOf(ss);
+      if (c) matColour.set(String(v(m.Name)), c);
+    }
+  }
+  /** The material name of a part: its shape's style name, else the element's material with the same colour. */
+  const partName = (styled, rgba, names) => {
+    if (styled) return styled;
+    let best = null, d0 = 0.08;
+    for (const n of names) { const c = matColour.get(n); if (!c) continue; const d = Math.abs(c[0] - rgba[0]) + Math.abs(c[1] - rgba[1]) + Math.abs(c[2] - rgba[2]) + Math.abs(c[3] - rgba[3]); if (d < d0) { d0 = d; best = n; } }
+    return best || (names.length === 1 ? names[0] : null);
+  };
 
   const comps = new Map();   // eid -> component
   const ids = [];
@@ -175,7 +215,7 @@ function build(api, id, progress) {
     const mats = matNames.get(p.eid) || [];
     const pr = props.get(p.eid) || {};
     if (mats.length) pr["Ollic.Materials"] = mats.join("; ").slice(0, 400);
-    comps.set(p.eid, { global_id: gid, ifc_type: p.type, name: (v(l.Name) || "").slice(0, 200) || null, family: p.family, storey: storeyOf(p.eid),
+    comps.set(p.eid, { global_id: gid, ifc_type: p.type, name: (v(l.Name) || "").slice(0, 200) || null, tag: v(l.Tag) ? String(v(l.Tag)).slice(0, 60) : null, family: p.family, storey: storeyOf(p.eid),
       has_geometry: false, properties: pr, predefined: pre, materials: mats });
   }
   const seen = new Map(); ids.forEach(g => seen.set(g, (seen.get(g) || 0) + 1));
@@ -204,15 +244,18 @@ function build(api, id, progress) {
       const g = api.GetGeometry(id, pg.geometryExpressID);
       const vd = api.GetVertexArray(g.GetVertexData(), g.GetVertexDataSize());
       const ix = api.GetIndexArray(g.GetIndexData(), g.GetIndexDataSize());
-      const c = pg.color, key = [c.x, c.y, c.z, c.w].map(x => Math.round(x * 1000) / 1000).join(",");
-      if (!groups.has(key)) groups.set(key, { rgba: key.split(",").map(Number), list: [], n: 0 });
+      const c = pg.color, rgbaKey = [c.x, c.y, c.z, c.w].map(x => Math.round(x * 1000) / 1000).join(","), sname = styleName.get(pg.geometryExpressID) || null;
+      const key = rgbaKey + "|" + (sname || "");
+      if (!groups.has(key)) groups.set(key, { rgba: rgbaKey.split(",").map(Number), sname, list: [], n: 0 });
       const gr = groups.get(key); gr.list.push({ vd: vd.slice(), ix: ix.slice(), m: pg.flatTransformation.slice() }); gr.n += ix.length;
       g.delete();
     }
     const comp = comps.get(mesh.expressID);
-    const out = [];
+    const out = [], lu = layerUse.get(mesh.expressID), names = comp?.materials || [];
     for (const gr of groups.values()) {
       if (!gr.n) continue;
+      // a layered wall drawn as one shape: its two faces get the layers on their sides, the rest (ends, top) its thickest layer
+      if (lu && groups.size === 1 && !gr.sname) { out.push(...splitLayers(gr, lu, comp, lo, hi)); continue; }
       const pos = new Float32Array(gr.n * 3);
       let o = 0;
       for (const { vd, ix, m } of gr.list) {
@@ -224,7 +267,8 @@ function build(api, id, progress) {
           if (X > hi[0]) hi[0] = X; if (Y > hi[1]) hi[1] = Y; if (Z > hi[2]) hi[2] = Z;
         }
       }
-      out.push({ pos, rgba: gr.rgba, cls: materialClass(comp?.ifc_type, comp?.materials || [], gr.rgba, groups.size) });
+      const pname = partName(gr.sname, gr.rgba, names);
+      out.push({ pos, rgba: gr.rgba, name: pname, cls: materialClass(comp?.ifc_type, pname ? [pname] : names, gr.rgba, groups.size) });
     }
     if (out.length) { meshes.push({ eid: mesh.expressID, parts: out }); if (comp) comp.has_geometry = true; }
     if (index % 50 === 0) progress(`Building the 3D geometry (${index + 1} of ${total})`, 0.15 + 0.7 * (index + 1) / Math.max(1, total));
@@ -246,12 +290,40 @@ function build(api, id, progress) {
   progress("Writing the 3D model", 0.9);
   const centre = [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2];
   const glb = writeGlb(meshes, comps, centre);
-  const components = [...comps.values()].map(({ predefined, materials, ...c }) => c);
+  const components = [...comps.values()].map(({ predefined, materials, tag, ...c }) => c);
   const status = checks.some(c => c.status === "fail") ? "fail" : checks.some(c => c.status === "warn") ? "warn" : "pass";
   const report = { status, schema, units: UNIT_NAMES[scale] || `${scale} m per unit`, checks, counts, families, storeys: storeys.map(s => s.name),
     size_m: size.map(x => Math.round(x * 100) / 100), elements: products.length, with_geometry: meshes.length, read_on: "browser" };
   void noGeom;
   return { glb, report, components, stats: { elements: products.length, with_geometry: meshes.length, glb_bytes: glb.byteLength, mep } };
+}
+
+/**
+ * Splits one layered wall's triangles by the side they face: along the layer direction (the wall's local Y), the
+ * low side is the first layer and the high side the last (reversed when the direction is negative).
+ */
+function splitLayers(gr, lu, comp, lo, hi) {
+  const sides = [[], [], []];   // first layer, last layer, the rest
+  let axis = null;
+  for (const { vd, ix, m } of gr.list) {
+    const ay = [m[4], m[5], m[6]], L = Math.hypot(...ay) || 1, Y = ay.map(x => x / L);
+    axis = axis || Y;
+    const P = k => { const b = ix[k] * 6, x = vd[b], y = vd[b + 1], z = vd[b + 2]; return [m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]]; };
+    for (let k = 0; k + 2 < ix.length; k += 3) {
+      const a = P(k), b = P(k + 1), c = P(k + 2);
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]], nl = Math.hypot(...n) || 1;
+      const d = (n[0] * Y[0] + n[1] * Y[1] + n[2] * Y[2]) / nl;
+      const side = d < -0.7 ? (lu.positive ? 0 : 1) : d > 0.7 ? (lu.positive ? 1 : 0) : 2;
+      for (const p of [a, b, c]) { sides[side].push(...p); for (let q = 0; q < 3; q++) { if (p[q] < lo[q]) lo[q] = p[q]; if (p[q] > hi[q]) hi[q] = p[q]; } }
+    }
+  }
+  const core = lu.layers.reduce((x, y) => (y.t > x.t ? y : x)).name;
+  const names = [lu.layers[0].name, lu.layers.at(-1).name, core];
+  const out = [];
+  sides.forEach((arr, i) => { if (arr.length) out.push({ pos: new Float32Array(arr), rgba: gr.rgba, name: names[i] || null, cls: materialClass(comp?.ifc_type, names[i] ? [names[i]] : [], gr.rgba, 1) }); });
+  void axis;
+  return out;
 }
 
 function writeGlb(meshes, comps, centre) {
@@ -267,12 +339,12 @@ function writeGlb(meshes, comps, centre) {
       let rgba = q.rgba && q.rgba.length === 4 ? q.rgba : DEFAULT_COLOURS[c.ifc_type] || [0.8, 0.8, 0.8, 1];
       if (c.ifc_type === "IfcSpace") rgba = [rgba[0], rgba[1], rgba[2], Math.min(rgba[3], 0.15)];
       rgba = rgba.map(x => Math.round(x * 1e4) / 1e4);
-      const key = `${q.cls}|${rgba.join(",")}`;
+      const key = `${q.cls}|${rgba.join(",")}|${q.name || ""}`;
       if (!matIndex.has(key)) {
         matIndex.set(key, materials.length);
         // the material's name carries its class (glass, metal, brick...) for the viewer's realistic look
         materials.push({ name: `ollic:${q.cls}`, pbrMetallicRoughness: { baseColorFactor: rgba, metallicFactor: q.cls === "metal" ? 0.8 : 0, roughnessFactor: q.cls === "glass" ? 0.05 : 0.85 },
-          alphaMode: rgba[3] < 0.99 ? "BLEND" : "OPAQUE", doubleSided: true });
+          alphaMode: rgba[3] < 0.99 ? "BLEND" : "OPAQUE", doubleSided: true, ...(q.name ? { extras: { ifcName: q.name } } : {}) });
       }
       const p = q.pos, mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
       for (let k = 0; k < p.length; k += 3) {
@@ -288,8 +360,8 @@ function writeGlb(meshes, comps, centre) {
     }
     glMeshes.push({ name: c.global_id, primitives: prims });
     nodes.push({ name: c.global_id, mesh: glMeshes.length - 1,
-      extras: { globalId: c.global_id, ifcType: c.ifc_type, name: c.name, storey: c.storey, family: c.family, predefined: c.predefined ?? null,
-        materials: (c.materials || []).slice(0, 4) } });
+      extras: { globalId: c.global_id, ifcType: c.ifc_type, name: c.name, tag: c.tag ?? null, storey: c.storey, family: c.family, predefined: c.predefined ?? null,
+        materials: (c.materials || []).slice(0, 4), ...(c.properties?.["Pset_OllicSource.Material"] ? { ollicMaterial: c.properties["Pset_OllicSource.Material"] } : {}) } });
   }
   const doc = { asset: { version: "2.0", generator: "Ollic Design Studio (read in the browser)" }, scene: 0, scenes: [{ nodes: nodes.map((_, i) => i) }],
     nodes, meshes: glMeshes, materials, accessors, bufferViews: views, buffers: [{ byteLength: offset }] };

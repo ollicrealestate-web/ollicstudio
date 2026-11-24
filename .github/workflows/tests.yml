@@ -20,6 +20,7 @@ jobs:
           npm i --no-save --no-package-lock playwright@1.48.2
           npx playwright install --with-deps chromium > /dev/null
           for f in tests/sketch/e2e_*.mjs; do node "$f" out/sketch || exit 1; done
+          for f in tests/studio/e2e_*.mjs; do node "$f" out/studio || exit 1; done
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -40,6 +41,7 @@ jobs:
             out/sketch/*.dxf
             out/sketch/*.glb
             out/sketch/*.ifc
+            out/studio/*.png
 
   backend:
     name: API and studio browser tests

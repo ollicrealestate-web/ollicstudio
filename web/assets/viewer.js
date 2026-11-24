@@ -17,6 +17,8 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
+import { matchMaterial } from "./materials/match.js";
+import { materialById } from "./materials/library.js";
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
 const SOLID_FOR_WALKING = new Set(["IfcWall", "IfcWallStandardCase", "IfcColumn", "IfcCurtainWall", "IfcRailing", "IfcWindow", "IfcPlate", "IfcMember", "IfcBuildingElementProxy", "IfcStair", "IfcStairFlight", "IfcFurnishingElement", "IfcFurniture"]);
@@ -122,8 +124,15 @@ export function createViewer(host, { onSelect } = {}) {
       // older 3D files from Ollic leave normals out (each triangle has its own corners), so they are made here
       if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
       const src = o.material, named = /^ollic:(\w+)/.exec(src?.name || "");
-      const cls = named ? named[1] : guessClass(x.ifcType, src?.opacity ?? 1);
-      const look = lookFor(cls, src?.color || new THREE.Color("#cccccc"), src?.opacity ?? 1);
+      const opacity = src?.opacity ?? 1, srcColor = src?.color || new THREE.Color("#cccccc");
+      // which library material this part is: from the IFC's material names, else its class and colour
+      const srgb = srcColor.clone().convertLinearToSRGB();
+      const mat = matchMaterial({ name: src?.userData?.ifcName, names: x.materials || [], ollic: x.ollicMaterial, cls: named ? named[1] : guessClass(x.ifcType, opacity),
+        rgba: [srgb.r, srgb.g, srgb.b, opacity], parts: o.parent?.children?.filter(c => c.isMesh).length || 1 });
+      const lib = materialById(mat.id);
+      const cls = lib?.cls || (named ? named[1] : guessClass(x.ifcType, opacity));
+      o.userData.mat = mat;
+      const look = lookFor(cls, srcColor, opacity);
       if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres);
       o.material = look;
       o.userData.cls = cls;
@@ -881,6 +890,15 @@ export function createViewer(host, { onSelect } = {}) {
       }
     },
     guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
+    /** Every part with its library material (for tests and the Materials panel): type, name, material, how, mean normal. */
+    debugParts() {
+      return elements.map(e => {
+        const n = e.geometry.attributes.normal, s = [0, 0, 0];
+        for (let i = 0; i < n.count; i++) { s[0] += n.getX(i); s[1] += n.getY(i); s[2] += n.getZ(i); }
+        const L = Math.hypot(...s) || 1;
+        return { type: e.userData.ifcType, name: e.userData.name, pre: e.userData.predefined, tag: e.userData.tag, mat: e.userData.mat?.id, how: e.userData.mat?.how, ifcName: e.userData.mat?.ifcName, seeThrough: (e.userData.mat && e.material.transparent) || false, n: s.map(x => x / L) };
+      });
+    },
     get facts() {
       const b = frameBox, size = b.getSize(new THREE.Vector3());
       return { storeys: storeys.slice(), rooms: rooms().map(r => r.name), width_m: +size.x.toFixed(1), depth_m: +size.z.toFixed(1), height_m: +size.y.toFixed(1) };

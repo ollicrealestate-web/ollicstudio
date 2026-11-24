@@ -341,7 +341,7 @@ export function buildRoofs3D(group, THREE, app, visible) {
       const colour = sel ? 0x3b82f6 : new THREE.Color((app.matOf?.(r) ?? r.material) ? matColor(app.matOf?.(r) ?? r.material) : R.roofType(doc, r).color || "#5b6168").getHex();
       const opts = { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 };
       const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: 0xf2f2f2, ...opts }) : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, ...opts }) : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.8, flatShading: true, ...opts });
-      const mesh = new THREE.Mesh(geo, mat); mesh.userData.id = r.id; mesh.castShadow = mesh.receiveShadow = style === "realistic"; group.add(mesh);
+      const mesh = new THREE.Mesh(geo, mat); mesh.userData.id = r.id; mesh.userData.mat = app.matOf?.(r) ?? r.material; mesh.castShadow = mesh.receiveShadow = style === "realistic"; group.add(mesh);
     }
     const ep = []; for (const [a, b] of m.edges) ep.push(...V(a), ...V(b));
     const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.Float32BufferAttribute(ep, 3));

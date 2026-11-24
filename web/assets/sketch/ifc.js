@@ -69,9 +69,10 @@ export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = 
 
   // ---- colours, shared between elements
   const styles = new Map();
-  const styleFor = (rgb, alpha) => {
-    const k = rgb.map(v => v.toFixed(3)).join(",") + "|" + alpha.toFixed(2);
-    if (!styles.has(k)) { const c = add(`IFCCOLOURRGB($,${rgb.map(num).join(",")})`), sh = add(`IFCSURFACESTYLESHADING(${c},${num(1 - alpha)})`); styles.set(k, add(`IFCSURFACESTYLE($,.BOTH.,(${sh}))`)); }
+  // a surface style is named after its material (as Revit names them), so readers know what each face is made of
+  const styleFor = (rgb, alpha, mat) => {
+    const k = rgb.map(v => v.toFixed(3)).join(",") + "|" + alpha.toFixed(2) + "|" + (mat || "");
+    if (!styles.has(k)) { const c = add(`IFCCOLOURRGB($,${rgb.map(num).join(",")})`), sh = add(`IFCSURFACESTYLERENDERING(${c},${num(1 - alpha)},$,$,$,$,$,$,.NOTDEFINED.)`); styles.set(k, add(`IFCSURFACESTYLE(${mat ? ifcText(matName(mat)) : "$"},.BOTH.,(${sh}))`)); }
     return styles.get(k);
   };
 
@@ -79,9 +80,9 @@ export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = 
   const counts = {}, mats = new Map();
   const level = (lid) => storeys.get(lid) || storeys.get(levels[0].id);
   const elementOf = eid => {
-    const w = doc.walls.find(x => x.id === eid); if (w) return { cls: "IFCWALL", name: (doc.wallTypes.find(t => t.id === w.typeId)?.name) || "Wall", lid: w.baseLevelId, pre: ".STANDARD." };
-    const f = doc.floors.find(x => x.id === eid); if (f) return { cls: "IFCSLAB", name: (doc.floorTypes.find(t => t.id === f.typeId)?.name) || "Floor", lid: f.levelId, pre: ".FLOOR." };
-    const r = doc.roofs.find(x => x.id === eid); if (r) return { cls: "IFCROOF", name: (doc.roofTypes.find(t => t.id === r.typeId)?.name) || "Roof", lid: r.baseLevelId, pre: ".NOTDEFINED." };
+    const w = doc.walls.find(x => x.id === eid); if (w) return { cls: "IFCWALL", name: (doc.wallTypes.find(t => t.id === w.typeId)?.name) || "Wall", lid: w.baseLevelId, pre: ".STANDARD.", material: w.material };
+    const f = doc.floors.find(x => x.id === eid); if (f) return { cls: "IFCSLAB", name: (doc.floorTypes.find(t => t.id === f.typeId)?.name) || "Floor", lid: f.levelId, pre: ".FLOOR.", material: f.material };
+    const r = doc.roofs.find(x => x.id === eid); if (r) return { cls: "IFCROOF", name: (doc.roofTypes.find(t => t.id === r.typeId)?.name) || "Roof", lid: r.baseLevelId, pre: ".NOTDEFINED.", material: r.material };
     const o = doc.openings.find(x => x.id === eid);
     if (o) { const host = doc.walls.find(x => x.id === o.hostWallId), t = (o.kind === "door" ? doc.doorTypes : doc.windowTypes).find(x => x.id === o.typeId) || {}; return { cls: o.kind === "door" ? "IFCDOOR" : "IFCWINDOW", name: t.name || (o.kind === "door" ? "Door" : "Window"), lid: host?.baseLevelId, w: t.width, h: t.height, mark: typeMark(o) }; }
     const dt = (doc.details || []).find(x => x.id === eid);
@@ -103,7 +104,7 @@ export function modelIfc(app, THREE, { name = "Sketch", typeMark = () => "" } = 
       if (!tris.length) continue;
       const pl = add(`IFCCARTESIANPOINTLIST3D((${pts.join(",")}))`);
       const fs = add(`IFCTRIANGULATEDFACESET(${pl},$,$,(${tris.join(",")}),$)`);
-      add(`IFCSTYLEDITEM(${fs},(${styleFor(part.rgb, part.alpha)}),$)`);
+      add(`IFCSTYLEDITEM(${fs},(${styleFor(part.rgb, part.alpha, part.mat)}),$)`);
       items.push(fs);
     }
     if (!items.length) continue;
@@ -147,8 +148,9 @@ function collectMeshes(root, THREE) {
     const P = k => { v.fromBufferAttribute(pos, k).applyMatrix4(o.matrixWorld); return [v.x * 1000, -v.z * 1000, v.y * 1000]; };
     const n = idx ? idx.count : pos.count, at = k => (idx ? idx.getX(k) : k);
     if (!out.has(o.userData.id)) out.set(o.userData.id, []);
-    const parts = out.get(o.userData.id), key = rgb.map(x => x.toFixed(3)).join(",") + alpha;
-    let part = parts.find(p => p.key === key); if (!part) { part = { key, rgb, alpha, tris: [] }; parts.push(part); }
+    const mat = typeof o.userData.mat === "string" && !o.userData.mat.startsWith("#") ? o.userData.mat : null;   // a library material
+    const parts = out.get(o.userData.id), key = rgb.map(x => x.toFixed(3)).join(",") + alpha + (mat || "");
+    let part = parts.find(p => p.key === key); if (!part) { part = { key, rgb, alpha, mat, tris: [] }; parts.push(part); }
     // keep the faces facing out of the solid as three.js does (counter-clockwise from outside), mirrored or not
     const flip = o.matrixWorld.determinant() < 0;
     for (let k = 0; k + 2 < n; k += 3) { const a = P(at(k)), b = P(at(k + 1)), c = P(at(k + 2)); part.tris.push(flip ? [a, c, b] : [a, b, c]); }

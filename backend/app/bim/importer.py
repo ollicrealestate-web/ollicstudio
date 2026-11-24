@@ -201,8 +201,17 @@ def import_ifc(data: bytes | str, progress=lambda stage: None) -> ImportResult:
         psets = ifcopenshell.util.element.get_psets(p, psets_only=True)
         props = {f"{ps}.{k}": _jsonable(v) for ps, vals in psets.items() if ps in ("Pset_WallCommon", "Pset_DoorCommon", "Pset_WindowCommon", "Pset_SlabCommon", "Ollic_Layout", "Qto_SpaceBaseQuantities_Ollic")
                  for k, v in vals.items() if k != "id"}
+        try:
+            mat_names = [m.Name for m in ifcopenshell.util.element.get_materials(p) if getattr(m, "Name", None)][:6]
+        except Exception:
+            mat_names = []
+        if mat_names:
+            props["Ollic.Materials"] = "; ".join(mat_names)[:400]
+        ollic_mat = (psets.get("Pset_OllicSource") or {}).get("Material")
+        if ollic_mat:
+            props["Pset_OllicSource.Material"] = _jsonable(ollic_mat)
         components.append({
-            "global_id": p.GlobalId, "ifc_type": p.is_a(), "name": (p.Name or "")[:200] or None, "family": family_of(p),
+            "global_id": p.GlobalId, "ifc_type": p.is_a(), "name": (p.Name or "")[:200] or None, "family": family_of(p), "_materials": mat_names,
             "storey": (storey.Name if storey is not None and storey.is_a("IfcBuildingStorey") else None),
             "has_geometry": p.GlobalId in with_geometry, "properties": props,
         })
@@ -214,6 +223,8 @@ def import_ifc(data: bytes | str, progress=lambda stage: None) -> ImportResult:
             kinds[p.GlobalId] = None
     n_elements, n_geometry = len(products), len(meshes)
     comps = {c["global_id"]: {**c, "predefined": kinds.get(c["global_id"])} for c in components}
+    for c in components:
+        c.pop("_materials", None)
     storey_names = [s.Name for s in storeys]
     # the IFC itself is no longer needed: free it before the 3D file is written
     del f, it, products, spaces, storeys, settings
@@ -233,34 +244,58 @@ def import_ifc(data: bytes | str, progress=lambda stage: None) -> ImportResult:
 
 class _Mesh:
     """One element's triangles, kept small: float32 corners and uint32 corner numbers."""
-    __slots__ = ("verts", "faces", "rgba", "ifc_type")
+    __slots__ = ("verts", "faces", "rgba", "ifc_type", "parts")
 
-    def __init__(self, verts, faces, rgba, ifc_type):
+    def __init__(self, verts, faces, rgba, ifc_type, parts=None):
         self.verts, self.faces, self.rgba, self.ifc_type = verts, faces, rgba, ifc_type
+        self.parts = parts or [(faces, rgba, None)]   # (faces, rgba, material name) per part
 
     @property
     def bounds(self):
         return np.array([self.verts.min(axis=0), self.verts.max(axis=0)])
 
 
+_UNNAMED = re.compile(r"^(ifc)?(surface[-_ ]?style|style|material|surfacestyle)[-_ #]?\d*$", re.I)
+
+
+def _rgba(m):
+    try:
+        d = m.diffuse
+        r, gg, b = (d.r(), d.g(), d.b()) if callable(getattr(d, "r", None)) else tuple(d)[:3]
+        t = float(getattr(m, "transparency", 0.0) or 0.0)
+        return (r, gg, b, 1 - t if t == t else 1.0)
+    except Exception:
+        return None
+
+
+def _style_name(m) -> str | None:
+    """The name of a surface style (Revit and Ollic name them after the material); None for made-up names."""
+    n = getattr(m, "name", None)
+    n = n() if callable(n) else n
+    n = str(n or "").strip()
+    return n[:120] if n and not _UNNAMED.match(n) else None
+
+
 def _to_mesh(shape) -> _Mesh:
+    """An element's triangles, split into parts by the material (surface style) of each face."""
     g = shape.geometry
     v = np.asarray(g.verts, dtype=np.float32).reshape(-1, 3)
     fc = np.asarray(g.faces, dtype=np.uint32).reshape(-1, 3)
     if not len(v) or not len(fc):
         raise ValueError("empty geometry")
-    rgba = None
     mats = list(g.materials)
-    if mats:
-        m = mats[0]
-        try:
-            d = m.diffuse
-            r, gg, b = (d.r(), d.g(), d.b()) if callable(getattr(d, "r", None)) else tuple(d)[:3]
-            t = float(getattr(m, "transparency", 0.0) or 0.0)
-            rgba = (r, gg, b, 1 - t if t == t else 1.0)
-        except Exception:
-            rgba = None
-    return _Mesh(v, fc, rgba, shape.type)
+    try:
+        ids = np.asarray(list(g.material_ids), dtype=np.int64) if mats else np.zeros(0, dtype=np.int64)
+    except Exception:
+        ids = np.zeros(0, dtype=np.int64)
+    parts = []
+    if mats and len(ids) == len(fc):
+        for k in np.unique(ids):
+            m = mats[int(k)] if 0 <= int(k) < len(mats) else None
+            parts.append((fc[ids == k], _rgba(m) if m is not None else None, _style_name(m) if m is not None else None))
+    else:
+        parts.append((fc, _rgba(mats[0]) if mats else None, _style_name(mats[0]) if mats else None))
+    return _Mesh(v, fc, parts[0][1], shape.type, parts)
 
 
 def _glb(meshes: dict[str, _Mesh], comps: dict[str, dict], lo, hi) -> bytes:
@@ -283,14 +318,6 @@ def _glb(meshes: dict[str, _Mesh], comps: dict[str, dict], lo, hi) -> bytes:
 
     for gid, m in meshes.items():
         c = comps.get(gid, {})
-        rgba = m.rgba or DEFAULT_COLOURS.get(c.get("ifc_type"), (0.8, 0.8, 0.8, 1))
-        if c.get("ifc_type") == "IfcSpace":
-            rgba = (rgba[0], rgba[1], rgba[2], min(rgba[3], 0.15))
-        rgba = tuple(round(float(x), 4) for x in rgba)
-        if rgba not in mat_index:
-            mat_index[rgba] = len(materials)
-            materials.append({"pbrMetallicRoughness": {"baseColorFactor": list(rgba), "metallicFactor": 0.0, "roughnessFactor": 0.85},
-                              "alphaMode": "BLEND" if rgba[3] < 0.99 else "OPAQUE", "doubleSided": True})
         # IFC is z-up; glTF is y-up: (x, y, z) -> (x - cx, z - cz, -(y - cy))
         v = np.empty_like(m.verts)
         v[:, 0] = m.verts[:, 0] - cx
@@ -299,11 +326,30 @@ def _glb(meshes: dict[str, _Mesh], comps: dict[str, dict], lo, hi) -> bytes:
         pos = len(accessors)
         accessors.append({"bufferView": add(v, 34962), "componentType": 5126, "count": int(len(v)), "type": "VEC3",
                           "min": [float(x) for x in v.min(axis=0)], "max": [float(x) for x in v.max(axis=0)]})
-        idx = m.faces.ravel().astype(np.uint16) if len(v) < 65536 else m.faces.ravel()
-        accessors.append({"bufferView": add(idx, 34963), "componentType": 5123 if idx.dtype == np.uint16 else 5125, "count": int(idx.size), "type": "SCALAR"})
-        gl_meshes.append({"name": gid, "primitives": [{"attributes": {"POSITION": pos}, "indices": pos + 1, "material": mat_index[rgba]}]})
+        prims = []
+        for faces, part_rgba, part_name in m.parts:
+            rgba = part_rgba or DEFAULT_COLOURS.get(c.get("ifc_type"), (0.8, 0.8, 0.8, 1))
+            if c.get("ifc_type") == "IfcSpace":
+                rgba = (rgba[0], rgba[1], rgba[2], min(rgba[3], 0.15))
+            rgba = tuple(round(float(x), 4) for x in rgba)
+            key = (rgba, part_name)
+            if key not in mat_index:
+                mat_index[key] = len(materials)
+                mat = {"pbrMetallicRoughness": {"baseColorFactor": list(rgba), "metallicFactor": 0.0, "roughnessFactor": 0.85},
+                       "alphaMode": "BLEND" if rgba[3] < 0.99 else "OPAQUE", "doubleSided": True}
+                if part_name:
+                    mat["extras"] = {"ifcName": part_name}   # the viewer matches it to the Ollic material library
+                materials.append(mat)
+            idx = faces.ravel().astype(np.uint16) if len(v) < 65536 else faces.ravel()
+            accessors.append({"bufferView": add(idx, 34963), "componentType": 5123 if idx.dtype == np.uint16 else 5125, "count": int(idx.size), "type": "SCALAR"})
+            prims.append({"attributes": {"POSITION": pos}, "indices": len(accessors) - 1, "material": mat_index[key]})
+        gl_meshes.append({"name": gid, "primitives": prims})
         extras = {"globalId": gid, "ifcType": c.get("ifc_type"), "name": c.get("name"), "storey": c.get("storey"), "family": c.get("family"),
                   "predefined": c.get("predefined")}
+        if c.get("_materials"):
+            extras["materials"] = c["_materials"][:4]
+        if (c.get("properties") or {}).get("Pset_OllicSource.Material"):
+            extras["ollicMaterial"] = c["properties"]["Pset_OllicSource.Material"]
         nodes.append({"name": gid, "mesh": len(gl_meshes) - 1, "extras": extras})
     doc = {"asset": {"version": "2.0", "generator": "Ollic Design Studio"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}],
            "nodes": nodes, "meshes": gl_meshes, "materials": materials, "accessors": accessors, "bufferViews": views,
