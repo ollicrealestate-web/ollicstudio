@@ -68,6 +68,12 @@ class Repository(Protocol):
     def update_sketch(self, user: CurrentUser, sketch_id: str, fields: dict) -> dict | None: ...
     def delete_sketch(self, user: CurrentUser, sketch_id: str) -> bool: ...
     def list_usage_events(self, user: CurrentUser, limit: int = 100) -> list[dict]: ...
+    # Ollic AI in Sketch
+    def create_ai_session(self, user: CurrentUser, record: dict) -> dict: ...
+    def get_ai_session(self, user: CurrentUser, session_id: str) -> dict | None: ...
+    def list_ai_sessions(self, user: CurrentUser) -> list[dict]: ...
+    def update_ai_session(self, user: CurrentUser, session_id: str, fields: dict) -> dict | None: ...
+    def create_ai_call(self, user: CurrentUser, record: dict) -> dict: ...
 
 
 class FileStorage(Protocol):
@@ -151,6 +157,24 @@ class SupabaseRepository:
     def delete_sketch(self, user, sketch_id):
         rows = self._call("DELETE", "/sketch_projects", user, params={"id": _eq(sketch_id), "owner_id": _eq(user.id)}, prefer="return=representation")
         return bool(rows)
+
+    # ------------------------------------------------------------ Ollic AI in Sketch
+    def create_ai_session(self, user, record):
+        return self._call("POST", "/sketch_ai_sessions", user, json={**record, "owner_id": user.id}, prefer="return=representation")[0]
+
+    def get_ai_session(self, user, session_id):
+        rows = self._call("GET", "/sketch_ai_sessions", user, params={"select": "*", "id": _eq(session_id), "owner_id": _eq(user.id)})
+        return rows[0] if rows else None
+
+    def list_ai_sessions(self, user):
+        return self._call("GET", "/sketch_ai_sessions", user, params={"select": "id,owner_id,sketch_id,status,stage,detail,cost_usd,estimate_usd,created_at,updated_at", "owner_id": _eq(user.id), "order": "created_at.desc", "limit": "50"})
+
+    def update_ai_session(self, user, session_id, fields):
+        rows = self._call("PATCH", "/sketch_ai_sessions", user, params={"id": _eq(session_id), "owner_id": _eq(user.id)}, json=fields, prefer="return=representation")
+        return rows[0] if rows else None
+
+    def create_ai_call(self, user, record):
+        return self._call("POST", "/sketch_ai_calls", user, json={**record, "owner_id": user.id}, prefer="return=representation")[0]
 
     # ------------------------------------------------------------ Phase 2: jobs, renders, usage
     def _insert(self, table, user, record):

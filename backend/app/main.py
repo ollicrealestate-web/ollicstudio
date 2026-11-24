@@ -24,13 +24,14 @@ from .runway import RunwayVideo
 from .prompt_writer import ClaudePromptWriter
 from .vision import CloudflareVision
 from .routes import animation, cinematic, films, look, models, projects, renders, sketches, videos
+from .routes import sketch_ai as sketch_ai_routes
 from .supabase import BackendUnavailable, SupabaseRepository, SupabaseStorage
 
 log = logging.getLogger("ollic")
 
 
 def create_app(settings: Settings | None = None, *, repo=None, storage=None, verifier=None, image_client=None, image_clients=None,
-               runner=None, vision="auto", prompt_writer="auto", kling="auto", gemini="auto", fal="auto", runway="auto", aps="auto") -> FastAPI:
+               runner=None, vision="auto", prompt_writer="auto", sketch_ai="auto", kling="auto", gemini="auto", fal="auto", runway="auto", aps="auto") -> FastAPI:
     settings = settings or Settings.from_env()
     app = FastAPI(title="Ollic Design Studio API", version="0.1.0")
     app.state.settings = settings
@@ -53,6 +54,11 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     if prompt_writer == "auto":
         prompt_writer = ClaudePromptWriter(settings.anthropic_api_key, settings.premium_prompt_model) if settings.anthropic_api_key else None
     app.state.prompt_writer = prompt_writer
+    # Ollic AI in Sketch; None means "Complete my design" says it is not set up. Tests pass a stand-in.
+    if sketch_ai == "auto":
+        from .sketch_ai import ClaudeSketchAI
+        sketch_ai = ClaudeSketchAI(settings.anthropic_api_key, settings.claude_model) if settings.anthropic_api_key else None
+    app.state.sketch_ai = sketch_ai
     # direct connections: Kling for cinematic clips, Google Gemini (Nano Banana) for line drawings
     if kling == "auto":
         kling = KlingVideo(settings.kling_api_key, settings.kling_base_url, settings.kling_model) if settings.kling_api_key else None
@@ -117,6 +123,7 @@ def create_app(settings: Settings | None = None, *, repo=None, storage=None, ver
     app.include_router(animation.router, prefix="/api")
     app.include_router(cinematic.router, prefix="/api")
     app.include_router(sketches.router, prefix="/api")
+    app.include_router(sketch_ai_routes.router, prefix="/api")
 
     # The website's public settings come from the server's environment, so keys are
     # entered once (e.g. in Railway's variables). Only public values are sent: the
