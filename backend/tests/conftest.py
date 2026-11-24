@@ -41,9 +41,39 @@ class FakeRepo:
         self.shots: dict[str, dict] = {}
         self.videos: dict[str, dict] = {}
         self.sketches: dict[str, dict] = {}
+        self.ai_sessions: dict[str, dict] = {}
+        self.ai_calls: list[dict] = []
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
+
+    # Ollic AI in Sketch
+    def create_ai_session(self, user, record):
+        row = {"id": str(uuid.uuid4()), "status": "open", "stage": "start", "scope": {}, "chat": [], "refs": [], "plan": [], "log": [], "report": None, "summary": None,
+               "input_tokens": 0, "output_tokens": 0, "cost_usd": "0", **record, "owner_id": user.id, "created_at": self._now(), "updated_at": self._now()}
+        self.ai_sessions[row["id"]] = row
+        return copy.deepcopy(row)
+
+    def get_ai_session(self, user, session_id):
+        r = self.ai_sessions.get(session_id)
+        return copy.deepcopy(r) if r and r["owner_id"] == user.id else None
+
+    def list_ai_sessions(self, user):
+        return [copy.deepcopy(r) for r in self.ai_sessions.values() if r["owner_id"] == user.id]
+
+    def update_ai_session(self, user, session_id, fields):
+        r = self.ai_sessions.get(session_id)
+        if not r or r["owner_id"] != user.id:
+            return None
+        r.update(copy.deepcopy(fields)); r["updated_at"] = self._now()
+        return copy.deepcopy(r)
+
+    def create_ai_call(self, user, record):
+        s = self.ai_sessions.get(record["session_id"])
+        assert s and s["owner_id"] == user.id, "the database would refuse a call logged against another user's session"
+        row = {"id": str(uuid.uuid4()), **record, "owner_id": user.id, "created_at": self._now()}
+        self.ai_calls.append(row)
+        return copy.deepcopy(row)
 
     # Sketch (plan and 3D modeller)
     def create_sketch(self, user, record):
@@ -286,7 +316,7 @@ class FakeStorage:
     """Buckets keyed by name; source files live in "source-files" (the default)."""
 
     def __init__(self):
-        self.buckets: dict[str, dict[str, tuple[bytes, str]]] = {"source-files": {}, "renders": {}, "models": {}, "videos": {}}
+        self.buckets: dict[str, dict[str, tuple[bytes, str]]] = {"source-files": {}, "renders": {}, "models": {}, "videos": {}, "sketch-ai": {}}
 
     @property
     def objects(self):

@@ -16,6 +16,8 @@ import { OpeningTool, drawOpenings, drawOpeningDims, openingsAt, buildOpenings3D
 import * as OP from "./openings.js";
 import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
 import { floorLoops, floorParts, curvePoints as curvePts } from "./floors.js";
+import { initAiPanel } from "./aipanel.js";
+import { shownMaterial, shownFinishes, OPTION_NAME } from "./options.js";
 import { drawDetails, detailsAt, detailBoxes, buildDetails3D, FINISHING, finishingDialog, detailProps, wireDetailProps } from "./detailsui.js";
 import { SKETCH_TITLES, startComponentSketch, finishComponentSketch, componentSketchProps, wireComponentSketchProps, drawComponents, drawRefPlanes, componentsAt, cutWallSolids, cutWallPlan, floorVoidHoles, buildComponents3D, RefPlaneTool, modelInPlaceDialog, wallSweepDialog, parapetDialog, componentProps, wireComponentProps, workPlaneDialog } from "./componentsui.js";
 import { checkSketch } from "./floors.js";
@@ -154,6 +156,8 @@ app.cutWallPlan = (w, pieces, cutZ) => cutWallPlan(app.doc, w, pieces, cutZ);
 app.floorVoidHoles = (part, top, bottom) => floorVoidHoles(app.doc, part, top, bottom);
 app.buildComponents3D = (group, THREE, visible) => buildComponents3D(group, THREE, app, visible);
 app.buildDetails3D = (group, THREE, visible) => buildDetails3D(group, THREE, app, visible);
+app.matOf = el => shownMaterial(el, app.showProposal !== false);
+app.finishesOf = el => shownFinishes(el, app.showProposal !== false);
 app.buildFloors3D = (group, THREE, visible) => buildFloors3D(group, THREE, app, visible);
 app.sketch = null;
 app.sketchChanged = () => { renderRibbon(); renderOptions(); renderProps(); setPrompt(); app.redraw(true); };
@@ -441,6 +445,7 @@ const RIBBON = [
       { id: "wallReveal", label: "Wall Reveal", icon: "sweep", run: () => wallSweepDialog(app, ui, true) },
       { id: "parapet", label: "Parapet", icon: "wall", run: () => parapetDialog(app, ui) },
     ] },
+    { label: "Ollic AI", items: [{ id: "aiComplete", label: "Complete my design", icon: "threed", run: () => app.completeDesign ? app.completeDesign() : app.aiPanel.show() }] },
     { label: "Finishing", items: FINISHING.map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
     { label: "Model", items: [{ id: "modelLine", label: "Model Line", icon: "line", key: "LI", tool: "modelLine" }] },
     { label: "Work Plane", items: [{ id: "refPlane", label: "Ref Plane", icon: "section", key: "RP", tool: "refPlane" }, { id: "workPlane", label: "Set", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
@@ -1189,6 +1194,7 @@ function renderAll() { renderRibbon(); renderOptions(); renderProps(); renderBro
 app.store = new Store(app);
 app.setTool("select");
 setLayout(app.prefs.layout || "tile");
+initAiPanel(app);
 renderAll();
 window.__sketch = app; // test hook: lets the browser tests read the model
 

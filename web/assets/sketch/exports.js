@@ -16,7 +16,7 @@ export function choosePaper(box, scale) {
 }
 
 /** Draws the plan of one level, as it is drawn on screen but without grid, selection or tools, onto a 2D context. */
-function drawPlanOn(app, levelId, ctx, { w, h, s, cx, cy, dpr }) {
+export function drawPlanOn(app, levelId, ctx, { w, h, s, cx, cy, dpr }) {
   const view = Object.create(PlanView.prototype);
   Object.assign(view, { canvas: ctx.canvas, ctx, app, cx, cy, s, dpr, w, h, hits: [], print: true });
   const keep = { level: app.levelId, sel: app.selection, hover: app.hoverId, hoverSet: app.hoverSet, tool: app.tool, snap: app.snap, rubber: app.rubber, sketch: app.sketch };

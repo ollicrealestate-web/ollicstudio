@@ -32,6 +32,8 @@ class Settings:
     # Premium prompting: Claude reads the plan, sketches and references and writes the prompt
     anthropic_api_key: str | None = field(default=None, repr=False)
     premium_prompt_model: str = "claude-opus-5-5"
+    # Ollic AI in Sketch ("Complete my design"): one setting picks the model (needs images and tool use)
+    claude_model: str = "claude-opus-5-5"
     renders_bucket: str = "renders"
     models_bucket: str = "models"
     videos_bucket: str = "videos"
@@ -118,6 +120,7 @@ class Settings:
             openai_image_model=os.environ.get("OPENAI_IMAGE_MODEL", "").strip() or "gpt-image-2.5-sunburst",
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip() or None,
             premium_prompt_model=os.environ.get("PREMIUM_PROMPT_MODEL", "").strip() or "claude-opus-5-5",
+            claude_model=os.environ.get("CLAUDE_MODEL", "").strip() or "claude-opus-5-5",
             openai_edit_model=os.environ.get("OPENAI_EDIT_MODEL", "").strip() or "gpt-image-2.5-sunburst",
             renders_bucket=os.environ.get("RENDERS_BUCKET", "renders").strip() or "renders",
             models_bucket=os.environ.get("MODELS_BUCKET", "models").strip() or "models",

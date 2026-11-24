@@ -15,7 +15,7 @@ const DETAIL_COLOR = "#c8ad7f";
 // --------------------------------------------------------------------------- plan
 export function drawDetails(view, app) {
   for (const d of app.doc.details) {
-    if (d.levelId !== app.levelId) continue;
+    if (d.levelId !== app.levelId || app.hiddenOption?.(d)) continue;
     const sel = app.selection.has(d.id), col = sel ? COLORS.sel : app.hoverId === d.id ? COLORS.hover : DETAIL_COLOR;
     for (const p of detailParts(app.doc, d)) for (const b of partBoxes(p)) { view.polygon(b.poly, sel ? "rgba(59,130,246,.10)" : null, null); for (let i = 0; i < b.poly.length; i++) view.segment(b.poly[i], b.poly[(i + 1) % b.poly.length], col, sel ? 1.6 : 1); }
   }
@@ -77,8 +77,9 @@ export function buildDetails3D(group, THREE, app, visible) {
   }
   // face finishes set on walls: a thin skin in the finish material, part of the wall
   for (const w of doc.walls) {
-    if (!w.finishes || (visible && !visible.has(w.baseLevelId))) continue;
-    for (const [side, m] of Object.entries(w.finishes)) {
+    const fin = app.finishesOf ? app.finishesOf(w) : w.finishes;
+    if (!fin || (visible && !visible.has(w.baseLevelId))) continue;
+    for (const [side, m] of Object.entries(fin)) {
       try { for (const p of claddingParts(doc, [w], { side, t: 3, m })) add(prismGeo(THREE, p.poly, p.z0, p.z1), w.id, m, app.selection.has(w.id), false); } catch { /* skip */ }
     }
   }

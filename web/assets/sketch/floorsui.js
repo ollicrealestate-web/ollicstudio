@@ -185,7 +185,7 @@ export function buildFloors3D(group, THREE, app, visible) {
       const geo = new THREE.ExtrudeGeometry(shape, { depth: (top - bottom) / 1000, bevelEnabled: false });
       geo.rotateX(-Math.PI / 2); geo.translate(0, bottom / 1000, 0);
       if (style !== "wire") {
-        const colour = sel ? 0x3b82f6 : f.material ? new THREE.Color(matColor(f.material)).getHex() : 0xb9b6ae;
+        const colour = sel ? 0x3b82f6 : (app.matOf?.(f) ?? f.material) ? new THREE.Color(matColor(app.matOf?.(f) ?? f.material)).getHex() : 0xb9b6ae;
         const mat = style === "hidden" ? new THREE.MeshBasicMaterial({ color: 0xf2f2f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
           : style === "consistent" ? new THREE.MeshBasicMaterial({ color: colour, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
           : new THREE.MeshStandardMaterial({ color: colour, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });

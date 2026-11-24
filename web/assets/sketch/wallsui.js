@@ -281,7 +281,7 @@ export function buildWalls3D(v3, THREE, app) {
     if (visible && !visible.has(w.baseLevelId)) continue;
     const f = fpAll.get(w.id); if (!f) continue;
     const sel = app.selection.has(w.id);
-    const colour = sel ? 0x3b82f6 : new THREE.Color(w.material ? matColor(w.material) : f.type.color || STYLE_COLORS[f.type.function] || 0xdddddd).getHex();
+    const colour = sel ? 0x3b82f6 : new THREE.Color(app.matOf?.(w) ?? w.material ? matColor(app.matOf?.(w) ?? w.material) : f.type.color || STYLE_COLORS[f.type.function] || 0xdddddd).getHex();
     const edgeColor = style === "hidden" ? 0x111111 : style === "wire" ? (sel ? 0x3b82f6 : 0xe8e8ec) : 0x1b1b20;
     const extrude = (poly, z0, z1) => {
       const shape = new THREE.Shape(poly.map(p => new THREE.Vector2(p.x / 1000, p.y / 1000)));

@@ -12,6 +12,8 @@ import { defaultProfiles, makeWallSweep, makeExtrusion, wallSweepGeometry, extru
 import { KINDS, buildDetail, wallFace, hostEdges } from "./details.js";
 import { checkParts, partBoxes, modelSolids, penetration } from "./checks.js";
 import { MATERIALS, checkMaterial } from "./library.js";
+import { inProposal, proposeMaterial } from "./options.js";
+import { modelSummary } from "./summary.js";
 
 const fail = msg => { throw new Error(msg); };
 
@@ -201,6 +203,12 @@ export const TOOLS = [
   tool("get_edges", "The numbered edges of a floor or roof: ends, length, height, outward direction, whether a wall stands on or under it.", { host_id: { type: "string" } }, ["host_id"], { read: true }),
   tool("list_materials", "The material library: ids, names, categories.", {}, [], { read: true }),
   tool("list_profiles", "The profile library for sweeps: ids, names, sizes.", {}, [], { read: true }),
+  tool("get_model_summary", "The model summary (levels, walls, openings, floors and roofs with numbered edges, what was added), for all or part of the model.", {
+    scope: { type: "object", properties: { levels: { type: "array", items: { type: "string" } }, ids: { type: "array", items: { type: "string" } } } },
+  }, [], { read: true }),
+  tool("capture_views", "Pictures of the model: clay (white) or material views from corners (ne, nw, se, sw) and the front, and plans of each level with ids.", {
+    views: { type: "array", items: { type: "string", enum: ["ne", "nw", "se", "sw", "front"] } }, style: { type: "string", enum: ["clay", "material"] }, plans: { type: "boolean" },
+  }, [], { read: true, browser: true }),
 ];
 export const TOOL_BY_NAME = Object.fromEntries(TOOLS.map(t => [t.name, t]));
 /** Tool definitions in the shape the assistant expects. */
@@ -226,6 +234,7 @@ const READ = {
     return out;
   },
   get_edges(doc, a) { return hostEdges(doc, a.host_id).map(e => ({ ref: e.ref, a: [Math.round(e.a.x), Math.round(e.a.y)], b: [Math.round(e.b.x), Math.round(e.b.y)], length: Math.round(e.len), top: Math.round(e.zA), out: [+e.out.x.toFixed(3), +e.out.y.toFixed(3)], level: Math.abs(e.zA - e.zB) < 5, exposed: e.exposed })); },
+  get_model_summary: (doc, a) => modelSummary(doc, a.scope || {}),
   list_materials: () => MATERIALS.map(m => ({ id: m.id, name: m.name, category: m.category })),
   list_profiles: doc => [...defaultProfiles(), ...(doc.profiles || [])].map(p => ({ id: p.id, name: p.name, width: Math.round(Math.max(...p.pts.map(q => q.x)) - Math.min(...p.pts.map(q => q.x))), height: Math.round(Math.max(...p.pts.map(q => q.y)) - Math.min(...p.pts.map(q => q.y))), centred: !!p.centred })),
 };
@@ -269,6 +278,10 @@ function WRITE(doc, name, T, a, ctx) {
     for (const id of list) {
       const f = findById(doc, id) || fail(`There is no element "${id}".`), el = f.el;
       if (!["walls", "floors", "roofs", "openings", "components", "details"].includes(f.coll)) fail(`${id} cannot take a material.`);
+      if (f.coll === "components" && el.isVoid) fail(`${id} is a void; it has no material.`);
+      if (a.face && f.coll === "walls" && el.shape !== "line") fail(`Wall ${id} is curved; face finishes go on straight walls.`);
+      // working in a design option: your element keeps its material; the new one is proposed until you accept it
+      if (ctx.option && !inProposal(el)) { proposeMaterial(el, m, f.coll === "walls" && a.face ? (a.face === "interior" ? "interior" : "exterior") : null, a.plan_item ?? ctx.planItem); continue; }
       if (f.coll === "details") { el.args = { ...el.args, material: m }; continue; } // materials may be set on any element
       if (f.coll === "components" && el.isVoid) fail(`${id} is a void; it has no material.`);
       if (a.face && f.coll === "walls") { if (el.shape !== "line") fail(`Wall ${id} is curved; face finishes go on straight walls.`); el.finishes = { ...(el.finishes || {}), [a.face === "interior" ? "interior" : "exterior"]: m }; }
