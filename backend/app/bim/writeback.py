@@ -155,7 +155,10 @@ def write_materials(ifc_bytes: bytes, parts: list[dict], materials: dict[str, di
             if n_parts <= 1 or len(whole) == n_parts and len(mats) == 1:
                 targets = items                      # the whole element
             else:                                    # only the shapes that showed this part's style or colour
-                targets = [it for it in items if (lambda nc: (p.get("orig_name") and nc[0] == p["orig_name"]) or _close(nc[1], p.get("orig_hex")))(w.item_style(it))]
+                seen = [(it, w.item_style(it)) for it in items]
+                # by the style's own name when the part had one (a window's "Glass"), else by its colour
+                targets = [it for it, nc in seen if p.get("orig_name") and nc[0] == p["orig_name"]] or \
+                          [it for it, nc in seen if _close(nc[1], p.get("orig_hex"), 12)]
             for it in targets:
                 w.style_items(it, style)
             label = f"Part{int(p.get('part') or 0) + 1}" if n_parts > 1 else ""
