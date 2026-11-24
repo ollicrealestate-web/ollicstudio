@@ -4,6 +4,7 @@
 // colour, size, rotation, roughness and offset; undo, redo and reset. Saved for the model on the server.
 import { MATERIALS, CATEGORIES, materialById } from "./library.js";
 import { drawPreview } from "./preview.js";
+import { userMaterials, registerMaterial, forgetMaterial } from "./look.js";
 
 const HOW = { ifc: "From your IFC", name: "Matched from its name", guess: "Guessed", user: "Set by you" };
 const TYPE_NAME = { IfcWall: "walls", IfcWallStandardCase: "walls", IfcSlab: "floor slabs", IfcRoof: "roofs", IfcDoor: "doors", IfcWindow: "windows", IfcColumn: "columns", IfcBeam: "beams",
@@ -30,7 +31,7 @@ export function swatchStyle(m, tint = null) {
  * root: the panel's element. viewer: the Studio viewer. store: { load(), save(assignments), prefs(), savePrefs(p) }.
  * extra(): materials beyond the library (My materials), each like a library entry. toast(text).
  */
-export function createMaterialsPanel({ root, viewer, store, toast = () => {}, extra = () => [] }) {
+export function createMaterialsPanel({ root, viewer, store, toast = () => {}, extra = () => userMaterials().filter(m => !m.id.startsWith("my-preview-")) }) {
   let part = null, chosen = null, scope = "part", eyedrop = null, prefs = { favourites: [], recent: [] }, cat = "All", query = "", saveTimer = 0, stopPreview = null;
   const all = () => [...extra(), ...MATERIALS];
   const byId = id => all().find(m => m.id === id) || materialById(id);
@@ -56,7 +57,8 @@ export function createMaterialsPanel({ root, viewer, store, toast = () => {}, ex
       el("button", { type: "button", class: "btn", id: "mpResetAll" }, "Reset everything"),
       el("span", { class: "hint", id: "mpMsg", role: "status" })),
     el("div", { class: "mp-lib" },
-      el("div", { class: "row" }, el("input", { type: "search", id: "mpSearch", placeholder: "Search materials (travertine, teak, porcelain…)", "aria-label": "Search materials" })),
+      el("div", { class: "row" }, el("input", { type: "search", id: "mpSearch", placeholder: "Search materials (travertine, teak, porcelain…)", "aria-label": "Search materials" }),
+        el("button", { type: "button", class: "btn", id: "mpPhoto" }, "Make a material from a photo")),
       el("div", { class: "chips", id: "mpCats", role: "group", "aria-label": "Groups" }),
       el("ul", { class: "mp-grid", id: "mpGrid" }),
       el("p", { class: "hint" }, "Tip: drag a material onto the model to put it on the part under the pointer. Double-click a material to apply it.")));
@@ -86,7 +88,11 @@ export function createMaterialsPanel({ root, viewer, store, toast = () => {}, ex
           onclick: () => choose({ id: m.id }), ondblclick: () => { choose({ id: m.id }); apply(); },
           ondragstart: e => { e.dataTransfer.setData("text/ollic-material", m.id); e.dataTransfer.effectAllowed = "copy"; } },
           el("span", { class: "mp-thumb", style: swatchStyle(m) }), el("span", { class: "mp-name" }, m.name)),
-        el("button", { type: "button", class: "mp-fav", "aria-pressed": String(fav), "aria-label": fav ? `Remove ${m.name} from favourites` : `Add ${m.name} to favourites`, onclick: () => toggleFav(m.id) }, fav ? "★" : "☆"));
+        el("button", { type: "button", class: "mp-fav", "aria-pressed": String(fav), "aria-label": fav ? `Remove ${m.name} from favourites` : `Add ${m.name} to favourites`, onclick: () => toggleFav(m.id) }, fav ? "★" : "☆"),
+        m.id.startsWith("my-") && store.deleteMaterial ? el("button", { type: "button", class: "mp-del", "aria-label": `Delete ${m.name} from My materials`, onclick: async () => {
+          if (!confirm(`Delete ${m.name} from My materials? Parts that show it go back to their own material.`)) return;
+          try { await store.deleteMaterial(m.id); forgetMaterial(m.id); drawGrid(); msg(`${m.name} deleted.`); } catch (err) { msg("Not deleted: " + err.message); }
+        } }, "×") : null);
     }));
     if (!list.length) $("#mpGrid").append(el("li", { class: "hint" }, cat === "Favourites" ? "No favourites yet: tap ☆ on a material." : "Nothing matches."));
   }
@@ -94,6 +100,10 @@ export function createMaterialsPanel({ root, viewer, store, toast = () => {}, ex
     prefs.favourites = prefs.favourites.includes(id) ? prefs.favourites.filter(x => x !== id) : [id, ...prefs.favourites];
     store.savePrefs?.(prefs); drawGrid();
   }
+  $("#mpPhoto").onclick = async () => {
+    const { openPhotoDialog } = await import("./upload.js");
+    openPhotoDialog({ store, toast, onSaved: m => { cat = "My materials"; drawCats(); choose({ id: m.id }); msg(`${m.name} is ready: click a part and Apply.`); } });
+  };
   $("#mpSearch").oninput = e => { query = e.target.value; if (query && cat !== "All") { cat = "All"; drawCats(); } drawGrid(); };
 
   // ---------------------------------------------------------------- the material being set up
@@ -224,6 +234,7 @@ export function createMaterialsPanel({ root, viewer, store, toast = () => {}, ex
     },
     async load() {
       try { prefs = { favourites: [], recent: [], ...(await store.prefs?.()) }; } catch { /* favourites can wait */ }
+      try { for (const m of (await store.mine?.()) || []) registerMaterial(m); } catch { /* my materials can wait */ }
       drawCats(); drawGrid();
       try { const a = await store.load(); if (a && Object.keys(a).length) viewer.setAssignments(a); } catch (err) { toast("Your material changes could not be loaded: " + err.message); }
       drawUndo();

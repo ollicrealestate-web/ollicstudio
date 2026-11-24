@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 22
       - name: Geometry and model unit tests
-        run: node --test tests/sketch/*.test.mjs
+        run: node --test tests/sketch/*.test.mjs tests/studio/*.test.mjs
       - name: Browser tests (real Chromium)
         run: |
           npm i --no-save --no-package-lock playwright@1.48.2

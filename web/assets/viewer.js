@@ -21,7 +21,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { addUVs, grassTexture, guessClass, lookFor } from "./looks.js";
 import { matchMaterial } from "./materials/match.js";
 import { materialById } from "./materials/library.js";
-import { materialLook, addMetricUVs, setupLooks, loadSources } from "./materials/look.js";
+import { materialLook, addMetricUVs, setupLooks, loadSources, findMaterial } from "./materials/look.js";
 import { PLACES, PRESETS, sunAngles, momentAt, afternoonAt, sunVector, sunLight } from "./materials/light.js";
 
 const PLAN_CUT = 1.3;                 // the section cut: 1.3 m above a floor, as on a floor plan
@@ -688,7 +688,7 @@ export function createViewer(host, { onSelect } = {}) {
     if (!m) return;
     if (!o.geometry.attributes.uv || o.geometry.userData.metric !== true) { addMetricUVs(o.geometry); o.geometry.userData.metric = true; }
     setLook(o, m);
-    const seen = materialById(a?.id || base?.id)?.cls || o.userData.cls;
+    const seen = findMaterial(a?.id || base?.id)?.cls || o.userData.cls;
     o.userData.shadowReal = seen !== "glass" && o.userData.cls !== "space";
     if (!classicOn) o.castShadow = o.userData.shadowReal;
   }

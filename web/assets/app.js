@@ -510,6 +510,10 @@ async function loadModels() {
           save: a => (viewerModelId ? api.putModelMaterials(viewerModelId, a) : Promise.resolve()),
           prefs: () => api.getMaterialPrefs(),
           savePrefs: p => { clearTimeout(prefsTimer); prefsTimer = setTimeout(() => api.putMaterialPrefs({ favourites: p.favourites, recent: p.recent }).catch(() => {}), 800); },
+          mine: () => api.listMyMaterials(),
+          saveMaterial: form => api.createMyMaterial(form),
+          deleteMaterial: id => api.deleteMyMaterial(id),
+          suggest: blob => api.suggestMaterial(blob),
         } });
       setViewMode("exterior");
     }

@@ -45,6 +45,7 @@ class FakeRepo:
         self.ai_calls: list[dict] = []
         self.model_materials: dict[str, dict] = {}
         self.material_prefs: dict[str, dict] = {}
+        self.user_materials: dict[str, dict] = {}
 
     def _now(self):
         return datetime.now(timezone.utc).isoformat()
@@ -97,6 +98,25 @@ class FakeRepo:
     def put_material_prefs(self, user, prefs):
         self.material_prefs[user.id] = {"owner_id": user.id, **copy.deepcopy(prefs), "updated_at": self._now()}
         return copy.deepcopy(self.material_prefs[user.id])
+
+    def create_user_material(self, user, record):
+        row = {"id": str(uuid.uuid4()), **copy.deepcopy(record), "owner_id": user.id, "created_at": self._now(), "updated_at": self._now()}
+        self.user_materials[row["id"]] = row
+        return copy.deepcopy(row)
+
+    def list_user_materials(self, user):
+        return [copy.deepcopy(r) for r in sorted(self.user_materials.values(), key=lambda r: r["created_at"], reverse=True) if r["owner_id"] == user.id]
+
+    def get_user_material(self, user, material_id):
+        r = self.user_materials.get(material_id)
+        return copy.deepcopy(r) if r and r["owner_id"] == user.id else None
+
+    def delete_user_material(self, user, material_id):
+        r = self.user_materials.get(material_id)
+        if not r or r["owner_id"] != user.id:
+            return False
+        del self.user_materials[material_id]
+        return True
 
     # Sketch (plan and 3D modeller)
     def create_sketch(self, user, record):
@@ -339,7 +359,7 @@ class FakeStorage:
     """Buckets keyed by name; source files live in "source-files" (the default)."""
 
     def __init__(self):
-        self.buckets: dict[str, dict[str, tuple[bytes, str]]] = {"source-files": {}, "renders": {}, "models": {}, "videos": {}, "sketch-ai": {}}
+        self.buckets: dict[str, dict[str, tuple[bytes, str]]] = {"source-files": {}, "renders": {}, "models": {}, "videos": {}, "sketch-ai": {}, "user-materials": {}}
 
     @property
     def objects(self):

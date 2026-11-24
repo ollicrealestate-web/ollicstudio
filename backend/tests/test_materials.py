@@ -46,3 +46,76 @@ def test_favourites_and_recent(client, alice, bob):
     assert r.json() == {"favourites": ["mt-travertine", "mt-timber-teak"], "recent": ["mt-brick-red"]}
     assert client.get("/api/material-prefs", headers=bob["headers"]).json() == {"favourites": [], "recent": []}
     assert client.put("/api/material-prefs", json={"favourites": ["<script>"]}, headers=alice["headers"]).status_code == 422
+
+
+# ---------------------------------------------------------------- My materials (made from photos)
+import io
+import json
+
+from PIL import Image
+
+
+def _jpeg(colour=(200, 180, 150), size=(64, 64)):
+    b = io.BytesIO(); Image.new("RGB", size, colour).save(b, "JPEG"); return b.getvalue()
+
+
+def _meta(**kw):
+    return json.dumps({"name": "Beige porcelain from the showroom", "cls": "tile", "size": 1.8, "sizeV": 1.5, "rough": 0.3, "plain": "#d6c8b0",
+                       "tiles": [6, 5], "tile_mm": [300, 300], "checks": {"deltaE": 1.2, "seam": 0.9}, **kw})
+
+
+def test_my_material_is_saved_privately_and_listed_with_its_pictures(client, storage, alice, bob):
+    files = {"color": ("c.jpg", _jpeg(), "image/jpeg"), "normal": ("n.jpg", _jpeg((128, 128, 255)), "image/jpeg"),
+             "rough": ("r.jpg", _jpeg((90, 90, 90)), "image/jpeg"), "ao": ("a.jpg", _jpeg((250, 250, 250)), "image/jpeg"), "original": ("o.jpg", _jpeg(size=(300, 200)), "image/jpeg")}
+    r = client.post("/api/my-materials", data={"meta": _meta()}, files=files, headers=alice["headers"])
+    assert r.status_code == 201, r.text
+    m = r.json()
+    assert m["id"].startswith("my-") and m["category"] == "My materials" and m["cls"] == "tile" and m["size"] == 1.8 and m["sizeV"] == 1.5
+    assert set(m["urls"]) == {"color", "normal", "rough", "ao", "original"}
+    stored = storage.buckets["user-materials"]
+    assert all(p.startswith(f"{alice['id']}/{m['id'][3:]}/") for p in stored) and len(stored) == 5
+    assert [x["id"] for x in client.get("/api/my-materials", headers=alice["headers"]).json()] == [m["id"]]
+    assert client.get("/api/my-materials", headers=bob["headers"]).json() == []
+    assert client.delete(f"/api/my-materials/{m['id'][3:]}", headers=bob["headers"]).status_code == 404
+    # it can be put on a model like a library material
+    assert client.delete(f"/api/my-materials/{m['id'][3:]}", headers=alice["headers"]).status_code == 204
+    assert client.get("/api/my-materials", headers=alice["headers"]).json() == [] and not storage.buckets["user-materials"]
+
+
+def test_my_material_refuses_what_is_not_a_picture_or_not_right(client, alice):
+    ok = {"color": ("c.jpg", _jpeg(), "image/jpeg")}
+    assert client.post("/api/my-materials", data={"meta": _meta()}, files={"color": ("c.jpg", b"not an image", "image/jpeg")}, headers=alice["headers"]).status_code == 422
+    assert client.post("/api/my-materials", data={"meta": _meta(cls="lava")}, files=ok, headers=alice["headers"]).status_code == 422
+    assert client.post("/api/my-materials", data={"meta": _meta(plain="beige")}, files=ok, headers=alice["headers"]).status_code == 422
+    assert client.post("/api/my-materials", data={"meta": "{"}, files=ok, headers=alice["headers"]).status_code == 422
+    assert client.post("/api/my-materials", data={"meta": _meta()}, files=ok, headers=alice["headers"]).status_code == 201
+
+
+def test_my_material_can_be_assigned_to_a_model(client, repo, alice):
+    mid = _model(client, repo, alice)
+    my = client.post("/api/my-materials", data={"meta": _meta()}, files={"color": ("c.jpg", _jpeg(), "image/jpeg")}, headers=alice["headers"]).json()
+    r = client.put(f"/api/models/{mid}/materials", json={"assignments": {"abc#0": {"id": my["id"]}}}, headers=alice["headers"])
+    assert r.status_code == 200 and r.json()["assignments"]["abc#0"]["id"] == my["id"]
+
+
+def test_ollic_ai_suggests_what_the_photo_shows(settings, repo, storage, alice):
+    from fastapi.testclient import TestClient
+    from app.auth import TokenVerifier
+    from app.jobs import InlineRunner
+    from app.main import create_app
+
+    class Writer:
+        model = "test"
+        def ask_json(self, system, content, max_tokens=0, timeout=0):
+            assert content[0]["type"] == "image" and "never mention brands" in system
+            return {"answer": {"name": "Travertine, honed", "cls": "stone", "rough": 0.45, "metal": 0, "size_mm": 600, "tile_mm": [600, 300], "notes": "Cream stone."}, "usage": {}, "cost_usd": 0.001}
+
+    c = TestClient(create_app(settings, repo=repo, storage=storage, verifier=TokenVerifier(settings), runner=InlineRunner(), prompt_writer=Writer()))
+    r = c.post("/api/my-materials/suggest", files={"image": ("p.jpg", _jpeg(), "image/jpeg")}, headers=alice["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json() == {"name": "Travertine, honed", "cls": "stone", "rough": 0.45, "metal": 0, "size_mm": 600.0, "tile_mm": [600.0, 300.0], "notes": "Cream stone."}
+
+
+def test_without_ollic_ai_the_suggestion_says_so(client, alice):
+    r = client.post("/api/my-materials/suggest", files={"image": ("p.jpg", _jpeg(), "image/jpeg")}, headers=alice["headers"])
+    assert r.status_code == 503
