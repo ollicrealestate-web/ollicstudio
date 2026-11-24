@@ -5,7 +5,7 @@ import * as G from "./geom.js";
 import { wallType, centrePolyline, makeWall } from "./walls.js";
 import { makeFloor } from "./floors.js";
 import { keepOpeningsInPlace } from "./openings.js";
-import { readiness } from "./summary.js";
+import { readiness, hasRing } from "./summary.js";
 
 const REACH = 3000;   // mm: how far an end is trimmed or extended to meet another wall
 const JOINED = 2;     // mm: as the wall geometry joins them
@@ -103,7 +103,7 @@ export function prepareModel(history) {
       for (const l of levels) {
         const walls = d.walls.filter(w => w.baseLevelId === l.id);
         if (!walls.some(w => ext(d, w))) continue;
-        if (!freeEnds(d, walls).length) continue;
+        if (hasRing(walls)) continue;   // already closed round (columns and free-standing walls are left as they are)
         let joined = 0, added = 0;
         // 1. outer walls drawn on a face (not the centre) are put on their centre line, in the same place
         for (const w of walls) {
@@ -112,11 +112,12 @@ export function prepareModel(history) {
           w.a = { ...c[0] }; w.b = { ...c.at(-1) }; w.locationLine = "wall-centre";
         }
         // 2. ends trimmed or extended to meet the wall they almost meet
-        for (let round = 0; round < 3; round++) {
+        for (let round = 0; round < 3 && !hasRing(walls); round++) {
           let changed = false;
-          for (const { w, key } of freeEnds(d, walls)) {
-            const hit = meetingPoint(d, w, key, walls);
-            if (!hit) continue;
+          // nearest first, and only until the ring is closed: nothing else is touched
+          const fixes = freeEnds(d, walls).map(e => ({ ...e, hit: meetingPoint(d, e.w, e.key, walls) })).filter(e => e.hit).sort((x, y) => x.hit.d - y.hit.d);
+          for (const { w, key, hit } of fixes) {
+            if (hasRing(walls)) break;
             w[key] = { x: hit.X.x, y: hit.X.y }; joined++; changed = true;
             // the other wall overshoots or falls short too: its nearer end goes to the same corner
             if (hit.u < 0 || hit.u > 1) { const k = hit.u < 0 ? "a" : "b"; hit.v[k] = { x: hit.X.x, y: hit.X.y }; }
@@ -124,7 +125,7 @@ export function prepareModel(history) {
           if (!changed) break;
         }
         // 3. a gap still open: a wall across it, the same as the wall beside it
-        for (let guard = 0; guard < 20; guard++) {
+        for (let guard = 0; guard < 20 && !hasRing(walls); guard++) {
           const ends = freeEnds(d, walls);
           if (ends.length < 2) break;
           let pair = null;

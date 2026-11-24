@@ -227,8 +227,9 @@ function flowHtml(app) {
   const err = F.error ? `<div class="err">${esc(F.error)}</div>` : "";
   const cost = F.session ? `<div class="ai-cost">Cost so far: ${usd(F.cost)}${F.estimate ? ` (estimate ${usd(F.estimate.low_usd)}–${usd(F.estimate.high_usd)})` : ""}</div>` : "";
   let body = "";
-  if (F.step === "notready") body = `<p><b>Ollic AI needs a little more to start from:</b></p><ul class="ai-issues">${F.issues.map(i => `<li>${esc(i)}</li>`).join("")}</ul><button class="btn" type="button" id="aiRecheck">Check again</button>`;
-  else if (F.step === "setup") body = (F.prepared?.length ? `<div class="ai-prepared"><p><b>Ollic AI first made the model ready</b> (one step: Undo takes it back):</p><ul class="ai-issues">${F.prepared.map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>` : "") + setupHtml(app);
+  const prepared = F.prepared?.length ? `<div class="ai-prepared"><p><b>Ollic AI first made the model ready</b> (one step: Undo takes it back):</p><ul class="ai-issues">${F.prepared.map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>` : "";
+  if (F.step === "notready") body = prepared + `<p><b>Ollic AI needs a little more to start from:</b></p><ul class="ai-issues">${F.issues.map(i => `<li>${esc(i)}</li>`).join("")}</ul><button class="btn" type="button" id="aiRecheck">Check again</button>`;
+  else if (F.step === "setup") body = prepared + setupHtml(app);
   else if (F.step === "past") body = pastHtml(app);
   else if (F.step === "questions") body = questionsHtml(app);
   else if (F.step === "plan") body = planHtml(app);
