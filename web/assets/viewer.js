@@ -115,7 +115,7 @@ export function createViewer(host, { onSelect } = {}) {
   const keys = new Set(), hold = { fwd: 0, turn: 0, up: 0 };
   let fly = null;          // a camera move in progress
   const redraw = () => { dirty = true; finalDone = false; };
-  setupLooks({ redraw });   // a texture that arrives redraws the view
+  const offTextures = setupLooks({ redraw });   // a texture that arrives redraws the view
 
   // ---------------------------------------------------------------- light: sky, sun, place, date and time
   const today = new Date(Date.now() + 3600000).toISOString().slice(0, 10);   // the date in Lagos
@@ -243,9 +243,10 @@ export function createViewer(host, { onSelect } = {}) {
     if (model) scene.remove(model);
     if (edgesGroup) { scene.remove(edgesGroup); edgesGroup.children.forEach(l => l.geometry.dispose()); edgesGroup = null; }
     model = gltf.scene;
-    elements = [];
+    elements = []; undoStack = []; redoStack = [];
     model.traverse(o => {
       if (!o.isMesh) return;
+      const single = !!o.userData?.globalId;   // an element with one part is itself the mesh
       const x = { ...(o.parent?.userData || {}), ...(o.userData || {}) };
       o.userData = x;
       // older 3D files from Ollic leave normals out (each triangle has its own corners), so they are made here
@@ -262,6 +263,7 @@ export function createViewer(host, { onSelect } = {}) {
       // the realistic look: the library material at its real size (texture coordinates in metres on every face)
       const lib = cls === "space" ? null : materialById(mat.id);
       o.userData.lookOpts = { tint: mat.tint, opacity: opacity < 0.99 ? opacity : null };
+      o.userData.part = single ? 0 : (o.parent?.children || [o]).filter(c => c.isMesh).indexOf(o);
       let look = lib && materialLook(mat.id, { ...o.userData.lookOpts, quality });
       if (look) addMetricUVs(o.geometry);
       else { look = lookFor(cls, srcColor, opacity); if (look.userData.metres && !o.geometry.attributes.uv) addUVs(o.geometry, look.userData.metres); }
@@ -453,7 +455,7 @@ export function createViewer(host, { onSelect } = {}) {
     ptr.last = null;
     if (moved) return;
     const hit = hitAt(e);
-    select(hit ? hit.object : null);
+    select(hit ? hit.object : null, hit);
   });
   renderer.domElement.addEventListener("dblclick", e => {
     const hit = hitAt(e);
@@ -653,13 +655,131 @@ export function createViewer(host, { onSelect } = {}) {
     aim();
   }
 
-  function select(obj) {
+  /** A copy of a look with the selection's red glow (keeping its tiles and texture touches). */
+  function glowing(m) {
+    const c = m.clone();
+    if (m.onBeforeCompile) { c.onBeforeCompile = m.onBeforeCompile; c.customProgramCacheKey = m.customProgramCacheKey; }
+    c.userData = m.userData; c.emissive?.set("#5a0a0d"); if (c.emissiveIntensity === 0) c.emissiveIntensity = 1;
+    return c;
+  }
+  function select(obj, hit = null) {
     if (selected?._look) { selected.material = selected._look; selected._look = null; }
     selected = obj;
-    if (obj) { obj._look = obj.material; obj.material = obj.material.clone(); obj.material.emissive?.set("#5a0a0d"); }
-    onSelect?.(obj ? obj.userData : null);
+    if (obj) { obj._look = obj.material; obj.material = glowing(obj.material); }
+    onSelect?.(obj ? obj.userData : null, obj ? { key: partKey(obj), normal: hit?.face ? hit.face.normal.clone().transformDirection(obj.matrixWorld).toArray() : null } : null);
     redraw();
   }
+  /** Puts a look on a part (keeping the selection glow if it is selected). */
+  function setLook(o, m) {
+    if (o._look) { o._look = m; o.material = glowing(m); } else o.material = m;
+  }
+
+  // ---------------------------------------------------------------- materials the user sets (click to apply)
+  // Each part is known by its element's GlobalId and its index among the element's parts ("2O2F...#1"), and one
+  // face of it by the side it faces ("#1/+" or "#1/-"). Only what the user changed is kept; the IFC's own stays.
+  let undoStack = [], redoStack = [], onAssign = null;
+  const partKey = o => `${o.userData.globalId || o.userData.name || "part"}#${o.userData.part ?? 0}${o.userData.face ? "/" + o.userData.face : ""}`;
+  const specOf = o => o.userData.assigned || { id: o.userData.mat?.id || null, tint: o.userData.lookOpts?.tint || null };
+  function dressPart(o) {
+    const a = o.userData.assigned, base = o.userData.mat;
+    let m = null;
+    if (a) m = materialLook(a.id, { tint: a.tint, scale: a.scale, rotation: a.rotation, rough: a.rough, offset: a.offset, opacity: o.userData.lookOpts?.opacity, quality });
+    else if (base?.id && o.userData.cls !== "space") m = materialLook(base.id, { ...o.userData.lookOpts, quality });
+    if (!m) return;
+    if (!o.geometry.attributes.uv || o.geometry.userData.metric !== true) { addMetricUVs(o.geometry); o.geometry.userData.metric = true; }
+    setLook(o, m);
+    const seen = materialById(a?.id || base?.id)?.cls || o.userData.cls;
+    o.userData.shadowReal = seen !== "glass" && o.userData.cls !== "space";
+    if (!classicOn) o.castShadow = o.userData.shadowReal;
+  }
+  /** Splits a part into its two faces (wall outside and inside) and the rest (ends, top), once. Returns the faces. */
+  function splitFaces(o) {
+    if (o.userData.faceSplit) return o.userData.faceSplit;
+    const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry, pos = g.attributes.position, n = pos.count / 3;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+    const normals = [], areas = [];
+    let ref = null, best = 0;
+    for (let t = 0; t < n; t++) {
+      a.fromBufferAttribute(pos, t * 3); b.fromBufferAttribute(pos, t * 3 + 1); c.fromBufferAttribute(pos, t * 3 + 2);
+      const nn = e1.subVectors(b, a).cross(e2.subVectors(c, a)), area = nn.length() / 2;
+      const u = area > 0 ? nn.clone().normalize() : new THREE.Vector3();
+      normals.push(u); areas.push(area);
+      if (Math.abs(u.y) < 0.3 && area > best) { best = area; ref = u.clone(); }
+    }
+    if (!ref) return (o.userData.faceSplit = { "+": o, "-": o });
+    const sides = { "+": [], "-": [], rest: [] };
+    for (let t = 0; t < n; t++) {
+      const d = normals[t].dot(ref), k = d > 0.7 ? "+" : d < -0.7 ? "-" : "rest";
+      for (let v = 0; v < 3; v++) sides[k].push(pos.getX(t * 3 + v), pos.getY(t * 3 + v), pos.getZ(t * 3 + v));
+    }
+    if (!sides["+"].length || !sides["-"].length) return (o.userData.faceSplit = { "+": o, "-": o });
+    // "+" is the side facing away from the building's middle: the outside
+    o.updateMatrixWorld();
+    const mid = frameBox.getCenter(new THREE.Vector3()), centroid = arr => { const v = new THREE.Vector3(); for (let i = 0; i < arr.length; i += 3) v.add(new THREE.Vector3(arr[i], arr[i + 1], arr[i + 2])); return v.multiplyScalar(3 / arr.length).applyMatrix4(o.matrixWorld); };
+    const worldRef = ref.clone().transformDirection(o.matrixWorld);
+    if (centroid(sides["+"]).sub(mid).dot(worldRef) < 0) [sides["+"], sides["-"]] = [sides["-"], sides["+"]];
+    const make = (arr, face) => {
+      const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3)); geo.computeVertexNormals(); geo.computeBoundingBox(); geo.computeBoundingSphere();
+      addMetricUVs(geo); geo.userData.metric = true;
+      const m = new THREE.Mesh(geo, o._look || o.material);
+      m.userData = { ...o.userData, face, faceName: face === "+" ? "outside" : "inside", faceSplit: null, assigned: o.userData.assigned };
+      m.position.copy(o.position); m.quaternion.copy(o.quaternion); m.scale.copy(o.scale);
+      m.castShadow = o.castShadow; m.receiveShadow = o.receiveShadow;
+      o.parent.add(m); elements.push(m);
+      return m;
+    };
+    const plus = make(sides["+"], "+"), minus = make(sides["-"], "-");
+    const rest = new THREE.BufferGeometry(); rest.setAttribute("position", new THREE.Float32BufferAttribute(sides.rest, 3)); rest.computeVertexNormals(); rest.computeBoundingBox(); rest.computeBoundingSphere();
+    addMetricUVs(rest); rest.userData.metric = true;
+    o.geometry = rest;
+    o.userData.faceSplit = { "+": plus, "-": minus };
+    if (edgesGroup) { scene.remove(edgesGroup); edgesGroup.children.forEach(l => l.geometry.dispose()); edgesGroup = null; }
+    schedule = null;
+    return o.userData.faceSplit;
+  }
+  /** The parts a change applies to: this part, everything showing the same material, every element of this type
+   * (on this floor or in the building), or one face of this part ("outside" or "inside"). */
+  function targetsOf(o, scope) {
+    const live = elements.filter(e => e.userData.cls !== "space" && e.userData.ifcType !== "IfcSpace");
+    if (scope === "same") { const s = specOf(o); return live.filter(e => { const t = specOf(e); return t.id === s.id && (t.tint || null) === (s.tint || null); }); }
+    if (scope === "type-floor") return live.filter(e => e.userData.ifcType === o.userData.ifcType && e.userData.storey === o.userData.storey);
+    if (scope === "type") return live.filter(e => e.userData.ifcType === o.userData.ifcType);
+    if (scope === "outside" || scope === "inside") { const f = splitFaces(o); return [f[scope === "outside" ? "+" : "-"]]; }
+    return [o];
+  }
+  const snapshotOf = list => Object.fromEntries(list.map(e => [partKey(e), e.userData.assigned ? { ...e.userData.assigned } : null]));
+  function applyMap(map) {
+    for (const [k, v] of Object.entries(map)) {
+      const e = findPart(k);
+      if (!e) continue;
+      e.userData.assigned = v ? { ...v } : null;
+      dressPart(e);
+    }
+    redraw();
+  }
+  function findPart(key) {
+    let e = elements.find(x => partKey(x) === key);
+    if (e || !/\/[+-]$/.test(key)) return e;
+    const whole = elements.find(x => partKey(x) === key.slice(0, -2) && !x.userData.face);   // a face: split its part first
+    if (!whole) return null;
+    splitFaces(whole);
+    return elements.find(x => partKey(x) === key) || null;
+  }
+  function assignments() {
+    const out = {};
+    for (const e of elements) if (e.userData.assigned) out[partKey(e)] = { ...e.userData.assigned };
+    return out;
+  }
+  function changed() { onAssign?.(assignments()); }
+  function assign(list, spec) {
+    const before = snapshotOf(list);
+    const after = Object.fromEntries(list.map(e => [partKey(e), spec ? { ...spec } : null]));
+    applyMap(after);
+    undoStack.push({ before, after }); if (undoStack.length > 200) undoStack.shift(); redoStack = [];
+    changed();
+    return list.length;
+  }
+
 
   function draw(final) {
     if (final && quality !== "fast" && !owner && (!lowPower || quality === "best")) {
@@ -1017,7 +1137,7 @@ export function createViewer(host, { onSelect } = {}) {
     reset() { if (mode === "walk") leaveWalk(); frameAll(); redraw(); },
     /** The view as a picture, at full quality (with ambient occlusion). */
     snapshot() { draw(true); return renderer.domElement.toDataURL("image/png"); },
-    dispose() { cancelAnimationFrame(frame); composer.dispose(); pmrem.dispose(); renderer.dispose(); host.replaceChildren(); },
+    dispose() { offTextures(); cancelAnimationFrame(frame); composer.dispose(); pmrem.dispose(); renderer.dispose(); host.replaceChildren(); },
     get storeys() { return storeys; },
     /** Hands the scene to the construction animation (on) or takes it back (off). */
     takeOver(on) {
@@ -1060,6 +1180,38 @@ export function createViewer(host, { onSelect } = {}) {
       bloom.enabled = !!PRESETS[light.preset]?.lightsOn && q !== "fast";
       resize(); redraw();
     },
+    /** Click to apply. scope: "part", "same", "type-floor", "type", "outside", "inside". spec: { id, tint, scale,
+     * rotation, rough, offset } or null (back to the IFC's own). Returns how many parts changed. */
+    applyMaterial(key, spec, scope = "part") {
+      const o = typeof key === "string" ? findPart(key) : selected;
+      if (!o) return 0;
+      const n = assign(targetsOf(o, scope), spec);
+      if (selected) onSelect?.(selected.userData, { key: partKey(selected), normal: null });
+      return n;
+    },
+    /** What a part shows now: { key, spec, how ("user" or the IFC's), name, ifcType, storey, face }. */
+    partInfo(key) {
+      const o = key ? findPart(key) : selected;
+      if (!o) return null;
+      return { key: partKey(o), spec: specOf(o), how: o.userData.assigned ? "user" : o.userData.mat?.how, ifcName: o.userData.mat?.ifcName, name: o.userData.name, ifcType: o.userData.ifcType,
+        storey: o.userData.storey, face: o.userData.faceName || null, base: o.userData.mat?.id || null, count: { same: targetsOf(o, "same").length, typeFloor: targetsOf(o, "type-floor").length, type: targetsOf(o, "type").length } };
+    },
+    /** The part under a point of the page (for dropping a material from the library onto the model). */
+    partAt(clientX, clientY) { const h = hitAt({ clientX, clientY }); return h ? partKey(h.object) : null; },
+    undo() { const s = undoStack.pop(); if (!s) return false; applyMap(s.before); redoStack.push(s); changed(); if (selected) onSelect?.(selected.userData, { key: partKey(selected) }); return true; },
+    redo() { const s = redoStack.pop(); if (!s) return false; applyMap(s.after); undoStack.push(s); changed(); if (selected) onSelect?.(selected.userData, { key: partKey(selected) }); return true; },
+    get canUndo() { return undoStack.length > 0; },
+    get canRedo() { return redoStack.length > 0; },
+    /** Back to the IFC's own materials: one part, or everything (one step to undo). */
+    resetMaterials(key = null) {
+      const list = key ? [findPart(key)].filter(Boolean) : elements.filter(e => e.userData.assigned);
+      return list.length ? assign(list, null) : 0;
+    },
+    /** The saved assignments, applied as they come (no undo step). */
+    setAssignments(map) { applyMap(Object.fromEntries(Object.entries(assignments()).map(([k]) => [k, null]))); applyMap(map || {}); undoStack = []; redoStack = []; },
+    assignments,
+    onAssign(fn) { onAssign = fn; },
+    select(key) { const o = key ? findPart(key) : null; select(o); return !!o; },
     guides, beginGuide, guideFrame, endGuide, along, shotPath, showPose, currentPose, materialGroups,
     /** Every part with its library material (for tests and the Materials panel): type, name, material, how, mean normal. */
     debugParts() {
@@ -1067,7 +1219,7 @@ export function createViewer(host, { onSelect } = {}) {
         const n = e.geometry.attributes.normal, s = [0, 0, 0];
         for (let i = 0; i < n.count; i++) { s[0] += n.getX(i); s[1] += n.getY(i); s[2] += n.getZ(i); }
         const L = Math.hypot(...s) || 1;
-        return { type: e.userData.ifcType, name: e.userData.name, pre: e.userData.predefined, tag: e.userData.tag, mat: e.userData.mat?.id, how: e.userData.mat?.how, ifcName: e.userData.mat?.ifcName, seeThrough: (e.userData.mat && e.material.transparent) || false, n: s.map(x => x / L) };
+        return { type: e.userData.ifcType, name: e.userData.name, pre: e.userData.predefined, tag: e.userData.tag, mat: e.userData.mat?.id, how: e.userData.mat?.how, ifcName: e.userData.mat?.ifcName, seeThrough: (e.userData.mat && e.material.transparent) || false, n: s.map(x => x / L), userMat: e.userData.assigned?.id || null, face: e.userData.faceName || null, key: partKey(e) };
       });
     },
     get facts() {

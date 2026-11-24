@@ -105,6 +105,18 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.select_option("#lightQuality", "fast"); page.select_option("#lightApron", "mt-gravel")
         assert page.evaluate("JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('ollic.light.')))).apron") == "mt-gravel"
         page.click("#lightPresets [data-preset=sunny]"); page.select_option("#lightQuality", "high"); page.click("#lightBtn")
+        # the Materials panel: the library is there; a material applied to a part is saved on the server for this model
+        page.click("#matBtn"); page.wait_for_selector("#matPanel:not([hidden]) .mp-swatch")
+        assert page.locator("#mpGrid .mp-swatch").count() >= 80
+        key = page.evaluate("(() => { const v = window.__ollic.viewer; const p = v.debugParts().find(p => p.type && p.type.startsWith('IfcWall')); v.select(p.key); return p.key; })()")
+        page.wait_for_function("document.querySelector('#mpPart b')")
+        page.click("[data-id=mt-travertine]"); page.click("#mpApply")
+        page.wait_for_function("document.querySelector('#mpMsg').textContent === 'Saved.'", timeout=10000)
+        model_id = page.evaluate("window.__ollic.modelId")
+        assert stack["repo"].model_materials[model_id]["assignments"][key]["id"] == "mt-travertine"
+        page.click("#mpUndo"); page.wait_for_function("document.querySelector('#mpMsg').textContent === 'Saved.'", timeout=10000)
+        assert stack["repo"].model_materials[model_id]["assignments"] == {}
+        page.click("#matBtn")
 
         # 2. "Capture view": the view goes into the render box; the AI reads it (and the model) and writes the prompt
         page.click("#useView")
