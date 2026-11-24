@@ -13,7 +13,7 @@ const WEB = fileURLToPath(new URL("../../web/", import.meta.url));
 const OUT = process.argv[2] || "out/sketch";
 mkdirSync(OUT, { recursive: true });
 
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml" };
+const TYPES = { ".wasm": "application/wasm", ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff": "font/woff", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml" };
 export function serve(root = WEB) {
   const srv = createServer(async (req, res) => {
     const path = normPath(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^([/\\])+/, "");

@@ -117,6 +117,12 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         page.click("#mpUndo"); page.wait_for_function("document.querySelector('#mpMsg').textContent === 'Saved.'", timeout=10000)
         assert stack["repo"].model_materials[model_id]["assignments"] == {}
         page.click("#matBtn")
+        # Photo mode: it starts refining; stopping keeps the picture so far, ready to save as PNG
+        page.click("#photoBtn"); page.select_option("#photoSize", "1280"); page.select_option("#photoSamples", "96")
+        page.click("#photoGo"); page.wait_for_function("document.querySelector('#photoProgress').value > 0", timeout=120000)
+        page.click("#photoStop"); page.wait_for_selector("#photoSave:not([hidden])", timeout=120000)
+        assert page.get_attribute("#photoSave", "href").startswith("data:image/png") and "1280x" in page.get_attribute("#photoSave", "download")
+        page.click("#photoBtn")
 
         # 2. "Capture view": the view goes into the render box; the AI reads it (and the model) and writes the prompt
         page.click("#useView")

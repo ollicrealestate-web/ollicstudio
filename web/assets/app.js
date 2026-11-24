@@ -569,6 +569,34 @@ document.querySelectorAll("[data-hold]").forEach(b => {
 });
 
 let matPanel = null, prefsTimer = 0;
+/* Photo mode: a path-traced still of the view, up to 4K */
+let photoRun = null;
+$("#photoBtn").onclick = () => { const p = $("#photoPanel"), open = p.hidden; p.hidden = !open; $("#photoBtn").setAttribute("aria-expanded", String(open)); };
+$("#photoGo").onclick = async () => {
+  if (!viewer || photoRun) return;
+  const w = +$("#photoSize").value, cv = $("#viewer canvas"), shape = $("#photoShape").value === "view" ? (cv.clientWidth / cv.clientHeight || 16 / 9) : +$("#photoShape").value;
+  const h = Math.round(w / shape / 2) * 2, samples = +$("#photoSamples").value, ctrl = new AbortController(), started = performance.now();
+  photoRun = ctrl;
+  $("#photoGo").disabled = true; $("#photoStop").hidden = false; $("#photoSave").hidden = true; $("#photoProgress").hidden = false; $("#photoProgress").value = 0;
+  $("#photoMsg").textContent = `Making a ${w} x ${h} photo…`;
+  let last = null;
+  try {
+    last = await viewer.photo({ width: w, height: h, samples, signal: ctrl.signal, onProgress: (f, canvas) => {
+      $("#photoProgress").value = f;
+      if (performance.now() - (photoRun.shown || 0) > 1500) { photoRun.shown = performance.now(); $("#photoImg").src = canvas.toDataURL("image/jpeg", 0.8); $("#photoImg").hidden = false; photoRun.partial = canvas.toDataURL("image/png"); }
+    } });
+  } catch (err) {
+    if (err.name === "AbortError") last = photoRun.partial || null;
+    else { $("#photoMsg").textContent = "The photo could not be made on this device: " + err.message; }
+  }
+  if (last) {
+    $("#photoImg").src = last; $("#photoImg").hidden = false;
+    $("#photoSave").href = last; $("#photoSave").download = `${(current?.name || "model").replace(/[^\w -]+/g, "")} photo ${w}x${h}.png`; $("#photoSave").hidden = false;
+    $("#photoMsg").textContent = `Done in ${Math.round((performance.now() - started) / 1000)} s.`;
+  }
+  $("#photoGo").disabled = false; $("#photoStop").hidden = true; $("#photoProgress").hidden = true; photoRun = null;
+};
+$("#photoStop").onclick = () => photoRun?.abort();
 $("#matBtn").onclick = () => { const p = $("#matPanel"), open = p.hidden; p.hidden = !open; $("#matBtn").setAttribute("aria-expanded", String(open)); };
 $("#viewReset").onclick = () => viewer?.reset();
 
