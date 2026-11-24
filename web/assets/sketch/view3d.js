@@ -193,6 +193,12 @@ export class View3D {
   }
 
   /** Looks from a named corner (for screenshots and the view cube). */
+  /** Looks from a direction (three.js x, y, z; y up), then fits the model. */
+  lookDir(d) {
+    const t = this.controls.target, dist = this.camera.position.distanceTo(t);
+    this.camera.position.copy(t.clone().add(new THREE.Vector3(...d).normalize().multiplyScalar(dist)));
+    this.fit();
+  }
   lookFrom(dirName) {
     const d = { ne: [1, 0.8, -1], nw: [-1, 0.8, -1], se: [1, 0.8, 1], sw: [-1, 0.8, 1], top: [0, 1, 0.0001] }[dirName] || [1, 0.8, 1];
     const t = this.controls.target, dist = this.camera.position.distanceTo(t);
