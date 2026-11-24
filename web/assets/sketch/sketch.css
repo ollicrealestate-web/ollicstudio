@@ -181,3 +181,29 @@ button { cursor: pointer; }
 .sk-dialog td select { width: 100%; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 5px; padding: 4px 6px; color: inherit; }
 .sk-dialog td input[type=checkbox] { width: auto; }
 .sk-dialog .opt { color: var(--muted); font-size: 11px; }
+/* Ollic AI panel and the AI proposal */
+.sk-body { position: relative; }
+.sk-ai { position: absolute; top: 8px; right: 8px; bottom: 8px; width: min(380px, calc(100% - 16px)); z-index: 25; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.5); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.sk-ai[hidden] { display: none; }
+.sk-ai .ai-head { display: flex; align-items: center; justify-content: space-between; }
+.sk-ai .ai-head .icon-btn { font-size: 18px; line-height: 1; width: 28px; height: 28px; }
+.sk-ai .ai-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sk-ai .ai-count, .sk-ai .ai-meta, .sk-ai .ai-note { color: var(--muted); font-size: 12px; }
+.sk-ai .ai-seg { display: flex; gap: 4px; margin: 8px 0; flex-wrap: wrap; }
+.sk-ai .ai-seg button { background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px 10px; color: inherit; }
+.sk-ai .ai-seg button[aria-pressed=true] { background: #2b4a7a; border-color: #3b82f6; }
+.sk-ai .ai-items { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.sk-ai .ai-items li { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 4px; }
+.sk-ai .ai-title { all: unset; cursor: pointer; font-weight: 600; font-size: 13px; }
+.sk-ai .ai-title:focus-visible { outline: 2px solid #3b82f6; }
+.sk-ai .ai-title .n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 10px; background: #2b4a7a; font-size: 11px; margin-right: 6px; }
+.sk-ai .ai-acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.sk-ai .ai-acts .btn { padding: 3px 9px; font-size: 12px; }
+.sk-ai .ai-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.cmp { position: relative; width: 100%; overflow: hidden; border-radius: 8px; background: #0c0c0e; user-select: none; }
+.cmp > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cmp-before { position: absolute; inset: 0 auto 0 0; overflow: hidden; }
+.cmp-before img { display: block; height: 100%; max-width: none; object-fit: cover; }
+.cmp-line { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; }
+.cmp-tag { position: absolute; top: 8px; font-size: 11px; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 4px; }
+.cmp-tag.l { left: 8px; } .cmp-tag.r { right: 8px; }

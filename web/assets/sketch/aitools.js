@@ -12,6 +12,7 @@ import { defaultProfiles, makeWallSweep, makeExtrusion, wallSweepGeometry, extru
 import { KINDS, buildDetail, wallFace, hostEdges } from "./details.js";
 import { checkParts, partBoxes, modelSolids, penetration } from "./checks.js";
 import { MATERIALS, checkMaterial } from "./library.js";
+import { inProposal, proposeMaterial } from "./options.js";
 
 const fail = msg => { throw new Error(msg); };
 
@@ -269,6 +270,10 @@ function WRITE(doc, name, T, a, ctx) {
     for (const id of list) {
       const f = findById(doc, id) || fail(`There is no element "${id}".`), el = f.el;
       if (!["walls", "floors", "roofs", "openings", "components", "details"].includes(f.coll)) fail(`${id} cannot take a material.`);
+      if (f.coll === "components" && el.isVoid) fail(`${id} is a void; it has no material.`);
+      if (a.face && f.coll === "walls" && el.shape !== "line") fail(`Wall ${id} is curved; face finishes go on straight walls.`);
+      // working in a design option: your element keeps its material; the new one is proposed until you accept it
+      if (ctx.option && !inProposal(el)) { proposeMaterial(el, m, f.coll === "walls" && a.face ? (a.face === "interior" ? "interior" : "exterior") : null, a.plan_item ?? ctx.planItem); continue; }
       if (f.coll === "details") { el.args = { ...el.args, material: m }; continue; } // materials may be set on any element
       if (f.coll === "components" && el.isVoid) fail(`${id} is a void; it has no material.`);
       if (a.face && f.coll === "walls") { if (el.shape !== "line") fail(`Wall ${id} is curved; face finishes go on straight walls.`); el.finishes = { ...(el.finishes || {}), [a.face === "interior" ? "interior" : "exterior"]: m }; }

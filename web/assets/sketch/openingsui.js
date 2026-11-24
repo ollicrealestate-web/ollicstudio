@@ -225,7 +225,7 @@ export function buildOpenings3D(group, THREE, app, visible) {
     g.position.set(f.mid.x / 1000, f.zSill / 1000, -f.mid.y / 1000);
     g.rotation.y = ang;
     const fr = (f.t.frame || 50) / 1000;
-    const frameMat = style === "wire" ? null : new THREE.MeshStandardMaterial({ color: sel ? 0x3b82f6 : o.material ? new THREE.Color(matColor(o.material)) : 0x6b4a2f, roughness: 0.8 });
+    const frameMat = style === "wire" ? null : new THREE.MeshStandardMaterial({ color: sel ? 0x3b82f6 : (app.matOf?.(o) ?? o.material) ? new THREE.Color(matColor(app.matOf?.(o) ?? o.material)) : 0x6b4a2f, roughness: 0.8 });
     const box = (sx, sy, sz, x, y, z, mat) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat); m.position.set(x, y, z); m.userData.id = o.id; g.add(m); return m; };
     if (frameMat) {
       box(fr, hgt, thick, -width / 2 + fr / 2, hgt / 2, 0, frameMat); box(fr, hgt, thick, width / 2 - fr / 2, hgt / 2, 0, frameMat);
