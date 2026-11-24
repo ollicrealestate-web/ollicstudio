@@ -17,6 +17,7 @@ import * as OP from "./openings.js";
 import { startFloorSketch, cancelSketch, finishSketch, BoundaryTool, drawFloors, floorsAt, buildFloors3D, floorProps, wireFloorProps, sketchProps, wireSketchProps, attachTopDialog } from "./floorsui.js";
 import { floorLoops, floorParts, curvePoints as curvePts } from "./floors.js";
 import { initAiPanel } from "./aipanel.js";
+import { dropWithHosts } from "./details.js";
 import { initAiFlow } from "./aiflow.js";
 import { shownMaterial, shownFinishes, OPTION_NAME, hasProposal } from "./options.js";
 import { drawDetails, detailsAt, detailBoxes, buildDetails3D, FINISHING, finishingDialog, detailProps, wireDetailProps } from "./detailsui.js";
@@ -447,9 +448,14 @@ const RIBBON = [
       { id: "parapet", label: "Parapet", icon: "wall", run: () => parapetDialog(app, ui) },
     ] },
     { label: "Ollic AI", items: [{ id: "aiComplete", label: "Complete my design", icon: "threed", run: () => app.completeDesign() }] },
-    { label: "Finishing", items: FINISHING.map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
     { label: "Model", items: [{ id: "modelLine", label: "Model Line", icon: "line", key: "LI", tool: "modelLine" }] },
     { label: "Work Plane", items: [{ id: "refPlane", label: "Ref Plane", icon: "section", key: "RP", tool: "refPlane" }, { id: "workPlane", label: "Set", icon: "levels", run: () => workPlaneDialog(app, ui) }] },
+  ] },
+  { tab: "Finishing", groups: [
+    { label: "Ollic AI", items: [{ id: "aiComplete2", label: "Complete my design", icon: "threed", run: () => app.completeDesign() }] },
+    { label: "Walls", items: FINISHING.filter(f => ["add_cladding", "add_fins", "add_canopy", "set_material"].includes(f.tool)).map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
+    { label: "Slabs and roof", items: FINISHING.filter(f => ["add_edge_sweep", "add_railing", "add_soffit", "add_parapet"].includes(f.tool)).map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
+    { label: "Outside", items: FINISHING.filter(f => ["add_pergola", "add_planter", "add_steps", "add_screen"].includes(f.tool)).map(f => ({ id: `fin-${f.tool}`, label: f.label, icon: f.icon, run: () => finishingDialog(app, f.tool) })) },
   ] },
   { tab: "Modify", groups: [
     { label: "Select", items: [{ id: "select", label: "Modify", icon: "modify", key: "MD", tool: "select" }] },
@@ -828,7 +834,7 @@ function deleteSelection() {
     doc.dimensions = doc.dimensions.filter(d => !ids.includes(d.id));
     doc.texts = doc.texts.filter(t => !ids.includes(t.id));
     doc.components = doc.components.filter(c => !ids.includes(c.id));
-    doc.details = doc.details.filter(d => !ids.includes(d.id));
+    doc.details = dropWithHosts(doc.details.filter(d => !ids.includes(d.id)), new Set([...ids, ...doc.openings.filter(o => ids.includes(o.hostWallId)).map(o => o.id)]));
     doc.referencePlanes = doc.referencePlanes.filter(r => !ids.includes(r.id));
     doc.openings = doc.openings.filter(o => !ids.includes(o.id) && !ids.includes(o.hostWallId));
     doc.tags = doc.tags.filter(t => !ids.includes(t.id) && doc.openings.some(o => o.id === t.hostId));
@@ -1069,9 +1075,9 @@ app.ask = (message, okLabel = "OK") => new Promise(resolve => {
   box.querySelector("#askYes").focus();
 });
 /** In-page text question: resolves the text, or null when cancelled. */
-app.askText = (label, value = "") => new Promise(resolve => {
+app.askText = (label, value = "", max = 80) => new Promise(resolve => {
   const w = $("#askWrap"), box = $("#ask");
-  box.innerHTML = `<label style="display:grid;gap:6px"><span>${esc(label)}</span><input type="text" class="wide" id="askIn" maxlength="80" value="${esc(value)}"></label><div class="actions"><button class="btn" type="button" id="askNo">Cancel</button><button class="btn primary" type="button" id="askYes">OK</button></div>`;
+  box.innerHTML = `<label style="display:grid;gap:6px"><span>${esc(label)}</span><input type="text" class="wide" id="askIn" maxlength="${max}" value="${esc(value)}"></label><div class="actions"><button class="btn" type="button" id="askNo">Cancel</button><button class="btn primary" type="button" id="askYes">OK</button></div>`;
   w.hidden = false;
   const inp = box.querySelector("#askIn");
   const done = v => { w.hidden = true; resolve(v); };

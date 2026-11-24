@@ -24,7 +24,7 @@ await page.waitForFunction(() => window.__sketch?.ready);
 const S = (fn, arg) => page.evaluate(fn, arg);
 const model = () => S(() => JSON.parse(JSON.stringify(window.__sketch.doc)));
 const select = ids => S(ids => { const a = window.__sketch; a.setTool("select"); a.selection.clear(); ids.forEach(id => a.selection.add(id)); a.selectionChanged(); }, ids);
-const ribbon = async id => { await page.locator("#ribbonTabs button", { hasText: "Architecture" }).first().click(); await page.locator(`.sk-tool[data-id='${id}']`).click(); };
+const ribbon = async id => { await page.locator("#ribbonTabs button", { hasText: "Finishing" }).first().click(); await page.locator(`.sk-tool[data-id='${id}']`).click(); };
 const setField = async (k, v) => { const el = page.locator(`#fd_${k}`); if ((await el.evaluate(e => e.tagName)) === "SELECT") await el.selectOption(String(v)); else await el.fill(String(v)); };
 
 await S(async doc => { const M = await import("./assets/sketch/model.js"); window.__sketch.loadDoc(M.normalize(doc)); window.__sketch.setLevel("lv-1"); }, testBox());

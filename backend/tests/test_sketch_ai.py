@@ -149,3 +149,22 @@ def test_estimate_grows_with_pictures_and_items():
     b = estimate_usd("claude-opus-5-5", pictures=7, references=6, summary_kb=8, items=12)
     assert b["high_usd"] > a["high_usd"] > a["low_usd"] > 0
     assert "Never name the company" in RULES and "Ollic AI" in RULES
+
+
+def test_cost_limit_stops_a_session(aclient, alice, repo):
+    s = _session(aclient, alice)
+    repo.ai_sessions[s["id"]]["cost_usd"] = "15.01"
+    r = aclient.post(f"/api/sketch-ai/sessions/{s['id']}/step", json={"stage": "build", "messages": [{"role": "user", "content": "x"}]}, headers=alice["headers"])
+    assert r.status_code == 402 and "cost limit" in r.json()["detail"]
+
+
+def test_busy_assistant_is_retried_and_cache_is_priced_right():
+    from app.sketch_ai import step_cost
+    answers = [httpx.Response(529, json={"error": {"message": "Overloaded"}}), httpx.Response(200, json={"content": [], "stop_reason": "end_turn", "usage": {"input_tokens": 1000, "cache_read_input_tokens": 10000, "output_tokens": 100}})]
+    waits = []
+    ai = ClaudeSketchAI("k", "claude-opus-5-5", client=httpx.Client(base_url="https://api.anthropic.com", transport=httpx.MockTransport(lambda req: answers.pop(0))), sleep=waits.append)
+    out = ai.step(stage="plan", messages=[{"role": "user", "content": "x"}], tools=[])
+    assert waits == [4] and out["stop_reason"] == "end_turn"
+    # 1,000 new + 10,000 cached (at a tenth) input at $4/M, 100 output at $20/M
+    assert float(out["cost_usd"]) == pytest.approx((1000 + 1000) * 4 / 1e6 + 100 * 20 / 1e6)
+    assert float(step_cost("claude-opus-5-5", {"input_tokens": 0, "cache_creation_input_tokens": 1000, "output_tokens": 0})) == pytest.approx(1250 * 4 / 1e6)

@@ -37,8 +37,8 @@ export function renderAiPanel(app) {
   $("#aiBefore").onclick = () => setShown(app, false);
   $("#aiAfter").onclick = () => setShown(app, true);
   $("#aiCompare").onclick = () => compare(app);
-  $("#aiAcceptAll").onclick = () => { app.commit(`Accept all (${OPTION_NAME})`, doc => acceptAll(doc)); app.toast("The proposal is now part of your model. Everything in it can be edited by hand."); };
-  $("#aiDiscard").onclick = async () => { if (await app.ask(`Discard the whole ${OPTION_NAME}? Your model stays as it is.`, "Discard")) app.commit(`Discard ${OPTION_NAME}`, doc => discardAll(doc)); };
+  $("#aiAcceptAll").onclick = () => { app.commit(`Accept all (${OPTION_NAME})`, doc => acceptAll(doc)); app.aiPanel.closed?.("accepted"); app.toast("The proposal is now part of your model. Everything in it can be edited by hand."); };
+  $("#aiDiscard").onclick = async () => { if (await app.ask(`Discard the whole ${OPTION_NAME}? Your model stays as it is.`, "Discard")) { app.commit(`Discard ${OPTION_NAME}`, doc => discardAll(doc)); app.aiPanel.closed?.("discarded"); } };
   box.querySelectorAll(".ai-items li").forEach(li => {
     const it = items.find(x => x.key === li.dataset.key), all = [...it.ids, ...it.materialIds];
     li.querySelectorAll("button[data-act]").forEach(b => b.onclick = () => {

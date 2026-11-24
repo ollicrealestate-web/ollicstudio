@@ -130,3 +130,15 @@ test("details follow their hosts: the railing's base moves with its level", () =
   near(range(doc, r.ids[0]).z0, 3300, 0.5, "follows");
   assert.throws(() => buildDetail(doc, "railing", { edges: ["F9:e1"] }), /not a floor or a roof/);
 });
+
+test("deleting a wall or floor trims or removes the details on it", async () => {
+  const { dropWithHosts } = await import("../../web/assets/sketch/details.js");
+  const { doc, h } = setup();
+  ok(runTool(h, "add_cladding", { wall_ids: ["S1", "E1"], material: "mt-travertine" }, AI));
+  ok(runTool(h, "add_railing", { edges: ["F2:exposed"], type: "glass", height: 1100, material: "mt-steel-brushed" }, AI));
+  ok(runTool(h, "add_canopy", { opening_id: "D1", depth: 1200, material: "mt-concrete" }, AI));
+  const kept = dropWithHosts(doc.details, new Set(["S1", "D1"]));
+  assert.deepEqual(kept.map(d => d.kind), ["cladding", "railing"]);
+  assert.deepEqual(kept[0].args.wall_ids, ["E1"]);
+  assert.deepEqual(dropWithHosts(doc.details, new Set(["F2"])).map(d => d.kind), ["cladding", "canopy"]);
+});

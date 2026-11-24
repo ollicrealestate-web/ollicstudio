@@ -20,6 +20,7 @@ export function initAiFlow(app) {
   app.aiPanel.extraHtml = () => flowHtml(app);
   app.aiPanel.wire = box => wireFlow(app, box);
   app.aiPanel.change = (a, item) => changeItem(app, item);
+  app.aiPanel.closed = status => save(app, { status, log: F.log, chat: F.chat });
   F.transport = null;
   return F;
 }
@@ -161,8 +162,7 @@ async function build(app) {
       F.progress[n] = input.ok === false ? "failed" : "done";
       if (input.note) F.log.push({ name: "item_done", ok: input.ok !== false, message: `Item ${n}: ${input.note}`, item: n });
       const it = F.plan.find(x => x.n === n);
-      app.history.squash(s => s.label.startsWith(`Item ${n}: `) && !s.squashed, `${fix ? "Fix item" : "Item"} ${n}${it ? `: ${it.title}` : ""}`);
-      if (app.history.undoStack.at(-1)) app.history.undoStack.at(-1).squashed = true;
+      if (app.history.squash(s => s.label.startsWith(`Item ${n}: `) && !s.squashed, `${fix ? "Fix item" : "Item"} ${n}${it ? `: ${it.title}` : ""}`)) app.history.undoStack.at(-1).squashed = true;
       render(app);
       return { result: "Noted." };
     };
@@ -200,7 +200,7 @@ async function build(app) {
 async function changeItem(app, item) {
   const F = app.aiFlow;
   if (!F.session || item.planItem == null) { app.toast("This item was not made in this session; edit it by hand (select it, then Edit in Properties)."); return; }
-  const words = await app.askText(`What should change in item ${item.planItem} (${item.title})?`);
+  const words = await app.askText(`What should change in item ${item.planItem} (${item.title})?`, "", 400);
   if (!words) return;
   F.busy = `Changing item ${item.planItem}…`; say(app, "you", `Item ${item.planItem}: ${words}`); render(app);
   try {
@@ -225,6 +225,7 @@ function flowHtml(app) {
   let body = "";
   if (F.step === "notready") body = `<p><b>Before Ollic AI can complete the design:</b></p><ul class="ai-issues">${F.issues.map(i => `<li>${esc(i)}</li>`).join("")}</ul><button class="btn" type="button" id="aiRecheck">Check again</button>`;
   else if (F.step === "setup") body = setupHtml(app);
+  else if (F.step === "past") body = pastHtml(app);
   else if (F.step === "questions") body = questionsHtml(app);
   else if (F.step === "plan") body = planHtml(app);
   else if (F.step === "building" || F.step === "review") body = progressHtml(app);
@@ -244,7 +245,8 @@ function setupHtml(app) {
       ${F.refs.length < MAX_REFS ? `<label class="btn ai-upload">Add pictures<input type="file" id="aiFiles" accept="image/jpeg,image/png,image/webp" multiple hidden></label>` : ""}</fieldset>
     <label class="ai-field"><span>Describe the style you want (optional)</span><textarea id="aiDesc" rows="3" maxlength="2000" placeholder="e.g. Modern Nigerian duplex, travertine and teak, glass balconies, a big thin roof overhang">${esc(F.description)}</textarea></label>
     <p class="ai-note">Ollic AI completes your design; it does not move your walls, levels, rooms or openings. Everything it adds goes into the AI proposal for you to accept.</p>
-    <div class="ai-foot"><span class="ai-cost" id="aiEst"></span><button class="btn primary" type="button" id="aiStart">Start</button></div>`;
+    <div class="ai-foot"><span class="ai-cost" id="aiEst"></span><button class="btn primary" type="button" id="aiStart">Start</button></div>
+    <button class="btn" type="button" id="aiPast">Past sessions</button>`;
 }
 function questionsHtml(app) {
   const F = app.aiFlow, esc = app.ui.esc;
@@ -256,10 +258,14 @@ function questionsHtml(app) {
 }
 function planHtml(app) {
   const F = app.aiFlow, esc = app.ui.esc;
+  if (!F.plan.length) return `<p class="ai-note">Ollic AI has not written a plan yet (see its message above). Answer it here, then press Send.</p>
+    <label class="ai-field"><span>Your answer</span><textarea id="aiTell" rows="3" maxlength="1000">${esc(F.tell || "")}</textarea></label>
+    <div class="ai-foot"><span></span><button class="btn primary" type="button" id="aiReplan">Send</button></div>`;
   return `<p class="ai-note">Tick what to build. To change an item, write the change under it (for example "make the fins 150 mm apart").</p>
     <ol class="ai-plan">${F.plan.map((it, i) => `<li><label><input type="checkbox" data-on="${i}"${it.on ? " checked" : ""}> <span class="n">${it.n}</span><b>${esc(it.title)}</b></label>
       <div class="ai-meta">${esc(it.what)} · ${esc(it.where)}${it.sizes ? ` · ${esc(it.sizes)}` : ""}${it.material ? ` · ${esc(it.material)}` : ""}${it.image ? ` · from image ${it.image}` : ""}</div>
       <input class="wide" data-change="${i}" placeholder="Change in words (optional)" value="${esc(it.change)}"></li>`).join("")}</ol>
+    <label class="ai-field"><span>Tell Ollic AI (optional): a question, or a change to the whole plan</span><textarea id="aiTell" rows="2" maxlength="1000">${esc(F.tell || "")}</textarea></label>
     <div class="ai-foot"><button class="btn" type="button" id="aiReplan">Rewrite plan with my changes</button><button class="btn primary" type="button" id="aiBuild">Build</button></div>`;
 }
 function progressHtml(app) {
@@ -306,7 +312,17 @@ function wireFlow(app, box) {
   // plan
   box.querySelectorAll("[data-on]").forEach(c => c.onchange = () => { F.plan[+c.dataset.on].on = c.checked; });
   box.querySelectorAll("[data-change]").forEach(c => c.oninput = () => { F.plan[+c.dataset.change].change = c.value; });
-  q("#aiReplan")?.addEventListener("click", () => { const ch = F.plan.filter(i => i.change.trim()).map(i => `item ${i.n}: ${i.change.trim()}`).join("; "); const off = F.plan.filter(i => !i.on).map(i => i.n); if (!ch && !off.length) { app.toast("Write a change under an item first."); return; } plan(app, [ch, off.length ? `leave out items ${off.join(", ")}` : ""].filter(Boolean).join("; ")); });
+  const tell = q("#aiTell"); if (tell) tell.oninput = () => { F.tell = tell.value; };
+  q("#aiReplan")?.addEventListener("click", () => {
+    const ch = F.plan.filter(i => i.change.trim()).map(i => `item ${i.n}: ${i.change.trim()}`).join("; "), off = F.plan.filter(i => !i.on).map(i => i.n), told = (F.tell || "").trim();
+    if (!ch && !off.length && !told) { app.toast("Write a change first."); return; }
+    if (told) say(app, "you", told);
+    F.tell = "";
+    plan(app, [told, ch, off.length ? `leave out items ${off.join(", ")}` : ""].filter(Boolean).join("; "));
+  });
+  q("#aiPast")?.addEventListener("click", () => pastSessions(app));
+  box.querySelectorAll("[data-past]").forEach(b => b.onclick = () => openPast(app, b.dataset.past));
+  q("#aiPastBack")?.addEventListener("click", () => { F.step = "setup"; F.past = null; render(app); });
   q("#aiBuild")?.addEventListener("click", () => build(app));
   const chat = q("#aiChat"); if (chat) chat.scrollTop = chat.scrollHeight;
 }
@@ -323,4 +339,36 @@ function estimate(app, box) {
       if (e) el.textContent = `Estimated cost: ${usd(e.low_usd)}–${usd(e.high_usd)}`;
     } catch { /* the estimate is shown again when the session starts */ }
   }, 200);
+}
+
+// --------------------------------------------------------------------------- past sessions (what was done and why)
+async function pastSessions(app) {
+  const F = app.aiFlow;
+  F.step = "past"; F.past = { list: null }; render(app);
+  try { F.past.list = await (await transport(app)).list(app.store?.cloudId || null); } catch (e) { F.past.error = e.message; }
+  render(app);
+}
+async function openPast(app, id) {
+  const F = app.aiFlow;
+  try { F.past.open = await (await transport(app)).get(id); } catch (e) { F.past.error = e.message; }
+  render(app);
+}
+function pastHtml(app) {
+  const F = app.aiFlow, esc = app.ui.esc, P = F.past || {};
+  const back = `<button class="btn" type="button" id="aiPastBack">Back</button>`;
+  if (P.error) return `<div class="err">${esc(P.error)}</div>${back}`;
+  if (!P.list) return `<p class="ai-note">Loading…</p>${back}`;
+  const when = t => new Date(t).toLocaleString();
+  if (P.open) {
+    const s = P.open, r = s.report || {};
+    return `<p><b>${esc(when(s.created_at))}</b> · ${esc(s.status)} · ${esc(s.detail || "")} · cost ${usd(s.cost_usd)}</p>
+      ${(s.refs || []).length ? `<div class="ai-refs">${s.refs.map(x => x.url ? `<figure><img src="${esc(x.url)}" alt="${esc(x.name || "")}"></figure>` : "").join("")}</div>` : ""}
+      <div class="ai-chat">${(s.chat || []).map(m => `<div class="msg ${m.from === "ai" ? "ai" : "you"}"><b>${m.from === "ai" ? "Ollic AI" : "You"}</b> ${esc(m.text)}</div>`).join("")}</div>
+      ${(s.plan || []).length ? `<p class="ai-note">Plan</p><ol class="ai-progress">${s.plan.map(i => `<li>${esc(`${i.n}. ${i.title}${i.on === false ? " (not built)" : ""}${i.change ? ` — your change: ${i.change}` : ""}`)}</li>`).join("")}</ol>` : ""}
+      ${r.built ? `<div class="ai-report"><b>Report</b>${[["Built", r.built], ["Could not build, or simplified", r.not_built || []], ["Please check", r.please_check || []]].filter(([, l]) => l.length).map(([h, l]) => `<p>${h}:</p><ul>${l.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}</div>` : ""}
+      <p class="ai-note">${(s.log || []).length} commands recorded${(s.log || []).filter(l => !l.ok).length ? `, ${(s.log || []).filter(l => !l.ok).length} refused by the checks` : ""}.</p>
+      <details><summary>Commands</summary><ol class="ai-log">${(s.log || []).map(l => `<li>${l.ok ? "✓" : "✕"} ${esc(l.name)}${l.item != null ? ` (item ${l.item})` : ""}: ${esc(l.message || "")}</li>`).join("")}</ol></details>${back}`;
+  }
+  if (!P.list.length) return `<p class="ai-note">No sessions yet${app.store?.cloudId ? " for this sketch" : ""}.</p>${back}`;
+  return `<ul class="ai-past">${P.list.map(s => `<li><button type="button" class="btn" data-past="${esc(s.id)}">${esc(when(s.created_at))} · ${esc(s.status)} · ${usd(s.cost_usd)}</button></li>`).join("")}</ul>${back}`;
 }

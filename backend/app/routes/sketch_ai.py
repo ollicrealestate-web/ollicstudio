@@ -136,6 +136,9 @@ def step(sid: uuid.UUID, body: StepIn, request: Request, user: CurrentUser = Dep
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Unknown stage: {body.stage}.")
     if row.get("status") in ("accepted", "discarded", "stopped"):
         raise HTTPException(status.HTTP_409_CONFLICT, "This session is finished. Start a new one with Complete my design.")
+    limit = request.app.state.settings.sketch_ai_session_limit_usd
+    if float(row.get("cost_usd") or 0) >= limit:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, f"This session has reached its cost limit (${limit:.2f}). Review what was built, or start a new session.")
     if len(json.dumps(body.messages)) > MAX_STEP_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Too many pictures in one step. Remove some reference images.")
     try:
