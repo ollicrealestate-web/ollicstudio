@@ -118,11 +118,13 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         assert stack["repo"].model_materials[model_id]["assignments"] == {}
         page.click("#matBtn")
         # Photo mode: it starts refining; stopping keeps the picture so far, ready to save as PNG
-        page.click("#photoBtn"); page.select_option("#photoSize", "1280"); page.select_option("#photoSamples", "96")
+        # (a small still: the test browser draws on the CPU, and a big one keeps the page busy for minutes)
+        page.click("#photoBtn"); page.evaluate("document.querySelector('#photoSize').add(new Option('Test (320 wide)', '320'))")
+        page.select_option("#photoSize", "320"); page.select_option("#photoSamples", "96")
         page.click("#photoGo"); page.wait_for_function("document.querySelector('#photoProgress').value > 0", timeout=120000)
         page.evaluate("document.querySelector('#photoStop').click()")   # the page is busy drawing; a click is taken between samples
         page.wait_for_selector("#photoSave:not([hidden])", timeout=180000)
-        assert page.get_attribute("#photoSave", "href").startswith("data:image/png") and "1280x" in page.get_attribute("#photoSave", "download")
+        assert page.get_attribute("#photoSave", "href").startswith("data:image/png") and "320x" in page.get_attribute("#photoSave", "download")
         page.click("#photoBtn")
 
         # 2. "Capture view": the view goes into the render box; the AI reads it (and the model) and writes the prompt
