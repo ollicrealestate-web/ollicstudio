@@ -96,16 +96,38 @@ export function readiness(doc) {
   for (const l of lv) {
     const walls = doc.walls.filter(w => w.baseLevelId === l.id && wallType(doc, w).function === "exterior");
     if (!walls.length) continue;
-    if (!closedRing(walls)) issues.push(`The outer walls on ${l.name} do not close into a loop yet.`);
+    if (!hasRing(doc.walls.filter(w => w.baseLevelId === l.id))) issues.push(`The outer walls on ${l.name} do not close into a loop yet.`);
   }
   const withWalls = lv.filter(l => doc.walls.some(w => w.baseLevelId === l.id));
   for (const l of withWalls.slice(1)) if (!doc.floors.some(f => f.levelId === l.id)) issues.push(`${l.name} has no floor yet.`);
   if (!doc.floors.length && !doc.roofs.length) issues.push("Add a floor or a roof.");
   return issues;
 }
-/** Do these walls' ends all meet another wall's end (a closed loop or loops)? */
-function closedRing(walls) {
-  const ends = walls.flatMap(w => (w.shape === "arc" ? [G.arcStart(w), G.arcEnd(w)] : [w.a, w.b]));
-  const onOther = (p, k) => walls.some((w, j) => j !== k && (w.shape === "arc" ? Math.abs(G.dist(p, w.c) - w.r) <= 5 : G.projectOnSegment(p, w.a, w.b).dist <= 5));
-  return ends.every((p, i) => onOther(p, Math.floor(i / 2))) || walls.every(w => w.shape === "arc" && G.isCircle(w));
+/**
+ * Is there a closed ring of walls round the building on this level? Walls are joined where an end meets another
+ * wall (at its end or along it). Things that stand on their own are fine: a round column is closed by itself and is
+ * not the building's ring, and a free-standing wall or fin with loose ends does not stop a ring from being closed.
+ */
+export function hasRing(walls, tol = 5) {
+  const selfClosed = w => w.shape === "arc" && (Math.abs(Math.abs(w.sweep) - 2 * Math.PI) < 1e-3 || G.dist(G.arcStart(w), G.arcEnd(w)) <= 2);
+  const ws = walls.filter(w => !selfClosed(w));
+  if (!ws.length) return false;
+  const endsOf = w => (w.shape === "arc" ? [G.arcStart(w), G.arcEnd(w)] : [w.a, w.b]);
+  // the points along each wall where something joins it: its ends, and any other wall's end that lands on it
+  const nodes = [], nodeAt = p => { let k = nodes.findIndex(q => G.dist(p, q) <= tol); if (k < 0) { nodes.push(p); k = nodes.length - 1; } return k; };
+  const onWall = (p, w) => (w.shape === "arc" ? Math.abs(G.dist(p, w.c) - w.r) <= tol : G.projectOnSegment(p, w.a, w.b).dist <= tol);
+  const along = (p, w) => (w.shape === "arc" ? ((Math.atan2(p.y - w.c.y, p.x - w.c.x) - w.start) / w.sweep + 4) % 1 : G.projectOnSegment(p, w.a, w.b).t);
+  const parent = [], find = k => { while (parent[k] !== k) k = parent[k] = parent[parent[k]]; return k; };
+  const link = (a, b) => { while (parent.length <= Math.max(a, b)) parent.push(parent.length); const ra = find(a), rb = find(b); if (ra === rb) return a !== b; parent[ra] = rb; return false; };
+  for (const w of ws) {
+    const [a, b] = endsOf(w);
+    const stops = [{ p: a, t: 0 }, { p: b, t: 1 }];
+    for (const v of ws) if (v !== w) for (const p of endsOf(v)) if (onWall(p, w)) stops.push({ p, t: along(p, w) });
+    stops.sort((x, y) => x.t - y.t);
+    for (let k = 1; k < stops.length; k++) {
+      const n1 = nodeAt(stops[k - 1].p), n2 = nodeAt(stops[k].p);
+      if (n1 !== n2 && link(n1, n2)) return true;   // joining two points already joined: a closed ring
+    }
+  }
+  return false;
 }

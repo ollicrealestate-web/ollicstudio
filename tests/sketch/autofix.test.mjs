@@ -5,7 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { testBox } from "./testbox.mjs";
 import { History } from "../../web/assets/sketch/history.js";
-import { readiness } from "../../web/assets/sketch/summary.js";
+import { readiness, hasRing } from "../../web/assets/sketch/summary.js";
+import { makeWall } from "../../web/assets/sketch/walls.js";
 import { prepareModel } from "../../web/assets/sketch/autofix.js";
 import { openingFrame } from "../../web/assets/sketch/openings.js";
 import * as G from "../../web/assets/sketch/geom.js";
@@ -36,7 +37,8 @@ test("ends short of a corner, past a corner, and a missing wall are all closed; 
   assert.deepEqual(r.issues, [], r.issues.join(" | "));
   assert.ok(r.done.some(t => /joined/.test(t)) && r.done.some(t => /added a 8\.00 m outer wall/.test(t)) && r.done.some(t => /floor on Level 2/.test(t)), r.done.join(" | "));
   assert.deepEqual(wall(doc, "W1").b, { x: 0, y: 8000 });
-  assert.deepEqual(wall(doc, "N1").b, { x: 10000, y: 8000 });
+  // a wall running past a corner is left as drawn (it may be a fin); only what closes the ring is changed
+  assert.deepEqual(wall(doc, "N1").b, { x: 10600, y: 8000 });
   assert.deepEqual(wall(doc, "S1").a, { x: 10000, y: 0 });
   // the openings on the south wall did not move (the wall's start moved, their positions were kept in space)
   mids(doc).forEach((p, i) => assert.ok(G.dist(p, openings[i]) < 0.5, `opening ${i} moved ${G.dist(p, openings[i]).toFixed(1)} mm`));
@@ -62,4 +64,26 @@ test("an empty sketch still asks for walls (nothing to start from)", () => {
   const doc = testBox(); doc.walls = []; doc.floors = []; doc.roofs = []; doc.openings = [];
   const r = prepareModel(new History(doc));
   assert.ok(r.issues.some(t => /no outer/.test(t)));
+});
+
+test("round columns and free-standing walls do not stop Complete my design, and are left as they are", () => {
+  const doc = testBox(), h = new History(doc);
+  // four round columns along the front (full-circle outer walls), a column drawn as an arc whose ends meet,
+  // and a free-standing 2 m garden wall, all on Level 1
+  for (const x of [1000, 3500, 6500, 9000]) doc.walls.push(makeWall(doc, { shape: "arc", c: G.P(x, -2500), r: 300, start: 0, sweep: 2 * Math.PI, typeId: "wt-ext225", baseLevelId: "lv-1", topLevelId: "lv-2" }));
+  doc.walls.push(makeWall(doc, { shape: "arc", c: G.P(5000, -2500), r: 300, start: 0.3, sweep: 2 * Math.PI - 1e-6, typeId: "wt-ext225", baseLevelId: "lv-1", topLevelId: "lv-2" }));
+  doc.walls.push(makeWall(doc, { a: G.P(-3000, 1000), b: G.P(-3000, 3000), typeId: "wt-ext225", baseLevelId: "lv-1", unconnectedHeight: 1800 }));
+  const drawn = JSON.stringify(doc.walls);
+  assert.deepEqual(readiness(doc), [], readiness(doc).join(" | "));
+  const r = prepareModel(h);
+  assert.deepEqual(r, { done: [], issues: [] });
+  assert.equal(JSON.stringify(doc.walls), drawn);
+});
+
+test("a ring is found through T-junctions, and not from columns alone", () => {
+  const W = (a, b) => ({ shape: "line", a: G.P(...a), b: G.P(...b) });
+  // an outer ring whose east side is made of two walls meeting another wall part-way along (a T)
+  assert.equal(hasRing([W([0, 0], [0, 5000]), W([0, 5000], [8000, 5000]), W([8000, 6000], [8000, 0]), W([8000, 0], [0, 0])]), true);
+  assert.equal(hasRing([W([0, 0], [0, 5000]), W([0, 5000], [8000, 5000]), W([8000, 4000], [8000, 0]), W([8000, 0], [0, 0])]), false);
+  assert.equal(hasRing([{ shape: "arc", c: G.P(0, 0), r: 300, start: 0, sweep: 2 * Math.PI }]), false);
 });
