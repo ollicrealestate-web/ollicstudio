@@ -70,11 +70,18 @@ def fetch_textures(only=None):
     for key, s in CFG["sets"].items():
         if only and key not in only:
             continue
-        if key in sources and (TEX / key / "color.jpg").exists() and not s.get("prefer") or (s.get("prefer") and sources.get(key, {}).get("asset") == s.get("prefer")):
+        prefer = s.get("prefer") or []
+        prefer = prefer if isinstance(prefer, list) else [prefer]
+        if key in sources and (TEX / key / "color.jpg").exists() and (not prefer or sources[key]["asset"] in prefer):
             continue
         found = search(s["q"])
         cands.append((key, found[:10]))
-        pick = next((a for a in found if a["assetId"] == s.get("prefer")), None) or next((a for a in found if a["assetId"] not in used and zip_url(a)), None)
+        pick = None
+        for pid in prefer:   # a chosen asset, looked up by its id
+            got = json.loads(get("https://ambientcg.com/api/v2/full_json?" + urllib.parse.urlencode({"id": pid, "include": "downloadData,tagData,imageData"}))).get("foundAssets", [])
+            if got and zip_url(got[0]):
+                pick = got[0]; break
+        pick = pick or next((a for a in found if a["assetId"] not in used and zip_url(a)), None)
         if not pick:
             print("NOTHING FOR", key, s["q"]); continue
         data = get(zip_url(pick))

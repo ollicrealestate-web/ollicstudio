@@ -6,62 +6,72 @@
     "painted plaster",
     "plaster"
    ],
-   "cls": "plaster"
+   "cls": "plaster",
+   "prefer": "PaintedPlaster017"
   },
   "render-sand": {
    "q": [
     "plaster",
     "stucco"
    ],
-   "cls": "plaster"
+   "cls": "plaster",
+   "prefer": "Plaster002"
   },
   "render-tyrolean": {
    "q": [
     "plaster",
     "facade"
    ],
-   "cls": "plaster"
+   "cls": "plaster",
+   "prefer": "Plaster004"
   },
   "concrete-fairface": {
    "q": "concrete",
-   "cls": "concrete"
+   "cls": "concrete",
+   "prefer": "Concrete042A"
   },
   "concrete-polished": {
    "q": [
     "concrete",
     "floor"
    ],
-   "cls": "concrete"
+   "cls": "concrete",
+   "prefer": "Concrete030"
   },
   "concrete-board": {
    "q": [
     "concrete",
     "wood formwork"
    ],
-   "cls": "concrete"
+   "cls": "concrete",
+   "prefer": "Concrete031"
   },
   "travertine": {
    "q": "travertine",
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Travertine009"
   },
   "granite-grey": {
    "q": [
     "granite"
    ],
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Granite002A"
   },
   "marble-white": {
    "q": [
     "marble"
    ],
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Marble012"
   },
   "marble-beige": {
    "q": [
     "marble",
     "onyx"
    ],
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Marble014"
   },
   "slate": {
    "q": [
@@ -69,7 +79,8 @@
     "rock dark",
     "tiles slate"
    ],
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Rock031"
   },
   "sandstone": {
    "q": [
@@ -77,48 +88,68 @@
     "rock",
     "stone"
    ],
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Bricks084"
   },
   "terrazzo": {
    "q": [
     "terrazzo",
     "tiles"
    ],
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Terrazzo013"
   },
   "stone-wall": {
    "q": "rock wall",
-   "cls": "stone"
+   "cls": "stone",
+   "prefer": "Rock023"
   },
   "wood-teak": {
    "q": [
     "wood",
     "wood siding"
    ],
-   "cls": "wood"
+   "cls": "wood",
+   "prefer": "Wood092"
   },
   "wood-dark": {
    "q": [
     "wood",
     "wood floor"
    ],
-   "cls": "wood"
+   "cls": "wood",
+   "prefer": "Wood051"
   },
   "wood-planks": {
    "q": "planks",
-   "cls": "wood"
+   "cls": "wood",
+   "prefer": "Planks037A"
   },
   "wood-floor": {
    "q": "wood floor",
-   "cls": "wood"
+   "cls": "wood",
+   "prefer": "WoodFloor051"
   },
   "brick-red": {
-   "q": "bricks",
-   "cls": "brick"
+   "q": [
+    "bricks red",
+    "red brick wall",
+    "bricks"
+   ],
+   "cls": "brick",
+   "prefer": [
+    "Bricks076C",
+    "Bricks076A",
+    "Bricks059",
+    "Bricks101",
+    "Bricks074",
+    "Bricks066"
+   ]
   },
   "brick-buff": {
    "q": "bricks white",
-   "cls": "brick"
+   "cls": "brick",
+   "prefer": "Bricks093"
   },
   "block-concrete": {
    "q": [
@@ -126,53 +157,69 @@
     "bricks concrete",
     "cinder"
    ],
-   "cls": "brick"
+   "cls": "brick",
+   "prefer": "Bricks038"
   },
   "roof-tiles": {
    "q": "roofing tiles",
-   "cls": "roof"
+   "cls": "roof",
+   "prefer": "RoofingTiles015A"
   },
   "roof-metal": {
    "q": "corrugated steel",
-   "cls": "roof"
+   "cls": "roof",
+   "prefer": "CorrugatedSteel005"
   },
   "metal-brushed": {
    "q": [
     "metal",
     "brushed"
    ],
-   "cls": "metal"
+   "cls": "metal",
+   "prefer": "Metal055A"
   },
   "metal-painted": {
    "q": [
     "painted metal",
     "metal"
    ],
-   "cls": "metal"
+   "cls": "metal",
+   "prefer": "Metal061B"
   },
   "grass": {
    "q": "grass",
-   "cls": "grass"
+   "cls": "grass",
+   "prefer": "Grass004"
   },
   "paving": {
    "q": "paving stones",
-   "cls": "paving"
+   "cls": "paving",
+   "prefer": "PavingStones146"
   },
   "gravel": {
    "q": "gravel",
-   "cls": "paving"
+   "cls": "paving",
+   "prefer": "Gravel041"
   },
   "asphalt": {
    "q": "asphalt",
-   "cls": "asphalt"
+   "cls": "asphalt",
+   "prefer": "Asphalt031"
   },
   "soil": {
    "q": "ground soil",
-   "cls": "grass"
+   "cls": "grass",
+   "prefer": "Ground048"
   },
   "fabric": {
    "q": "fabric",
-   "cls": "furniture"
+   "cls": "furniture",
+   "prefer": "Fabric061"
+  },
+  "roof-clay": {
+   "q": "roofing tiles",
+   "cls": "roof",
+   "prefer": "RoofingTiles006"
   }
  },
  "vendor": {
