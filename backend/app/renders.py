@@ -86,31 +86,6 @@ def build_prompt(opts: dict, *, with_reference: bool = False, roles: list[str] |
 SAFE_TAIL = "Do not add any text, labels, logos or watermarks."
 
 
-def _reference_scene(state, user, job, scene_images) -> str:
-    """The reference pictures' scene in words, read on their own by Ollic AI (never their building); empty without it."""
-    from .render_prompt import PromptUnavailable, read_reference_scene
-    writer = getattr(state, "prompt_writer", None)
-    if writer is None or not hasattr(writer, "ask_json"):
-        return ""
-    try:
-        state.repo.update_job(user, job["id"], {"stage": "Reading the scene of your reference pictures"})
-        r = read_reference_scene(writer, scene_images)
-    except PromptUnavailable as exc:
-        log.warning("reference scene failed for job %s: %s", job["id"], exc)
-        return ""
-    except BackendUnavailable:
-        return ""
-    try:
-        u = r.get("usage") or {}
-        state.repo.create_usage_event(user, {"project_id": job["project_id"], "job_id": job["id"], "provider": "anthropic", "model": r.get("model") or "claude",
-                                             "operation": "vision_read", "input_text_tokens": int(u.get("input_tokens") or 0), "output_tokens": int(u.get("output_tokens") or 0),
-                                             "cost_usd": str(r["cost_usd"]) if r.get("cost_usd") is not None else None,
-                                             "price_source": "platform.claude.com price list", "raw_usage": u})
-    except BackendUnavailable:
-        log.exception("could not record the reference scene's usage for job %s", job["id"])
-    return r["scene"]
-
-
 def _premium_prompt(state, user, job, tier, ask):
     """Premium renders get their prompt written by Claude from the images and brief. Any failure falls
     back to the standard prompt, so a render is never lost because prompting was unavailable."""
@@ -179,7 +154,7 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
 
     inp = job["input"]
     tier = inp.get("tier", "standard")
-    writer_note, scene = None, ""
+    writer_note = None
     client = state.image_clients.get(tier)
     if client is None:
         return fail("Premium render is not available right now." if tier == "premium" else "Standard renders are not available right now.")
@@ -190,27 +165,18 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
             if inp.get("reference_file_id") and not refs:
                 refs = [{"file_id": inp["reference_file_id"], "role": "base"}]
             refs.sort(key=lambda r: ROLE_ORDER[r["role"]])
-            images, roles, scene_images = [], [], []
+            images, roles = [], []
             for r in refs:
                 src = repo.get_source_file(user, r["file_id"])
                 if not src or src.get("project_id") != job["project_id"] or src.get("detected_type") not in ("png", "jpeg", "pdf"):
                     return fail("One of the reference images is no longer available. Choose it again.")
-                img = _as_image(storage.download(user, src["storage_path"]), src["detected_type"])
-                if r["role"] == "style":    # a reference picture: only its scene is used, in words; it is never sent with the building
-                    scene_images.append(img)
-                else:
-                    images.append(img); roles.append(r["role"])
-            brief = inp["prompt"]
-            if scene_images and not inp.get("prompt_ready"):   # a ready prompt already has the references' scene in it
-                scene = _reference_scene(state, user, job, scene_images)
-                if scene:
-                    from .render_prompt import scene_paragraph
-                    brief = brief.strip() + "\n" + scene_paragraph(scene)
-            prompt = build_prompt({**inp, "prompt": brief}, roles=roles)
+                images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"]))
+                roles.append(r["role"])
+            prompt = build_prompt(inp, roles=roles)
             if inp.get("prompt_ready"):      # the prompt the AI wrote from the pictures and the architect checked: used as written
                 prompt = inp["prompt"].strip() + "\n" + SAFE_TAIL
             writer_note = None if inp.get("prompt_ready") else _premium_prompt(state, user, job, tier, lambda w: w.write(
-                brief=brief, images=images, roles=roles,
+                brief=inp["prompt"], images=images, roles=roles,
                 choices={k: inp.get(k) for k in ("view", "style", "storeys", "ground_floor", "time_of_day", "materials", "landscaping", "aspect", "shot_name")}))
             if writer_note:
                 prompt = writer_note["prompt"] + "\n" + SAFE_TAIL
@@ -337,7 +303,6 @@ def run_render_job(state, user: CurrentUser, job_id: str) -> None:
         storage.upload(user, base_path, base_jpg, "image/jpeg", bucket=settings.renders_bucket)
         storage.upload(user, shown_path, shown_jpg, "image/jpeg", bucket=settings.renders_bucket)
         options = {"size": size, "quality": quality, "operation": operation, "tier": tier, "final_prompt": prompt[:8000],
-                   **({"reference_scene": scene} if job["type"] == "concept_render" and scene else {}),
                    "prompt_notes": (writer_note or {}).get("notes"), "premium_prompting": bool(writer_note)}
         if check:
             options["check"] = check
@@ -481,16 +446,27 @@ def apply_look(state, user: CurrentUser, job: dict, inp: dict, images: list, rol
                 hero = None
     if exact:      # the depth model sees only the prompt: the materials and the scene go in as words
         return images, roles, look_block(look, None, None), ctx
-    # the project's scene copied from the architect's own picture goes in as its recipe, in words (look_block); the picture
-    # itself is never sent with the building, so its building cannot leak into the render
+    # the scene copied from the architect's own picture goes along as a scene reference (never its building)
+    scene_ref = None
+    if look.scene_ref_file_id and not look.scene_id:
+        f = repo.get_source_file(user, str(look.scene_ref_file_id))
+        if f and f.get("project_id") == job["project_id"] and f.get("detected_type") in ("png", "jpeg") \
+                and str(look.scene_ref_file_id) not in {str(r.get("file_id")) for r in inp.get("references") or []}:
+            scene_ref = storage.download(user, f["storage_path"])
     main = "model" if "model" in roles else "base" if "base" in roles else None
     at = roles.index(main) + 1 if main else 0
     add = ([(ctx["map"], "image/png", "materials")] if ctx["map"] else []) + ([(hero, "image/jpeg", "hero")] if hero else [])
     images = images[:at] + [(d, m) for d, m, _ in add] + images[at:]
     roles = roles[:at] + [r for _, _, r in add] + roles[at:]
+    if scene_ref is not None and len(images) < 4:
+        images, roles = images + [(scene_ref, "image/jpeg")], roles + ["style"]
+    while len(images) > 4 and "style" in roles:          # image models take up to four pictures: references go first
+        i = len(roles) - 1 - roles[::-1].index("style"); images.pop(i); roles.pop(i)
     map_i = roles.index("materials") + 1 if "materials" in roles else None
     hero_i = roles.index("hero") + 1 if "hero" in roles else None
     block = look_block(look, map_i, hero_i, roles.index(main) + 1 if main else None)
+    if scene_ref is not None and "style" in roles:
+        block += f"\nImage {len(roles) - roles[::-1].index('style')} is the project's SCENE REFERENCE: copy its light, sky, setting, planting, life, camera feel and mood, never its building."
     return images, roles, block, ctx
 
 

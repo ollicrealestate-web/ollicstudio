@@ -414,10 +414,10 @@ def write_look(claude, images, description: str, facts: str) -> dict:
 @router.post("/projects/{project_id}/render-prompt")
 def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Request, user: CurrentUser = Depends(get_current_user)):
     """Studies the pictures (and the model's facts) and writes the rendering prompt; nothing is rendered or charged to the customer."""
-    from ..render_prompt import PromptUnavailable, facts_text, scene_paragraph, write_with_claude, write_with_cloudflare
+    from ..render_prompt import PromptUnavailable, facts_text, write_with_claude, write_with_cloudflare
     from ..renders import ROLE_ORDER, _as_image
     _owned_project(request, user, project_id)
-    if not any(r.role != "style" for r in body.references) and not body.view_image and len(body.description.strip()) < 3:
+    if not body.references and not body.view_image and len(body.description.strip()) < 3:
         raise HTTPException(422, {"code": "nothing_to_read", "reason": "Capture a view or choose a picture first, or describe the building."})
     repo, storage = _repo(request), _storage(request)
     profile = repo.get_profile(user) or {}
@@ -426,16 +426,12 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
         if used >= DAILY_PROMPTS:
             raise HTTPException(429, {"code": "daily_limit", "reason": f"You have written today's {DAILY_PROMPTS} prompts. Edit the last one, or try again after 01:00 Lagos time."})
     refs = sorted(body.references, key=lambda r: ROLE_ORDER[r.role])
-    images, roles, scene_images = [], [], []
+    images, roles = [], []
     for r in refs:
         src = repo.get_source_file(user, str(r.file_id))
         if not src or src.get("owner_id") != user.id or src.get("project_id") != str(project_id) or src.get("detected_type") not in ("png", "jpeg", "pdf"):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Picture not found in this project.")
-        img = _as_image(storage.download(user, src["storage_path"]), src["detected_type"])
-        if r.role == "style":          # a reference: read on its own, below; it never goes in with the building's pictures
-            scene_images.append(img)
-        else:
-            images.append(img); roles.append(r.role)
+        images.append(_as_image(storage.download(user, src["storage_path"]), src["detected_type"])); roles.append(r.role)
     if body.view_image:
         import base64
         try:
@@ -454,12 +450,6 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
             model = None
     facts = facts_text(model)
     claude, vision = getattr(request.app.state, "prompt_writer", None), getattr(request.app.state, "vision", None)
-    # the reference pictures: their scene only, read in a request of its own that never sees the building
-    scene, scene_note = "", ""
-    if scene_images:
-        scene, scene_note = _reference_scene(request, user, str(project_id), claude, scene_images)
-        if scene:
-            description = (description + "\n" if description else "") + scene_paragraph(scene)
     if claude is None and (vision is None or not images):
         raise HTTPException(503, {"code": "not_configured", "reason": "AI prompt writing is not switched on for this site yet. Write the prompt yourself."})
     try:
@@ -487,30 +477,7 @@ def write_render_prompt(project_id: uuid.UUID, body: RenderPromptIn, request: Re
                                        "raw_usage": u})
     except BackendUnavailable:
         pass
-    notes = " ".join(x for x in (out.get("notes") or "", scene_note) if x)
-    return {"prompt": out["prompt"], "notes": notes, "scene": scene, "order": [str(r.file_id) for r in refs if r.role != "style"]}
-
-
-def _reference_scene(request: Request, user: CurrentUser, project_id: str, claude, scene_images) -> tuple[str, str]:
-    """(scene words, a note for the architect). The reference pictures alone go to Ollic AI, which describes their scene and
-    never their building; without Ollic AI they are left out (never sent in with the building)."""
-    from ..render_prompt import PromptUnavailable, read_reference_scene
-    if claude is None or not hasattr(claude, "ask_json"):
-        return "", "The reference pictures were not used: reading their scene needs Ollic AI, which is not connected."
-    try:
-        r = read_reference_scene(claude, scene_images)
-    except PromptUnavailable as exc:
-        log.warning("OWNER: reference scene failed: %s", exc)
-        return "", "The reference pictures could not be read this time, so they were left out."
-    try:
-        u = r.get("usage") or {}
-        _repo(request).create_usage_event(user, {"project_id": project_id, "provider": "anthropic", "model": r.get("model") or "claude", "operation": "vision_read",
-                                                 "input_text_tokens": int(u.get("input_tokens") or 0), "output_tokens": int(u.get("output_tokens") or 0),
-                                                 "cost_usd": str(r["cost_usd"]) if r.get("cost_usd") is not None else None,
-                                                 "price_source": "platform.claude.com price list", "raw_usage": u})
-    except BackendUnavailable:
-        pass
-    return r["scene"], "Scene taken from the references: " + (r.get("notes") or "setting, light and sky only.")
+    return {"prompt": out["prompt"], "notes": out.get("notes") or "", "order": [str(r.file_id) for r in refs]}
 
 
 # ---------------------------------------------------------------- "Read my plan"

@@ -150,17 +150,16 @@ function removeButton(f) {
 function drawRenderBox() {
   const pics = renderPics();
   if (rPick && !pics.some(f => f.id === rPick)) rPick = null;
-  rRefSel = rRefSel.filter(id => pics.some(f => f.id === id && !/^3D view/i.test(f.original_name)) && id !== rPick);
+  rRefSel = rRefSel.filter(id => pics.some(f => f.id === id) && id !== rPick);
   $("#rPics").replaceChildren(...(pics.length ? pics.slice(0, 16).map(f => picTile(f, f.id === rPick, () => { rPick = rPick === f.id ? null : f.id; drawRenderBox(); }, "radio"))
     : [el("span", { class: "hint" }, service === "model" ? "Frame a view of your model, then press Capture view." : service === "plan" ? "Upload a picture or PDF of the floor plan." : "Upload a sketch, 3D image or photo.")]));
-  // references are pictures of other scenes: the model's own captured views are never offered here (they are pictures to render)
-  const refs = pics.filter(f => f.id !== rPick && f.detected_type !== "pdf" && !/^3D view/i.test(f.original_name));
+  const refs = pics.filter(f => f.id !== rPick && f.detected_type !== "pdf");
   $("#rRefs").replaceChildren(...(refs.length ? refs.slice(0, 16).map(f => picTile(f, rRefSel.includes(f.id), () => {
     if (rRefSel.includes(f.id)) rRefSel = rRefSel.filter(x => x !== f.id);
     else if (rRefSel.length >= 3) { toast("Use up to three reference images."); return; }
     else rRefSel = [...rRefSel, f.id];
     drawRenderBox();
-  }, "check")) : [el("span", { class: "hint" }, "Upload photos of scenes you like: setting, sky and light.")]));
+  }, "check")) : [el("span", { class: "hint" }, "Upload photos of buildings or scenes you like.")]));
   $("#rPicHint").textContent = rPick ? `Rendering: ${pics.find(f => f.id === rPick)?.original_name}${guideFor(rPick) ? " · checked against your model" : ""}` : service === "model"
     ? "Frame a view of your model, then press Capture view." : "Choose the picture to render.";
 }
@@ -186,7 +185,7 @@ $("#writePromptBtn").onclick = async () => {
   const btn = $("#writePromptBtn");
   if (!rPick && !$("#rDesc").value.trim()) { toast("Capture a view or choose a picture first, or describe the building."); return; }
   btn.disabled = true; btn.textContent = "Studying the picture…";
-  $("#planNote").textContent = rRefSel.length ? "Ollic AI is reading the scene of your references, then studying your picture. This takes about 20–40 seconds." : "The AI is studying the picture. This takes about 10–30 seconds.";
+  $("#planNote").textContent = "The AI is studying the picture and the references. This takes about 10–30 seconds.";
   try {
     const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim(),
       ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}), ...(cameraWords.get(rPick) ? { camera: cameraWords.get(rPick) } : {}) });
@@ -209,7 +208,7 @@ const SERVICES = {
     hint: "Choose the model.", sections: ["modelSection", "filmSection"], modes: ["exterior", "interior", "walk"], icon: "M4 6h12v12H4zM16 10l5-3v10l-5-3" },
   render: { name: "Photoreal render", short: "Photoreal render", accept: [...IMG, "pdf"], multi: 4, optional: true, needs: "a picture or a PDF drawing",
     lead: "Turn a sketch, photo or 3D view into a photoreal image, or just describe the building.",
-    hint: "Tick the pictures to use. The first is the building to render (its shape and camera); the others are scene references: only their setting, sky and light are used, never their building.",
+    hint: "Tick the pictures to use. The first keeps its shape and camera; the others give the look and materials.",
     sections: ["studio"], icon: "M4 20 10 4h4l6 16M7 13h10" },
   plan: { name: "Floor plan to 3D", short: "Floor plan to 3D", accept: [...IMG, "pdf"], multi: 1, needs: "a floor plan (PDF or picture)",
     lead: "Upload a floor plan. Ollic reads the rooms and makes photoreal 3D views of the building that follow the layout.",
