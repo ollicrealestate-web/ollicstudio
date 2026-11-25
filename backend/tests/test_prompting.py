@@ -39,6 +39,11 @@ class FakeWriter:
         self.calls.append(("write", kw))
         return self._out()
 
+    def ask_json(self, system, content, max_tokens=1800, timeout=180):
+        self.calls.append(("ask", {"system": system, "content": content}))
+        return {"answer": {"scene": "Wet street at blue hour, deep blue sky with soft clouds, warm glowing windows, palms along the pavement.",
+                           "notes": "Blue hour, wet ground, palms."}, "usage": {"input_tokens": 900, "output_tokens": 80}, "cost_usd": Decimal("0.005"), "model": self.model}
+
     def write_edit(self, **kw):
         self.calls.append(("edit", kw))
         return self._out()
@@ -66,14 +71,21 @@ def test_premium_renders_use_the_written_prompt_and_record_its_cost(render_setti
     body = {"prompt": "Luxury block, glass balconies", "tier": "premium", "storeys": 6, "style": "luxury contemporary",
             "references": [{"file_id": plan["id"], "role": "plan"}, {"file_id": look["id"], "role": "style"}]}
     c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"])
-    kind, kw = writer.calls[0]
-    assert kind == "write" and kw["roles"] == ["plan", "style"] and len(kw["images"]) == 2 and kw["choices"]["storeys"] == 6
+    # the reference picture is read first, on its own: only it is shown, and only its scene is asked for
+    kind, ask = writer.calls[0]
+    assert kind == "ask" and sum(1 for b in ask["content"] if b["type"] == "image") == 1 and "NEVER describe the building" in ask["system"]
+    # the building's prompt is written from the building's pictures alone, with the scene in words
+    kind, kw = writer.calls[1]
+    assert kind == "write" and kw["roles"] == ["plan"] and len(kw["images"]) == 1 and kw["choices"]["storeys"] == 6
+    assert "SCENE FROM THE REFERENCE PICTURES" in kw["brief"] and "Wet street at blue hour" in kw["brief"]
     assert images.calls[0]["prompt"].startswith(WRITTEN) and images.calls[0]["prompt"].endswith("Do not add any text, labels, logos or watermarks.")
+    assert len(images.calls[0]["images"]) == 1          # the image model gets the plan only, never the reference picture
     ev = [e for e in repo.usage if e["operation"] == "prompt_write"]
     assert len(ev) == 1 and ev[0]["provider"] == "anthropic" and ev[0]["cost_usd"] == "0.034000"
+    assert [e["cost_usd"] for e in repo.usage if e["operation"] == "vision_read"] == ["0.005"]
     img = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"][0]
     assert img["options"]["premium_prompting"] is True and img["options"]["prompt_notes"].startswith("Read two")
-    assert {e["service"] for e in c.get("/api/usage", headers=alice["headers"]).json()["events"]} == {"Premium render", "AI prompt writing"}
+    assert {"Premium render", "AI prompt writing"} <= {e["service"] for e in c.get("/api/usage", headers=alice["headers"]).json()["events"]}
 
     # a plain-words revision is turned into a precise edit too
     c.post(f"/api/renders/{img['id']}/edit", json={"instruction": "make the balconies bronze"}, headers=alice["headers"])
@@ -132,6 +144,11 @@ class FakeRenderPrompter:
     def __init__(self):
         self.calls = []
 
+    def ask_json(self, system, content, max_tokens=1800, timeout=180):
+        self.calls.append((system, content))
+        return {"answer": {"scene": "A landscaped forecourt with mature trees, clipped hedges and warm evening light under a clear sky.", "notes": "Forecourt and evening light."},
+                "usage": {"input_tokens": 800, "output_tokens": 60}, "cost_usd": Decimal("0.004"), "model": self.model}
+
     def _call(self, system, content):
         self.calls.append((system, content))
         return {"prompt": "Photorealistic render of the eight-storey block in Image 1, keep every opening and the camera exactly; bronze glass, white stone, "
@@ -155,17 +172,26 @@ def test_the_ai_writes_the_prompt_from_the_captured_view_and_references(render_s
     r = c.post(f"/api/projects/{pid}/render-prompt", json=body, headers=alice["headers"])
     assert r.status_code == 200, r.text
     out = r.json()
-    assert "eight-storey" in out["prompt"] and out["order"] == [view["id"], ref["id"]]          # the view first, as the render sends them
-    system, content = writer.calls[-1]
-    texts = [b["text"] for b in content if b["type"] == "text"]
-    assert texts[0].startswith("Image 1 is the VIEW TO RENDER") and texts[1].startswith("Image 2 is a REFERENCE") and "luxury office complex" in texts[-1]
-    assert sum(1 for b in content if b["type"] == "image") == 2 and "keep the view to render exactly" in system
+    assert "eight-storey" in out["prompt"] and out["order"] == [view["id"]]          # only the building's pictures, as the render sends them
+    assert out["scene"].startswith("A landscaped forecourt") and "Forecourt" in out["notes"]
+    # 1. the reference alone, read for its scene: one picture (the reference), never the view
+    (s1, c1), (s2, c2) = writer.calls[-2:]
+    assert "NEVER describe the building" in s1 and "camera" in s1 and sum(1 for b in c1 if b["type"] == "image") == 1
+    assert c1[1]["source"]["data"] != c2[1]["source"]["data"]                        # the reference, not the view
+    # 2. the building's prompt: the view alone, with the scene in words
+    texts = [b["text"] for b in c2 if b["type"] == "text"]
+    assert texts[0].startswith("Image 1 is the VIEW TO RENDER") and not any(t.startswith("Image 2") for t in texts)
+    assert "luxury office complex" in texts[-1] and "SCENE FROM THE REFERENCE PICTURES" in texts[-1] and "landscaped forecourt" in texts[-1]
+    assert sum(1 for b in c2 if b["type"] == "image") == 1 and "keep the view to render exactly" in s2
     assert repo.usage[-1]["operation"] == "prompt_write" and repo.usage[-1]["provider"] == "anthropic"
-    # the render uses the prompt as written, with the same pictures in the same order
+    assert repo.usage[-2]["operation"] == "vision_read"
+    # the render uses the prompt as written (the scene is in it already: no second reading), and only the view goes to the image model
+    n = len(writer.calls)
     rb = {"prompt": out["prompt"], "prompt_ready": True, "references": body["references"], "tier": "standard"}
     assert c.post(f"/api/projects/{pid}/architectural-render", json=rb, headers={**alice["headers"], "Idempotency-Key": "ready-0001"}).status_code == 202
     call = images.calls[-1]
-    assert call["prompt"].startswith(out["prompt"]) and "Architect's brief" not in call["prompt"] and len(call["images"]) == 2
+    assert call["prompt"].startswith(out["prompt"]) and "Architect's brief" not in call["prompt"] and len(call["images"]) == 1
+    assert len(writer.calls) == n
     # checked: another customer's pictures, nothing to read
     assert c.post(f"/api/projects/{pid}/render-prompt", json=body, headers=bob["headers"]).status_code == 404
     assert c.post(f"/api/projects/{pid}/render-prompt", json={}, headers=alice["headers"]).status_code == 422
@@ -200,3 +226,38 @@ def test_the_project_scene_reaches_the_writer_and_claude_writes_a_look_from_the_
     assert r.json()["prompt"].startswith("White render") and "LOOK" in writer.calls[-1][0]
     assert sum(1 for b in writer.calls[-1][1] if b["type"] == "image") == 1 and "Blue Hour Glow" in writer.calls[-1][1][-1]["text"]
     assert c.get(f"/api/projects/{pid}", headers=alice["headers"]).json()["source_files"] == []
+
+
+def test_reference_pictures_alone_without_ollic_ai_are_left_out(render_settings, repo, storage, alice):
+    """Without Ollic AI the reference pictures cannot be read for their scene, so they are left out (never sent with the building)."""
+    from .test_studio import new_project, upload
+    images = FakeImages()
+    c = TestClient(create_app(render_settings, repo=repo, storage=storage, verifier=TokenVerifier(render_settings), image_client=images, runner=InlineRunner(),
+                              vision=None, prompt_writer=None))
+    pid = new_project(c, alice)
+    view = upload(c, alice, pid, "view.png", samples.png(400, 300))
+    ref = upload(c, alice, pid, "other-house.jpg", jpeg_bytes(300, 200))
+    body = {"prompt": "white villa", "references": [{"file_id": view["id"], "role": "model"}, {"file_id": ref["id"], "role": "style"}]}
+    assert c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"]).status_code == 202
+    assert len(images.calls[-1]["images"]) == 1 and "reference" not in images.calls[-1]["prompt"].lower()
+
+
+def test_the_scene_reader_sees_only_the_references_and_asks_for_no_building():
+    from app.render_prompt import REFERENCE_SCENE_SYSTEM, PromptUnavailable, read_reference_scene, scene_paragraph
+    seen = []
+
+    class W:
+        def ask_json(self, system, content, max_tokens=1800, timeout=180):
+            seen.append(content)
+            return {"answer": {"scene": "Soft overcast sky, wet paving, birch trees.", "notes": ""}, "usage": {}, "cost_usd": None, "model": "m"}
+    out = read_reference_scene(W(), [(jpeg_bytes(200, 120), "image/jpeg"), (jpeg_bytes(200, 120), "image/jpeg")])
+    assert out["scene"].startswith("Soft overcast") and sum(1 for b in seen[0] if b["type"] == "image") == 2
+    for words in ("NEVER describe the building", "floors", "materials", "NEVER describe the camera"):
+        assert words in REFERENCE_SCENE_SYSTEM
+    assert "the building, its materials and the camera come only from the architect" in scene_paragraph("x")
+
+    class Empty(W):
+        def ask_json(self, *a, **k):
+            return {"answer": {"scene": ""}, "usage": {}, "cost_usd": None, "model": "m"}
+    with pytest.raises(PromptUnavailable):
+        read_reference_scene(Empty(), [(jpeg_bytes(80, 60), "image/jpeg")])

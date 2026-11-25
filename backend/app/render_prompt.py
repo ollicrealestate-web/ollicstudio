@@ -29,6 +29,51 @@ ROLE_INTRO = {
     "plan": "Image {n} is the architect's FLOOR PLAN of a typical floor.",
     "style": "Image {n} is a REFERENCE: copy its scene (setting, landscaping, sky, light, mood and material palette), never its building.",
 }
+SCENE_ONLY = ("model", "base", "plan")   # the pictures of the building; reference pictures are read on their own (read_reference_scene)
+
+# Reference pictures are read on their own, by a separate request that sees nothing of the architect's building, and
+# only their scene comes back, in words. The building's prompt is then written from the building's own pictures and
+# these words, and the image model never sees the reference pictures, so a reference's building cannot leak in.
+REFERENCE_SCENE_SYSTEM = (
+    "You are an architectural visualisation director. The pictures are REFERENCES for the scene of a render of a DIFFERENT "
+    "building, which you will not see. Describe ONLY the scene and atmosphere, so it can be recreated around that other building: "
+    "the setting and surroundings (street, garden, waterfront, city, hills), landscaping and planting, ground surfaces and wetness, "
+    "the sky and clouds, weather, time of day, the sun's direction and the quality and colour of the light, artificial lighting "
+    "(soffits, uplights, glowing windows), entourage (cars, people), colour grade and mood. When there are several pictures, combine "
+    "what they share into one scene.\n"
+    "NEVER describe the building or buildings in the pictures in any way: not their shape, size, number of floors, roof, windows, "
+    "balconies, columns, facade, materials or colours, and not their style. NEVER describe the camera position, angle, height or lens "
+    "(the architect sets the camera). Never mention brands, names, text or watermarks.\n"
+    'Answer with JSON only: {"scene": "one paragraph of 50-120 words, in the style of a render brief", '
+    '"notes": "one short sentence for the architect on what you took from the references"}'
+)
+
+
+def read_reference_scene(writer, images: list[tuple[bytes, str]]) -> dict:
+    """The scene of the reference pictures, in words (never their building). writer: prompt_writer.ClaudePromptWriter.
+    Returns {"scene", "notes", "model", "usage", "cost_usd"}; raises PromptUnavailable."""
+    from .prompt_writer import PromptWriterFailed, _image_block
+    if not images:
+        raise PromptUnavailable("no reference pictures")
+    content = []
+    for i, (data, _mime) in enumerate(images[:3], 1):
+        content += [{"type": "text", "text": f"Reference picture {i}:"}, _image_block(data)]
+    content.append({"type": "text", "text": "Describe the scene only, as instructed."})
+    try:
+        out = writer.ask_json(REFERENCE_SCENE_SYSTEM, content, 1500, 120)
+    except PromptWriterFailed as exc:
+        raise PromptUnavailable(str(exc)) from exc
+    a = out.get("answer") or {}
+    scene = " ".join(str(a.get("scene") or "").split())[:1200]
+    if len(scene) < 30:
+        raise PromptUnavailable("no scene in the reply")
+    return {"scene": scene, "notes": str(a.get("notes") or "")[:300], "model": out.get("model"), "usage": out.get("usage"), "cost_usd": out.get("cost_usd")}
+
+
+def scene_paragraph(scene: str) -> str:
+    """How the references' scene goes into the brief: for the setting only, never the building or the camera."""
+    return ("SCENE FROM THE REFERENCE PICTURES (use it only for the setting, landscaping, sky, weather, light and mood; the building, "
+            "its materials and the camera come only from the architect's own pictures and words): " + scene)
 
 SYSTEM = (
     "You are a senior architectural visualisation artist. You write the prompt an AI image model will use to turn the architect's "
@@ -37,12 +82,12 @@ SYSTEM = (
     "Study the pictures closely before writing. On the view to render, count and describe exactly what is there: the massing and "
     "setbacks, the number of floors, the roof and parapets, every band of windows and how it is divided, balconies, louvres, fins, "
     "cladding panels, columns, canopies, the entrance, terraces and roof plant, and the camera position, height, angle and framing. "
-    "Use the model facts (floors, element counts) only to understand the building; never copy element counts or IFC words into the prompt, describe what is seen instead. On a floor plan, read the footprint, units, core and balconies. On a "
-    "reference, note only its scene: surroundings, landscaping, sky, time of day, light, mood and materials palette.\n"
+    "Use the model facts (floors, element counts) only to understand the building; never copy element counts or IFC words into the prompt, describe what is seen instead. On a floor plan, read the footprint, units, core and balconies. If a "
+    "SCENE paragraph read from reference pictures is given, use it only for the surroundings, sky, light and mood, never for the building.\n"
     "Then write ONE prompt that: (1) tells the image model to keep the view to render exactly: same building form, same number of "
     "floors, same openings and facade elements in the same places, same camera and framing; it may only add realistic materials, "
     "glass with reflections, lighting, sky, landscaping, context and entourage; (2) names concrete materials and colours for each "
-    "part, from the architect's description or the references, or tasteful choices that suit the design if none are given; (3) sets "
+    "part, from the architect's description (never from the reference pictures' buildings), or tasteful choices that suit the design if none are given; (3) sets "
     "the light, time of day, sky and surroundings; (4) asks for professional architectural photography quality, true verticals and "
     "realistic scale. Refer to the pictures as Image 1, Image 2 and so on, in the order given. Never invent floors, wings or features "
     "that are not in the pictures. Never ask for text, labels, logos or watermarks. Keep it under 450 words.\n"
