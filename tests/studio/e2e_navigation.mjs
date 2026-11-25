@@ -45,6 +45,14 @@ const state = () => page.evaluate(async () => {
   const off = c.position.clone().sub(t), polar = Math.acos(Math.max(-1, Math.min(1, off.y / off.length()))) * 180 / Math.PI;
   return { polar, dist: off.length(), pos: c.position.toArray(), target: t.toArray(), centre: E.frame.getCenter(new THREE.Vector3()).toArray(), ground: E.groundY };
 });
+// waits until the camera has stopped moving (a view change glides for a moment)
+const settle = async () => {
+  let last = "", same = 0;
+  for (let i = 0; i < 60 && same < 3; i++) {
+    const p = await page.evaluate(() => window.__studio.engine().camera.position.toArray().map(v => v.toFixed(4)).join(","));
+    same = p === last ? same + 1 : 0; last = p; await page.waitForTimeout(150);
+  }
+};
 const drag = async (dx, dy) => { await page.mouse.move(cx, cy); await page.mouse.down(); for (let i = 1; i <= 12; i++) await page.mouse.move(cx + dx * i / 12, cy + dy * i / 12); await page.mouse.up(); await page.waitForTimeout(600); };
 
 // 1. drag up a long way: the view goes past the horizon and looks up at the building from below
@@ -57,9 +65,10 @@ await drag(0, 1300);
 s = await state();
 check(s.polar < 5, `and over the top to look straight down (${s.polar.toFixed(1)}°)`);
 await page.evaluate(() => window.__studio.view("corner"));
-await page.waitForTimeout(800);
+await settle();
 
 // 2. the turn is round what is under the pointer: pressing on the building puts the turning point on it
+await settle();
 s0 = await state();
 await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.up();
 s = await state();
