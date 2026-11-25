@@ -105,10 +105,9 @@ def test_render_from_plan_and_style_references(studio, alice, storage):
     assert c.get(f"/api/jobs/{r.json()['id']}", headers=alice["headers"]).json()["status"] == "succeeded"
     (call,) = images.calls
     sent = [d for d, _ in call["images"]]
-    # reference pictures never go to the image model with the building (only their scene, in words, when Ollic AI reads them)
-    assert sent == [storage.objects[plan["storage_path"]][0]]
+    assert sent == [storage.objects[plan["storage_path"]][0], storage.objects[look1["storage_path"]][0], storage.objects[look2["storage_path"]][0]]  # plan first
     p = call["prompt"]
-    assert "Image 1 is the architect's floor plan" in p and "Image 2" not in p and "reference for the look" not in p
+    assert "Image 1 is the architect's floor plan" in p and "Image 2 is a reference for the look" in p and "Image 3 is a reference for the look" in p
     assert "6 floors above a ground-floor car park" in p and "glass balconies, stone and timber" in p and "cantilevered top floor" in p
     assert "Exterior view of the whole building" in p
     img = c.get(f"/api/projects/{pid}/outputs", headers=alice["headers"]).json()["images"][0]
