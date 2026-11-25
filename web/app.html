@@ -366,7 +366,7 @@
           <div class="rpics" id="rPics" role="radiogroup" aria-label="Picture to render"></div>
         </div>
         <div class="span2 rbox">
-          <div class="rbox-head"><b>Reference images</b> <span class="hint">Optional, up to 3. The scene, materials and mood are copied from them, never their building.</span>
+          <div class="rbox-head"><b>Reference images</b> <span class="hint">Optional, up to 3. Ollic AI reads them on their own for the scene only (setting, sky, light and mood); their building is never used, and they are not sent with your picture.</span>
             <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="rRefUpload" accept=".png,.jpg,.jpeg" multiple hidden></label></div>
           <div class="rpics refs" id="rRefs" role="group" aria-label="Reference images"></div>
         </div>
@@ -374,7 +374,7 @@
           <textarea id="rDesc" rows="2" maxlength="1500" placeholder="e.g. Luxury office complex in a well landscaped environment, bronze glass, white stone, evening light"></textarea></label>
         <div class="span2 rwrite">
           <button type="button" class="btn" id="writePromptBtn">Read image and write prompt</button>
-          <span class="hint" id="planNote">The AI studies the picture, your model and the references, and writes the rendering prompt.</span>
+          <span class="hint" id="planNote">The AI studies your picture and model, takes only the scene from the references, and writes the rendering prompt.</span>
         </div>
         <label class="field span2">Rendering prompt <span class="hint">Written by the AI. Edit it if you like.</span>
           <textarea id="rPrompt" rows="7" maxlength="6000" required placeholder="Press “Read image and write prompt”, or write your own."></textarea></label>

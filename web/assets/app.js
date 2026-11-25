@@ -185,7 +185,7 @@ $("#writePromptBtn").onclick = async () => {
   const btn = $("#writePromptBtn");
   if (!rPick && !$("#rDesc").value.trim()) { toast("Capture a view or choose a picture first, or describe the building."); return; }
   btn.disabled = true; btn.textContent = "Studying the picture…";
-  $("#planNote").textContent = "The AI is studying the picture and the references. This takes about 10–30 seconds.";
+  $("#planNote").textContent = rRefSel.length ? "Ollic AI is reading the scene of your references, then studying your picture. This takes about 20–40 seconds." : "The AI is studying the picture. This takes about 10–30 seconds.";
   try {
     const r = await api.writePrompt(current.id, { references: renderRefs(), description: $("#rDesc").value.trim(),
       ...(SERVICES[service]?.modes && viewerModelId ? { model_id: viewerModelId } : {}), ...(cameraWords.get(rPick) ? { camera: cameraWords.get(rPick) } : {}) });
@@ -208,7 +208,7 @@ const SERVICES = {
     hint: "Choose the model.", sections: ["modelSection", "filmSection"], modes: ["exterior", "interior", "walk"], icon: "M4 6h12v12H4zM16 10l5-3v10l-5-3" },
   render: { name: "Photoreal render", short: "Photoreal render", accept: [...IMG, "pdf"], multi: 4, optional: true, needs: "a picture or a PDF drawing",
     lead: "Turn a sketch, photo or 3D view into a photoreal image, or just describe the building.",
-    hint: "Tick the pictures to use. The first keeps its shape and camera; the others give the look and materials.",
+    hint: "Tick the pictures to use. The first is the building to render (its shape and camera); the others are scene references: only their setting, sky and light are used, never their building.",
     sections: ["studio"], icon: "M4 20 10 4h4l6 16M7 13h10" },
   plan: { name: "Floor plan to 3D", short: "Floor plan to 3D", accept: [...IMG, "pdf"], multi: 1, needs: "a floor plan (PDF or picture)",
     lead: "Upload a floor plan. Ollic reads the rooms and makes photoreal 3D views of the building that follow the layout.",

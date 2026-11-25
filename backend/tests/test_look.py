@@ -420,7 +420,7 @@ def test_scene_presets_and_a_scene_copied_from_a_picture(render_settings, repo, 
     # an interior render is told the interior rules
     c.post(f"/api/projects/{pid}/architectural-render", json=body | {"view": "interior"}, headers=alice["headers"])
     assert "RENDER TYPE: An interior view: keep every wall" in images.calls[-1]["prompt"]
-    # a scene copied from the architect's own picture: named and written by Claude, the picture sent as the scene reference
+    # a scene copied from the architect's own picture: named and written by Claude; its recipe goes in as words, the picture never
     ref = upload(c, alice, pid, "my-scene.jpg", jpg(picture("#203060", "#ffcc88")))
     out = c.post(f"/api/projects/{pid}/look/scene-from-image", json={"file_id": ref["id"]}, headers=alice["headers"]).json()
     assert out["scene_name"] == "Dusk by the Pool" and out["scene_id"] is None and out["scene_ref_file_id"] == ref["id"]
@@ -428,7 +428,7 @@ def test_scene_presets_and_a_scene_copied_from_a_picture(render_settings, repo, 
     c.post(f"/api/projects/{pid}/architectural-render", json=body, headers=alice["headers"])
     call = images.calls[n]
     assert "SCENE for every view of this project (Dusk by the Pool): Blue hour after sunset" in call["prompt"]
-    assert len(call["images"]) == 2 and "Image 2 is the project's SCENE REFERENCE" in call["prompt"]
+    assert len(call["images"]) == 1 and "SCENE REFERENCE" not in call["prompt"]       # only the model view: the scene picture's building cannot leak in
 
 
 def test_aerial_scenes_and_the_planting_rule():

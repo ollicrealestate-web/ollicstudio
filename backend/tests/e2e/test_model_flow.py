@@ -199,19 +199,23 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         assert pr["look"]["materials"][0]["name"] == "Sandtex white render" and pr["look"]["hero_render_id"] == img["id"]
         assert page.is_visible(".shot .chip:has-text('Materials')")
 
-        # 3. a reference image: uploaded in the render box, ticked, and sent second
+        # 3. a reference image: uploaded in the render box and ticked; Ollic AI reads it on its own, for its scene only
         page.set_input_files("#rRefUpload", str(look))
         page.wait_for_selector("#rRefs .rpic.on")
         page.click("#writePromptBtn")
         page.wait_for_function("document.querySelector('#planNote').textContent.includes('AI:')", timeout=20000)
-        system, content = stack["writer"].calls[-1]
-        assert sum(1 for b in content if b["type"] == "image") == 2 and any("Image 2 is a REFERENCE" in b.get("text", "") for b in content)
+        (s1, c1), (system, content) = stack["writer"].calls[-2:]
+        assert "REFERENCES for the scene" in s1 and sum(1 for b in c1 if b["type"] == "image") == 1        # the reference alone
+        texts = " ".join(b.get("text", "") for b in content)
+        assert sum(1 for b in content if b["type"] == "image") == 1 and "Image 2" not in texts and "SCENE FROM THE REFERENCE PICTURES" in texts
+        assert "Scene taken from the references" in page.inner_text("#planNote")
         page.screenshot(path=str(shots / "e2e-studio.png"), full_page=True)
         page.click("#renderBtn")
         page.wait_for_function("document.querySelectorAll('.shot').length === 2", timeout=30000)
         call = stack["images"].calls[-1]
-        # the model view, its material map, the approved hero render and the reference
-        assert len(call["images"]) == 4 and len(stack["images"].calls) >= 4
+        # the model view, its material map and the approved hero render; the reference picture is never sent
+        assert len(call["images"]) == 3 and len(stack["images"].calls) >= 4
+        assert look.read_bytes() not in [d for d, _ in call["images"]]
         assert "Image 3 is the APPROVED LOOK" in call["prompt"] and "Sandtex white render" in call["prompt"] and "Maitama avenue" in call["prompt"]
         assert "Also in this project:" in call["prompt"] and "Palm trees in planters" in call["prompt"]
         assert "SCENE for every view of this project (Golden Hour Driveway)" in call["prompt"] and "RENDER TYPE: An exterior view" in call["prompt"]
