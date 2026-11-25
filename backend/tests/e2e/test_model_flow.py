@@ -200,6 +200,8 @@ def test_ifc_view_and_floor_plan_renders_in_the_browser(stack, tmp_path):
         assert page.is_visible(".shot .chip:has-text('Materials')")
 
         # 3. a reference image: uploaded in the render box and ticked; Ollic AI reads it on its own, for its scene only
+        # (the model's captured views are pictures to render, never offered as references)
+        assert "3D view" not in page.inner_text("#rRefs") and "Captured view" in page.inner_text("#rPics")
         page.set_input_files("#rRefUpload", str(look))
         page.wait_for_selector("#rRefs .rpic.on")
         page.click("#writePromptBtn")
