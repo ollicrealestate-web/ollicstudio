@@ -145,6 +145,8 @@ class FakeRenderPrompter:
         self.calls = []
 
     def ask_json(self, system, content, max_tokens=1800, timeout=180):
+        if "REFERENCES for the scene" not in system:      # this stand-in only reads reference scenes (no model check)
+            raise PromptWriterFailed("not offered by this stand-in")
         self.calls.append((system, content))
         return {"answer": {"scene": "A landscaped forecourt with mature trees, clipped hedges and warm evening light under a clear sky.", "notes": "Forecourt and evening light."},
                 "usage": {"input_tokens": 800, "output_tokens": 60}, "cost_usd": Decimal("0.004"), "model": self.model}
