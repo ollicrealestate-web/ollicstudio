@@ -150,16 +150,17 @@ function removeButton(f) {
 function drawRenderBox() {
   const pics = renderPics();
   if (rPick && !pics.some(f => f.id === rPick)) rPick = null;
-  rRefSel = rRefSel.filter(id => pics.some(f => f.id === id) && id !== rPick);
+  rRefSel = rRefSel.filter(id => pics.some(f => f.id === id && !/^3D view/i.test(f.original_name)) && id !== rPick);
   $("#rPics").replaceChildren(...(pics.length ? pics.slice(0, 16).map(f => picTile(f, f.id === rPick, () => { rPick = rPick === f.id ? null : f.id; drawRenderBox(); }, "radio"))
     : [el("span", { class: "hint" }, service === "model" ? "Frame a view of your model, then press Capture view." : service === "plan" ? "Upload a picture or PDF of the floor plan." : "Upload a sketch, 3D image or photo.")]));
-  const refs = pics.filter(f => f.id !== rPick && f.detected_type !== "pdf");
+  // references are pictures of other scenes: the model's own captured views are never offered here (they are pictures to render)
+  const refs = pics.filter(f => f.id !== rPick && f.detected_type !== "pdf" && !/^3D view/i.test(f.original_name));
   $("#rRefs").replaceChildren(...(refs.length ? refs.slice(0, 16).map(f => picTile(f, rRefSel.includes(f.id), () => {
     if (rRefSel.includes(f.id)) rRefSel = rRefSel.filter(x => x !== f.id);
     else if (rRefSel.length >= 3) { toast("Use up to three reference images."); return; }
     else rRefSel = [...rRefSel, f.id];
     drawRenderBox();
-  }, "check")) : [el("span", { class: "hint" }, "Upload photos of buildings or scenes you like.")]));
+  }, "check")) : [el("span", { class: "hint" }, "Upload photos of scenes you like: setting, sky and light.")]));
   $("#rPicHint").textContent = rPick ? `Rendering: ${pics.find(f => f.id === rPick)?.original_name}${guideFor(rPick) ? " · checked against your model" : ""}` : service === "model"
     ? "Frame a view of your model, then press Capture view." : "Choose the picture to render.";
 }
